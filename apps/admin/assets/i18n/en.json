@@ -74,5 +74,6 @@
   "admin.account.tab.policy": "Policy",
   "admin.nav.organizations": "Organizations",
   "admin.organizations.title": "Organizations",
-  "admin.organizations.message": "Create multiple roots, nested nodes, members, and node or subtree responsibilities."
+  "admin.organizations.message": "Create multiple roots, nested nodes, members, and node or subtree responsibilities.",
+  "admin.organizations.refresh.button": "Refresh organizations"
 }

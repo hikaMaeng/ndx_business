@@ -74,5 +74,6 @@
   "admin.account.tab.policy": "策略",
   "admin.nav.organizations": "组织",
   "admin.organizations.title": "组织",
-  "admin.organizations.message": "创建多个根节点和层级节点，并分配成员及节点或子树负责人。"
+  "admin.organizations.message": "创建多个根节点和层级节点，并分配成员及节点或子树负责人。",
+  "admin.organizations.refresh.button": "刷新组织"
 }

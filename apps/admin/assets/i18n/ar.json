@@ -74,5 +74,6 @@
   "admin.account.tab.policy": "السياسة",
   "admin.nav.organizations": "المنظمات",
   "admin.organizations.title": "المنظمات",
-  "admin.organizations.message": "أنشئ جذوراً متعددة وعقداً هرمية وعيّن أعضاء ومسؤولين للعقد أو الشجرة الفرعية."
+  "admin.organizations.message": "أنشئ جذوراً متعددة وعقداً هرمية وعيّن أعضاء ومسؤولين للعقد أو الشجرة الفرعية.",
+  "admin.organizations.refresh.button": "تحديث المنظمات"
 }

@@ -74,5 +74,6 @@
   "admin.account.tab.policy": "नीति",
   "admin.nav.organizations": "संगठन",
   "admin.organizations.title": "संगठन",
-  "admin.organizations.message": "कई रूट, पदानुक्रमित नोड, सदस्य और नोड या सबट्री जिम्मेदार बनाएं।"
+  "admin.organizations.message": "कई रूट, पदानुक्रमित नोड, सदस्य और नोड या सबट्री जिम्मेदार बनाएं।",
+  "admin.organizations.refresh.button": "संगठन रीफ्रेश करें"
 }

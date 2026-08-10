@@ -83,4 +83,5 @@ export enum RSC {
   ,ADMIN_NAV_ORGANIZATIONS = "admin.nav.organizations"
   ,ADMIN_ORGANIZATIONS_TITLE = "admin.organizations.title"
   ,ADMIN_ORGANIZATIONS_MESSAGE = "admin.organizations.message"
+  ,ADMIN_ORGANIZATIONS_REFRESH_BUTTON = "admin.organizations.refresh.button"
 }

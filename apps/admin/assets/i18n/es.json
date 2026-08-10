@@ -74,5 +74,6 @@
   "admin.account.tab.policy": "Política",
   "admin.nav.organizations": "Organizaciones",
   "admin.organizations.title": "Organizaciones",
-  "admin.organizations.message": "Crea varias raíces, nodos jerárquicos, miembros y responsables de nodo o subárbol."
+  "admin.organizations.message": "Crea varias raíces, nodos jerárquicos, miembros y responsables de nodo o subárbol.",
+  "admin.organizations.refresh.button": "Actualizar organizaciones"
 }

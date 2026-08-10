@@ -74,5 +74,6 @@
   "admin.account.tab.policy": "Política",
   "admin.nav.organizations": "Organizações",
   "admin.organizations.title": "Organizações",
-  "admin.organizations.message": "Crie várias raízes, nós hierárquicos e atribua membros e responsáveis."
+  "admin.organizations.message": "Crie várias raízes, nós hierárquicos e atribua membros e responsáveis.",
+  "admin.organizations.refresh.button": "Atualizar organizações"
 }
