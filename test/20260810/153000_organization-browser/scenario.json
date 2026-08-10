@@ -1,0 +1,12 @@
+[
+  { "action": "goto", "url": "http://127.0.0.1:18081/" },
+  { "action": "assertRole", "role": "main" },
+  { "action": "fill", "label": "Email", "value": "hika00@gmail.com" },
+  { "action": "fill", "label": "Password", "value": "Acceptance-12345" },
+  { "action": "click", "role": "button", "name": "Login" },
+  { "action": "assertText", "text": "Organizations" },
+  { "action": "screenshot", "name": "admin-shell-with-organizations" },
+  { "action": "click", "role": "button", "name": "Organizations" },
+  { "action": "assertText", "text": "Create multiple roots" },
+  { "action": "screenshot", "name": "organizations-screen" }
+]

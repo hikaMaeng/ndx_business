@@ -1,0 +1,34 @@
+name: ndx-business
+
+services:
+  admin:
+    build:
+      context: .
+      dockerfile: apps/admin/docker/Dockerfile
+    image: ndx-business-admin:latest
+    container_name: admin
+    # Reap zombies and forward signals, so stopping the stack is immediate
+    # instead of waiting out the kill timeout.
+    init: true
+    restart: unless-stopped
+    env_file:
+      # Generated from docker/env.defaults and never committed. The image
+      # carries its own defaults, so a missing file is not fatal.
+      - path: apps/admin/docker/.env
+        required: false
+    ports:
+      - "${ADMIN_HOST_PORT:-18080}:18080"
+    volumes:
+      - admin_data:/app/data
+    networks:
+      - ndx-business_internal
+
+volumes:
+  admin_data:
+    name: ndx-business_admin_data
+
+networks:
+  # Project-scoped: no other compose project joins this network. Publishing a
+  # port to the host is how the outside reaches the service.
+  ndx-business_internal:
+    internal: false
