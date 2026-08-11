@@ -84,5 +84,7 @@
   "organization.node.assign.member.button": "Atribuir membro",
   "organization.node.assign.responsible.button": "Atribuir responsável",
   "organization.node.close.button": "Fechar",
-  "organization.node.empty.message": "Nenhum membro ou responsável atribuído."
+  "organization.node.empty.message": "Nenhum membro ou responsável atribuído.",
+  "organization.scope.node.option": "Somente este nó",
+  "organization.scope.subtree.option": "Este nó e seus descendentes"
 }

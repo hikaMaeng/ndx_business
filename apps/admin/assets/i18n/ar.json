@@ -84,5 +84,7 @@
   "organization.node.assign.member.button": "تعيين عضو",
   "organization.node.assign.responsible.button": "تعيين مسؤول",
   "organization.node.close.button": "إغلاق",
-  "organization.node.empty.message": "لا يوجد أعضاء أو مسؤولون معينون."
+  "organization.node.empty.message": "لا يوجد أعضاء أو مسؤولون معينون.",
+  "organization.scope.node.option": "هذه العقدة فقط",
+  "organization.scope.subtree.option": "هذه العقدة وكل الأبناء"
 }

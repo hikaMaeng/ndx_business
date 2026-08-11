@@ -84,5 +84,7 @@
   "organization.node.assign.member.button": "멤버 할당",
   "organization.node.assign.responsible.button": "책임자 지정",
   "organization.node.close.button": "닫기",
-  "organization.node.empty.message": "할당된 멤버와 책임자가 없습니다."
+  "organization.node.empty.message": "할당된 멤버와 책임자가 없습니다.",
+  "organization.scope.node.option": "이 노드만",
+  "organization.scope.subtree.option": "이 노드와 하위 전체"
 }

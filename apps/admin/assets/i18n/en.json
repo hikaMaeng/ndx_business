@@ -84,5 +84,7 @@
   "organization.node.assign.member.button": "Assign member",
   "organization.node.assign.responsible.button": "Assign responsible",
   "organization.node.close.button": "Close",
-  "organization.node.empty.message": "No members or responsibilities assigned."
+  "organization.node.empty.message": "No members or responsibilities assigned.",
+  "organization.scope.node.option": "This node only",
+  "organization.scope.subtree.option": "This node and descendants"
 }

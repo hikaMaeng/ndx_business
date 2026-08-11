@@ -84,5 +84,7 @@
   "organization.node.assign.member.button": "Assigner le membre",
   "organization.node.assign.responsible.button": "Assigner le responsable",
   "organization.node.close.button": "Fermer",
-  "organization.node.empty.message": "Aucun membre ni responsable assigné."
+  "organization.node.empty.message": "Aucun membre ni responsable assigné.",
+  "organization.scope.node.option": "Ce nœud uniquement",
+  "organization.scope.subtree.option": "Ce nœud et ses descendants"
 }

@@ -84,5 +84,7 @@
   "organization.node.assign.member.button": "分配成员",
   "organization.node.assign.responsible.button": "指定负责人",
   "organization.node.close.button": "关闭",
-  "organization.node.empty.message": "尚未分配成员或负责人。"
+  "organization.node.empty.message": "尚未分配成员或负责人。",
+  "organization.scope.node.option": "仅此节点",
+  "organization.scope.subtree.option": "此节点及所有子节点"
 }

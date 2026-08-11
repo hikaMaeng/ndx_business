@@ -93,4 +93,6 @@ export enum RSC {
   ,ORGANIZATION_NODE_ASSIGN_RESPONSIBLE_BUTTON = "organization.node.assign.responsible.button"
   ,ORGANIZATION_NODE_CLOSE_BUTTON = "organization.node.close.button"
   ,ORGANIZATION_NODE_EMPTY_MESSAGE = "organization.node.empty.message"
+  ,ORGANIZATION_SCOPE_NODE_OPTION = "organization.scope.node.option"
+  ,ORGANIZATION_SCOPE_SUBTREE_OPTION = "organization.scope.subtree.option"
 }

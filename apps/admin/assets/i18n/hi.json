@@ -84,5 +84,7 @@
   "organization.node.assign.member.button": "सदस्य असाइन करें",
   "organization.node.assign.responsible.button": "जिम्मेदार असाइन करें",
   "organization.node.close.button": "बंद करें",
-  "organization.node.empty.message": "कोई सदस्य या जिम्मेदार असाइन नहीं है।"
+  "organization.node.empty.message": "कोई सदस्य या जिम्मेदार असाइन नहीं है।",
+  "organization.scope.node.option": "केवल यह नोड",
+  "organization.scope.subtree.option": "यह नोड और उसके बच्चे"
 }
