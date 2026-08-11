@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
+import adminPackage from "../../package.json";
 import {
   Building2,
   ChevronDown,
@@ -21,6 +22,7 @@ import "./styles.css";
 
 const language = resolveLanguage();
 const t = texts(language);
+const applicationVersion = `v${adminPackage.version}`;
 document.documentElement.lang = language;
 document.documentElement.dir = direction(language);
 
@@ -821,7 +823,7 @@ function Admin({ token, onLogout }: { token: string; onLogout: () => void }) {
           </span>
           <span>
             <strong>{t[RSC.ADMIN_BRAND_TEXT]}</strong>
-            <small>{t[RSC.ADMIN_BRAND_VERSION]}</small>
+            <small>{applicationVersion}</small>
           </span>
           <LanguageSwitcher />
         </div>

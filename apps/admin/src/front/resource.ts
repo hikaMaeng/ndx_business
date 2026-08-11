@@ -58,7 +58,6 @@ export enum RSC {
   ,ADMIN_ACCOUNT_TAB_SESSIONS = "admin.account.tab.sessions"
   ,ADMIN_ACCOUNT_TAB_POLICY = "admin.account.tab.policy"
   ,ADMIN_BRAND_TEXT = "admin.brand.text"
-  ,ADMIN_BRAND_VERSION = "admin.brand.version"
   ,ADMIN_OVERVIEW_TITLE = "admin.overview.title"
   ,ADMIN_OVERVIEW_MESSAGE = "admin.overview.message"
   ,ADMIN_SYSTEM_TITLE = "admin.system.title"

@@ -46,7 +46,6 @@
   "admin.nav.system": "System",
   "admin.nav.section": "Administration",
   "admin.brand.text": "Admin Console",
-  "admin.brand.version": "Control plane",
   "admin.overview.title": "Overview",
   "admin.overview.message": "Choose a section from the left menu to manage this installation.",
   "admin.system.title": "System",
