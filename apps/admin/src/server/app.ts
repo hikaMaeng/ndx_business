@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   assignMember,
+  assignOrganizationInferenceService,
   assignResponsible,
   createOrganization,
   createModelDefinition,
@@ -18,6 +19,7 @@ import {
   openAuthDatabase,
   readSettings,
   removeMember,
+  removeOrganizationInferenceService,
   removeResponsible,
   revokeSession,
   revokeSessionById,
@@ -27,8 +29,14 @@ import {
   refreshModelEndpoint,
   updateModelDefinition,
   updateModelEndpoint,
+  updateOrganizationInferenceModel,
   updateOrganization,
 } from "admin_domain/server";
+import {
+  addOrganizationInferenceServiceRoute,
+  removeOrganizationInferenceServiceRoute,
+  updateOrganizationInferenceModelRoute,
+} from "admin_domain/common";
 import type { DatabaseSync } from "node:sqlite";
 import { apiPermissionMiddleware, type AuthenticatedRequest } from "./permission/index.js";
 
@@ -84,6 +92,9 @@ export function createApp(database: DatabaseSync = openAuthDatabase(process.env.
   app.delete("/api/organizations/:id/members/:userId", (request: AuthenticatedRequest, response) => { try { response.json(removeMember(database, request.user!.id, Boolean(request.user!.isMasterAdmin), String(request.params.id), String(request.params.userId))); } catch (error) { response.status(403).json({ error: error instanceof Error ? error.message : "Member removal failed" }); } });
   app.post("/api/organizations/:id/responsibilities", (request: AuthenticatedRequest, response) => { try { response.json(assignResponsible(database, request.user!.id, Boolean(request.user!.isMasterAdmin), String(request.params.id), body(request) as never)); } catch (error) { response.status(403).json({ error: error instanceof Error ? error.message : "Responsibility assignment failed" }); } });
   app.delete("/api/organizations/:id/responsibilities/:userId", (request: AuthenticatedRequest, response) => { try { response.json(removeResponsible(database, request.user!.id, Boolean(request.user!.isMasterAdmin), String(request.params.id), String(request.params.userId))); } catch (error) { response.status(403).json({ error: error instanceof Error ? error.message : "Responsibility removal failed" }); } });
+  app.post(addOrganizationInferenceServiceRoute.path, (request: AuthenticatedRequest, response) => { try { response.json(assignOrganizationInferenceService(database, request.user!.id, Boolean(request.user!.isMasterAdmin), String(request.params.id), body(request) as never)); } catch (error) { response.status(403).json({ error: error instanceof Error ? error.message : "Inference service assignment failed" }); } });
+  app.delete(removeOrganizationInferenceServiceRoute.path, (request: AuthenticatedRequest, response) => { try { response.json(removeOrganizationInferenceService(database, request.user!.id, Boolean(request.user!.isMasterAdmin), String(request.params.id), String(request.params.endpointId))); } catch (error) { response.status(403).json({ error: error instanceof Error ? error.message : "Inference service removal failed" }); } });
+  app.put(updateOrganizationInferenceModelRoute.path, (request: AuthenticatedRequest, response) => { try { response.json(updateOrganizationInferenceModel(database, request.user!.id, Boolean(request.user!.isMasterAdmin), String(request.params.id), String(request.params.endpointId), String(request.params.modelId), body(request) as never)); } catch (error) { response.status(403).json({ error: error instanceof Error ? error.message : "Inference model update failed" }); } });
   app.delete("/api/organizations/:id", (request: AuthenticatedRequest, response) => { try { response.json(deleteOrganization(database, request.user!.id, Boolean(request.user!.isMasterAdmin), String(request.params.id))); } catch (error) { response.status(403).json({ error: error instanceof Error ? error.message : "Organization deletion failed" }); } });
   app.get("/api/auth/me", (request: AuthenticatedRequest, response) => response.json(request.user));
   app.get("/api/models", (_request, response) => response.json(listModelCatalog(database)));

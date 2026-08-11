@@ -163,7 +163,9 @@
 .organization-member-remove:focus-visible,
 .organization-modal-tabs button:focus-visible,
 .organization-permission-toggle:focus-visible,
-.organization-color-option:focus-visible {
+.organization-color-option:focus-visible,
+.organization-inference-service-remove:focus-visible,
+.organization-model-toggle:focus-visible {
   outline: 0;
   box-shadow: 0 0 0 2px var(--primary-focus);
 }
@@ -248,7 +250,7 @@
 
 .organization-modal-tabs {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
   margin-top: 18px;
   padding: 4px;
@@ -285,7 +287,8 @@
 }
 
 .organization-info-form,
-.organization-members-panel {
+.organization-members-panel,
+.organization-models-panel {
   margin-top: 18px;
 }
 
@@ -372,6 +375,114 @@
 .organization-members-panel {
   display: grid;
   gap: 16px;
+}
+
+.organization-models-panel,
+.organization-inference-service-list,
+.organization-inference-model-list {
+  display: grid;
+  gap: 12px;
+}
+
+.organization-inference-service-select {
+  display: grid;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.organization-inference-service-select select {
+  min-height: 40px;
+  color: var(--text-primary);
+  border: 1px solid var(--input-border);
+  border-radius: 8px;
+  background: var(--input-bg);
+}
+
+.organization-inference-service {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--input-border);
+  border-radius: 10px;
+  background: var(--input-bg);
+}
+
+.organization-inference-service header,
+.organization-inference-model {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.organization-inference-service h3,
+.organization-model-empty {
+  margin: 0;
+}
+
+.organization-inference-service-remove {
+  display: inline-grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 0;
+  color: var(--text-secondary);
+  border: 1px solid var(--input-hover-border);
+  border-radius: 8px;
+  background: transparent;
+}
+
+.organization-inference-service-remove:hover {
+  color: var(--text-primary);
+  background: var(--surface-hover-bg);
+}
+
+.organization-inference-service-remove svg {
+  width: 15px;
+  height: 15px;
+}
+
+.organization-inference-model {
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid var(--divider);
+  border-radius: 8px;
+  background: var(--surface-bg);
+}
+
+.organization-inference-model strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.organization-model-toggle {
+  min-width: 66px;
+  min-height: 30px;
+  padding: 0 10px;
+  color: var(--text-description);
+  border: 1px solid var(--input-hover-border);
+  border-radius: 999px;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.organization-model-toggle[aria-pressed="true"] {
+  color: var(--on-primary);
+  border-color: var(--primary);
+  background: var(--primary);
+}
+
+.organization-model-empty {
+  padding: 18px;
+  color: var(--text-description);
+  border: 1px dashed var(--input-hover-border);
+  border-radius: 10px;
+  text-align: center;
 }
 
 .organization-member-search {

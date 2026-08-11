@@ -43,6 +43,11 @@ follows is the small set of decisions that are not obvious from the code.
 - **Embedding models are excluded at the boundary.** Provider identifiers that
   contain `embedding` are not persisted. Why: the configured items represent
   generative endpoints with sampling and modality controls.
+- **Organization model activation is a relation, not provider configuration.**
+  Selecting a service projects every current endpoint model as active; only
+  changed flags are stored locally. Why: later provider models appear by
+  default, while one node can still disable a model without changing another
+  node or exposing provider credentials.
 - **`dist` is a single bundled file, not a dependency tree.** That is why the
   runtime image needs no package manager and why its Node major is independent
   of the version the build ran on.

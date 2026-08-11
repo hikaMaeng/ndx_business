@@ -4,11 +4,16 @@ import {
   ORGANIZATION_COLORS,
   ORGANIZATION_ICONS,
   type AssignMemberRequest,
+  type AssignOrganizationInferenceServiceRequest,
   type AssignResponsibleRequest,
   type CreateOrganizationRequest,
   type OrganizationColor,
   type OrganizationIcon,
+  type OrganizationInferenceService,
+  type OrganizationInferenceServiceOption,
+  type OrganizationInferenceModel,
   type OrganizationSnapshot,
+  type UpdateOrganizationInferenceModelRequest,
   type UpdateOrganizationRequest,
 } from "../../common/protocol/organization/index.js";
 import type { UsersResponse } from "../../common/protocol/auth/index.js";
@@ -57,6 +62,43 @@ export function listOrganizations(
     scope: "node" | "subtree";
     email: string;
   }>;
+  const inferenceServiceOptions = database
+    .prepare("SELECT id, name FROM model_endpoints ORDER BY name COLLATE NOCASE")
+    .all() as Array<{ id: string; name: string }>;
+  const inferenceServiceRows = database
+    .prepare(
+      "SELECT service.organization_id, service.endpoint_id, endpoint.name FROM organization_inference_services service JOIN model_endpoints endpoint ON endpoint.id = service.endpoint_id ORDER BY endpoint.name COLLATE NOCASE",
+    )
+    .all() as Array<{ organization_id: string; endpoint_id: string; name: string }>;
+  const inferenceModelRows = database
+    .prepare(
+      "SELECT service.organization_id, service.endpoint_id, definition.id AS model_id, definition.identifier, COALESCE(item.active, 1) AS active FROM organization_inference_services service JOIN model_definitions definition ON definition.endpoint_id = service.endpoint_id LEFT JOIN organization_inference_models item ON item.organization_id = service.organization_id AND item.endpoint_id = service.endpoint_id AND item.model_id = definition.id ORDER BY definition.identifier COLLATE NOCASE",
+    )
+    .all() as Array<{
+    organization_id: string;
+    endpoint_id: string;
+    model_id: string;
+    identifier: string;
+    active: number;
+  }>;
+  const servicesByOrganization = new Map<string, Map<string, OrganizationInferenceService>>();
+  for (const row of inferenceServiceRows) {
+    const services = servicesByOrganization.get(row.organization_id) ?? new Map();
+    services.set(row.endpoint_id, {
+      organizationId: row.organization_id,
+      endpointId: row.endpoint_id,
+      name: row.name,
+      models: [],
+    });
+    servicesByOrganization.set(row.organization_id, services);
+  }
+  for (const row of inferenceModelRows) {
+    servicesByOrganization.get(row.organization_id)?.get(row.endpoint_id)?.models.push({
+      modelId: row.model_id,
+      identifier: row.identifier,
+      active: Boolean(row.active),
+    } satisfies OrganizationInferenceModel);
+  }
   return {
     organizations: organizationRows.map((row) => ({
       id: row.id,
@@ -77,6 +119,13 @@ export function listOrganizations(
       scope: row.scope,
       email: row.email,
     })),
+    inferenceServiceOptions: inferenceServiceOptions.map((row) => ({
+      endpointId: row.id,
+      name: row.name,
+    } satisfies OrganizationInferenceServiceOption)),
+    inferenceServices: [...servicesByOrganization.values()].flatMap((services) =>
+      [...services.values()],
+    ),
     access: buildOrganizationAccess(
       database,
       actorId,
@@ -84,6 +133,74 @@ export function listOrganizations(
       organizationRows.map((row) => row.id),
     ),
   } satisfies OrganizationSnapshot;
+}
+
+export function assignOrganizationInferenceService(
+  database: DatabaseSync,
+  actorId: string,
+  master: boolean,
+  organizationId: string,
+  input: AssignOrganizationInferenceServiceRequest,
+): OrganizationSnapshot {
+  requireOrganizationManage(database, actorId, organizationId, master);
+  if (!input || typeof input.endpointId !== "string" || !input.endpointId)
+    throw new Error("Unknown inference service");
+  const endpoint = database
+    .prepare("SELECT id FROM model_endpoints WHERE id = ?")
+    .get(input.endpointId) as { id: string } | undefined;
+  if (!endpoint) throw new Error("Unknown inference service");
+  database
+    .prepare(
+      "INSERT OR IGNORE INTO organization_inference_services (organization_id, endpoint_id) VALUES (?, ?)",
+    )
+    .run(organizationId, endpoint.id);
+  return listOrganizations(database, actorId, master);
+}
+
+export function removeOrganizationInferenceService(
+  database: DatabaseSync,
+  actorId: string,
+  master: boolean,
+  organizationId: string,
+  endpointId: string,
+): OrganizationSnapshot {
+  requireOrganizationManage(database, actorId, organizationId, master);
+  const removed = database
+    .prepare(
+      "DELETE FROM organization_inference_services WHERE organization_id = ? AND endpoint_id = ?",
+    )
+    .run(organizationId, endpointId);
+  if (!removed.changes) throw new Error("Unknown organization inference service");
+  return listOrganizations(database, actorId, master);
+}
+
+export function updateOrganizationInferenceModel(
+  database: DatabaseSync,
+  actorId: string,
+  master: boolean,
+  organizationId: string,
+  endpointId: string,
+  modelId: string,
+  input: UpdateOrganizationInferenceModelRequest,
+): OrganizationSnapshot {
+  requireOrganizationManage(database, actorId, organizationId, master);
+  if (!input || typeof input.active !== "boolean")
+    throw new Error("Inference model active state is required");
+  const changed = database
+    .prepare(
+      "INSERT INTO organization_inference_models (organization_id, endpoint_id, model_id, active) SELECT ?, ?, definition.id, ? FROM model_definitions definition JOIN organization_inference_services service ON service.organization_id = ? AND service.endpoint_id = ? WHERE definition.id = ? AND definition.endpoint_id = ? ON CONFLICT(organization_id, endpoint_id, model_id) DO UPDATE SET active = excluded.active",
+    )
+    .run(
+      organizationId,
+      endpointId,
+      Number(input.active),
+      organizationId,
+      endpointId,
+      modelId,
+      endpointId,
+    );
+  if (!changed.changes) throw new Error("Unknown organization inference model");
+  return listOrganizations(database, actorId, master);
 }
 
 export function listOrganizationAccounts(

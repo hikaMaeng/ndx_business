@@ -48,6 +48,24 @@ export type OrganizationNodePermission = {
   canAssignAdminAll: boolean;
 };
 
+export type OrganizationInferenceServiceOption = {
+  endpointId: string;
+  name: string;
+};
+
+export type OrganizationInferenceModel = {
+  modelId: string;
+  identifier: string;
+  active: boolean;
+};
+
+export type OrganizationInferenceService = {
+  organizationId: string;
+  endpointId: string;
+  name: string;
+  models: OrganizationInferenceModel[];
+};
+
 export type OrganizationAccess = {
   isMasterAdmin: boolean;
   canCreateRoot: boolean;
@@ -58,6 +76,8 @@ export type OrganizationSnapshot = {
   organizations: Organization[];
   members: OrganizationMember[];
   responsibilities: OrganizationResponsibility[];
+  inferenceServiceOptions: OrganizationInferenceServiceOption[];
+  inferenceServices: OrganizationInferenceService[];
   access: OrganizationAccess;
 };
 
@@ -78,6 +98,40 @@ export type AssignResponsibleRequest = {
   userId: string;
   scope: "node" | "subtree";
 };
+export type AssignOrganizationInferenceServiceRequest = { endpointId: string };
+export type UpdateOrganizationInferenceModelRequest = { active: boolean };
+
+export const addOrganizationInferenceServiceRoute = {
+  path: "/api/organizations/:id/inference-services",
+  method: "POST",
+} as const;
+export const removeOrganizationInferenceServiceRoute = {
+  path: "/api/organizations/:id/inference-services/:endpointId",
+  method: "DELETE",
+} as const;
+export const updateOrganizationInferenceModelRoute = {
+  path: "/api/organizations/:id/inference-services/:endpointId/models/:modelId",
+  method: "PUT",
+} as const;
+
+export function organizationInferenceServicesPath(organizationId: string): string {
+  return `/api/organizations/${organizationId}/inference-services`;
+}
+
+export function organizationInferenceServicePath(
+  organizationId: string,
+  endpointId: string,
+): string {
+  return `${organizationInferenceServicesPath(organizationId)}/${endpointId}`;
+}
+
+export function organizationInferenceModelPath(
+  organizationId: string,
+  endpointId: string,
+  modelId: string,
+): string {
+  return `${organizationInferenceServicePath(organizationId, endpointId)}/models/${modelId}`;
+}
 
 export function parseOrganizationSnapshot(
   value: unknown,
@@ -88,6 +142,8 @@ export function parseOrganizationSnapshot(
     !Array.isArray(record.organizations) ||
     !Array.isArray(record.members) ||
     !Array.isArray(record.responsibilities) ||
+    !Array.isArray(record.inferenceServiceOptions) ||
+    !Array.isArray(record.inferenceServices) ||
     !record.access ||
     typeof record.access !== "object"
   )
@@ -123,6 +179,30 @@ export function parseOrganizationSnapshot(
       typeof row.email === "string"
     );
   });
+  const inferenceServiceOptions = record.inferenceServiceOptions.every((item) => {
+    if (!item || typeof item !== "object") return false;
+    const row = item as Record<string, unknown>;
+    return typeof row.endpointId === "string" && typeof row.name === "string";
+  });
+  const inferenceServices = record.inferenceServices.every((item) => {
+    if (!item || typeof item !== "object") return false;
+    const row = item as Record<string, unknown>;
+    return (
+      typeof row.endpointId === "string" &&
+      typeof row.organizationId === "string" &&
+      typeof row.name === "string" &&
+      Array.isArray(row.models) &&
+      row.models.every((model) => {
+        if (!model || typeof model !== "object") return false;
+        const modelRow = model as Record<string, unknown>;
+        return (
+          typeof modelRow.modelId === "string" &&
+          typeof modelRow.identifier === "string" &&
+          typeof modelRow.active === "boolean"
+        );
+      })
+    );
+  });
   const access = record.access as Record<string, unknown>;
   const accessNodes = Array.isArray(access.nodes)
     ? access.nodes.every((item) => {
@@ -142,6 +222,8 @@ export function parseOrganizationSnapshot(
   return organizations &&
     members &&
     responsibilities &&
+    inferenceServiceOptions &&
+    inferenceServices &&
     typeof access.isMasterAdmin === "boolean" &&
     typeof access.canCreateRoot === "boolean" &&
     accessNodes

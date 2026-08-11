@@ -4,6 +4,9 @@ import {
   ORGANIZATION_COLORS,
   ORGANIZATION_ICONS,
   parseOrganizationSnapshot,
+  organizationInferenceModelPath,
+  organizationInferenceServicePath,
+  organizationInferenceServicesPath,
   type Organization,
   type OrganizationColor,
   type OrganizationIcon,
@@ -54,7 +57,7 @@ export function OrganizationNodeModal({
   onSnapshot: (snapshot: OrganizationSnapshot) => void;
   onClose: () => void;
 }) {
-  const [tab, setTab] = useState<"info" | "members">("info");
+  const [tab, setTab] = useState<"info" | "members" | "models">("info");
   const [name, setName] = useState(organization.name);
   const [color, setColor] = useState<OrganizationColor>(organization.color);
   const [icon, setIcon] = useState<OrganizationIcon>(organization.icon);
@@ -64,6 +67,15 @@ export function OrganizationNodeModal({
   const [saved, setSaved] = useState(false);
   const members = snapshot.members.filter(
     (member) => member.organizationId === organization.id,
+  );
+  const inferenceServices = snapshot.inferenceServices.filter(
+    (service) => service.organizationId === organization.id,
+  );
+  const assignedServiceIds = new Set(
+    inferenceServices.map((service) => service.endpointId),
+  );
+  const availableInferenceServices = snapshot.inferenceServiceOptions.filter(
+    (service) => !assignedServiceIds.has(service.endpointId),
   );
   const memberIds = useMemo(
     () => new Set(members.map((member) => member.userId)),
@@ -176,6 +188,43 @@ export function OrganizationNodeModal({
     }
   }
 
+  async function addInferenceService(endpointId: string) {
+    if (!endpointId) return;
+    try {
+      await mutate(organizationInferenceServicesPath(organization.id), {
+        method: "POST",
+        body: JSON.stringify({ endpointId }),
+      });
+    } catch {
+      // The shared alert already renders the request error.
+    }
+  }
+
+  async function removeInferenceService(endpointId: string) {
+    try {
+      await mutate(organizationInferenceServicePath(organization.id, endpointId), {
+        method: "DELETE",
+      });
+    } catch {
+      // The shared alert already renders the request error.
+    }
+  }
+
+  async function toggleInferenceModel(
+    endpointId: string,
+    modelId: string,
+    active: boolean,
+  ) {
+    try {
+      await mutate(
+        organizationInferenceModelPath(organization.id, endpointId, modelId),
+        { method: "PUT", body: JSON.stringify({ active: !active }) },
+      );
+    } catch {
+      // The shared alert already renders the request error.
+    }
+  }
+
   return (
     <div
       className="organization-modal-backdrop"
@@ -232,6 +281,15 @@ export function OrganizationNodeModal({
           >
             <span>{text[RSC.ORGANIZATION_NODE_MEMBERS_TAB_BUTTON]}</span>
             <span className="organization-tab-count">{members.length}</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "models"}
+            aria-controls="organization-models-panel"
+            onClick={() => setTab("models")}
+          >
+            {text[RSC.ORGANIZATION_NODE_MODELS_TAB_BUTTON]}
           </button>
         </div>
 
@@ -327,7 +385,7 @@ export function OrganizationNodeModal({
               </div>
             )}
           </form>
-        ) : (
+        ) : tab === "members" ? (
           <div
             id="organization-members-panel"
             role="tabpanel"
@@ -476,6 +534,118 @@ export function OrganizationNodeModal({
                 </p>
               )}
             </div>
+          </div>
+        ) : (
+          <div
+            id="organization-models-panel"
+            role="tabpanel"
+            className="organization-models-panel"
+          >
+            <label className="organization-inference-service-select">
+              {text[RSC.ORGANIZATION_NODE_MODEL_SERVICE_LABEL]}
+              <select
+                aria-label={text[RSC.ORGANIZATION_NODE_MODEL_SERVICE_LABEL]}
+                defaultValue=""
+                disabled={!permission.canUpdate || busy}
+                onChange={(event) => {
+                  void addInferenceService(event.target.value);
+                  event.currentTarget.value = "";
+                }}
+              >
+                <option value="">
+                  {text[RSC.ORGANIZATION_NODE_MODEL_SERVICE_PLACEHOLDER]}
+                </option>
+                {availableInferenceServices.map((service) => (
+                  <option key={service.endpointId} value={service.endpointId}>
+                    {service.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {inferenceServices.length ? (
+              <div className="organization-inference-service-list">
+                {inferenceServices.map((service) => (
+                  <article
+                    className="organization-inference-service"
+                    key={service.endpointId}
+                  >
+                    <header>
+                      <h3>{service.name}</h3>
+                      {permission.canUpdate && (
+                        <button
+                          type="button"
+                          className="organization-inference-service-remove"
+                          aria-label={
+                            text[
+                              RSC
+                                .ORGANIZATION_NODE_MODEL_SERVICE_REMOVE_BUTTON
+                            ]
+                          }
+                          onClick={() =>
+                            void removeInferenceService(service.endpointId)
+                          }
+                          disabled={busy}
+                        >
+                          <Trash2 aria-hidden="true" />
+                        </button>
+                      )}
+                    </header>
+                    {service.models.length ? (
+                      <div className="organization-inference-model-list">
+                        {service.models.map((model) => (
+                          <div
+                            className="organization-inference-model"
+                            key={model.modelId}
+                          >
+                            <strong>{model.identifier}</strong>
+                            {permission.canUpdate ? (
+                              <button
+                                type="button"
+                                className="organization-model-toggle"
+                                aria-pressed={model.active}
+                                onClick={() =>
+                                  void toggleInferenceModel(
+                                    service.endpointId,
+                                    model.modelId,
+                                    model.active,
+                                  )
+                                }
+                                disabled={busy}
+                              >
+                                {text[
+                                  model.active
+                                    ? RSC.ORGANIZATION_NODE_MODEL_ACTIVE_BUTTON
+                                    : RSC.ORGANIZATION_NODE_MODEL_INACTIVE_BUTTON
+                                ]}
+                              </button>
+                            ) : (
+                              <span
+                                className="organization-model-toggle"
+                                aria-pressed={model.active}
+                              >
+                                {text[
+                                  model.active
+                                    ? RSC.ORGANIZATION_NODE_MODEL_ACTIVE_BUTTON
+                                    : RSC.ORGANIZATION_NODE_MODEL_INACTIVE_BUTTON
+                                ]}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="organization-model-empty">
+                        {text[RSC.ORGANIZATION_NODE_MODEL_EMPTY_MESSAGE]}
+                      </p>
+                    )}
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="organization-model-empty">
+                {text[RSC.ORGANIZATION_NODE_MODEL_EMPTY_MESSAGE]}
+              </p>
+            )}
           </div>
         )}
       </section>

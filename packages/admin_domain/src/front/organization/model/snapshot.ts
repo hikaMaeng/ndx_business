@@ -6,6 +6,8 @@ export function createOrganizationSnapshotModel(): SliceModel<OrganizationSnapsh
     organizations: [],
     members: [],
     responsibilities: [],
+    inferenceServiceOptions: [],
+    inferenceServices: [],
     access: {
       isMasterAdmin: false,
       canCreateRoot: false,

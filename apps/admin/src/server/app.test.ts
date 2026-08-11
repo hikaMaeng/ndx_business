@@ -306,6 +306,94 @@ test("model endpoints refresh provider models, filter embeddings, and persist mo
     assert.equal(updated.body.models[0].reasoning, true);
     assert.equal(updated.body.models[0].supportsImage, true);
     assert.equal(updated.body.models[0].supportsSound, false);
+
+    const organization = await request(app)
+      .post("/api/organizations")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ name: "Model-enabled node", mode: "root", parentId: null })
+      .expect(201);
+    const organizationId = organization.body.organizations.find(
+      (item: { name: string }) => item.name === "Model-enabled node",
+    ).id as string;
+    const assigned = await request(app)
+      .post(`/api/organizations/${organizationId}/inference-services`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ endpointId: endpoint.id })
+      .expect(200);
+    assert.deepEqual(assigned.body.inferenceServices, [{
+      organizationId,
+      endpointId: endpoint.id,
+      name: "Primary provider",
+      models: [{ modelId: item.id, identifier: "chat-primary", active: true }],
+    }]);
+    const child = await request(app)
+      .post("/api/organizations")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ name: "Model child node", mode: "child", parentId: organizationId })
+      .expect(201);
+    const childId = child.body.organizations.find(
+      (organization: { name: string }) => organization.name === "Model child node",
+    ).id as string;
+    assert.equal(
+      child.body.inferenceServices.some(
+        (service: { organizationId: string }) => service.organizationId === childId,
+      ),
+      false,
+    );
+    const addedModel = await request(app)
+      .post(`/api/models/${endpoint.id}/models`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        identifier: "chat-later",
+        contextSize: 0,
+        temperature: 1,
+        minP: 0,
+        topP: 1,
+        topK: 0,
+        repeatPenalty: 1,
+        reasoning: false,
+        supportsText: true,
+        supportsImage: false,
+        supportsSound: false,
+        supportsVideo: false,
+      })
+      .expect(201);
+    const laterModel = addedModel.body.models.find(
+      (definition: { identifier: string }) => definition.identifier === "chat-later",
+    ) as { id: string };
+    const allModels = await request(app)
+      .get("/api/organizations")
+      .set("Authorization", `Bearer ${token}`)
+      .expect(200);
+    assert.deepEqual(
+      allModels.body.inferenceServices[0].models.map(
+        (model: { identifier: string; active: boolean }) => [model.identifier, model.active],
+      ),
+      [["chat-later", true], ["chat-primary", true]],
+    );
+    const disabled = await request(app)
+      .put(`/api/organizations/${organizationId}/inference-services/${endpoint.id}/models/${item.id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ active: false })
+      .expect(200);
+    assert.equal(
+      disabled.body.inferenceServices[0].models.find(
+        (model: { modelId: string }) => model.modelId === item.id,
+      ).active,
+      false,
+    );
+    assert.equal(
+      disabled.body.inferenceServices[0].models.find(
+        (model: { modelId: string }) => model.modelId === laterModel.id,
+      ).active,
+      true,
+    );
+    const removed = await request(app)
+      .delete(`/api/organizations/${organizationId}/inference-services/${endpoint.id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .expect(200);
+    assert.deepEqual(removed.body.inferenceServices, []);
+
   } finally {
     globalThis.fetch = previousFetch;
     restoreMasterEmails();

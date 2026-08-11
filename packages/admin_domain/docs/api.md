@@ -19,6 +19,9 @@ Public exports:
 | `listOrganizationAccounts`                           | Lists account candidates only for actors with organization authority.  | `src/server/organizations/index.ts#listOrganizationAccounts`     |
 | `buildOrganizationAccess`                            | Projects the server policy into per-node UI capabilities.               | `src/server/organizations/authorization/index.ts#buildOrganizationAccess` |
 | `ensureOrganizationModel`                            | Token-keyed live front model registry.                                  | `src/front/organization/model/store.ts#ensureOrganizationModel`  |
+| `OrganizationInferenceService` and route bindings     | Carries safe service options plus the node-specific active model state. | `src/common/protocol/organization/index.ts#OrganizationInferenceService` |
+| `assignOrganizationInferenceService`                  | Connects one persisted inference service; its current models project as active unless locally overridden. | `src/server/organizations/index.ts#assignOrganizationInferenceService` |
+| `updateOrganizationInferenceModel`                    | Switches an attached model without changing global provider model configuration. | `src/server/organizations/index.ts#updateOrganizationInferenceModel` |
 
 ## Model endpoint surface
 
