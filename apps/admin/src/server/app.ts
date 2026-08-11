@@ -1,7 +1,7 @@
 import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { authenticate, createOrganization, getSettings, listOrganizations, listPendingUsers, login, revokeSession, revokeSessionById, saveSettings, setUserStatus, signup, readSettings, assignMember, assignResponsible } from "admin_domain/server";
+import { authenticate, createOrganization, getSettings, listOrganizations, listPendingUsers, listUsers, login, revokeSession, revokeSessionById, saveSettings, setUserStatus, signup, readSettings, assignMember, assignResponsible } from "admin_domain/server";
 import { openAuthDatabase } from "admin_domain/server";
 import type { DatabaseSync } from "node:sqlite";
 
@@ -101,6 +101,7 @@ export function createApp(database: DatabaseSync = openAuthDatabase(process.env.
     response.json({ ok: true });
   });
   app.get("/api/admin/pending-users", requireSession, (_request, response) => response.json({ users: listPendingUsers(database) }));
+  app.get("/api/admin/users", requireSession, (_request, response) => response.json({ users: listUsers(database) }));
   app.post("/api/admin/users/:id/approve", requireSession, (request, response) => { setUserStatus(database, String(request.params.id), "active"); response.json({ ok: true }); });
   app.post("/api/admin/users/:id/reject", requireSession, (request, response) => { setUserStatus(database, String(request.params.id), "rejected"); response.json({ ok: true }); });
 

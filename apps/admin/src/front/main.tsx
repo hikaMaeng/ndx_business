@@ -76,6 +76,12 @@ type OrganizationSnapshot = {
   members: OrganizationMember[];
   responsibilities: OrganizationResponsibility[];
 };
+type Account = {
+  id: string;
+  email: string;
+  status: "active" | "pending" | "rejected";
+  isMasterAdmin?: boolean;
+};
 
 async function api(path: string, options: RequestInit = {}, token?: string) {
   const deviceKey =
@@ -224,10 +230,84 @@ function LanguageSwitcher() {
 
 function OrganizationScreen({ token }: { token: string }) {
   const [snapshot, setSnapshot] = useState<OrganizationSnapshot | null>(null);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [name, setName] = useState("");
+  const [parentId, setParentId] = useState("");
+  const [memberOrganizationId, setMemberOrganizationId] = useState("");
+  const [memberId, setMemberId] = useState("");
+  const [ownerOrganizationId, setOwnerOrganizationId] = useState("");
+  const [ownerId, setOwnerId] = useState("");
+  const [ownerScope, setOwnerScope] = useState<"node" | "subtree">("node");
   const [error, setError] = useState("");
   async function loadOrganizations() {
     try {
-      setSnapshot(await api("/api/organizations", {}, token));
+      const [organizationResult, accountResult] = await Promise.all([
+        api("/api/organizations", {}, token),
+        api("/api/admin/users", {}, token),
+      ]);
+      setSnapshot(organizationResult);
+      setAccounts(accountResult.users);
+      setMemberOrganizationId(
+        (current) => current || organizationResult.organizations[0]?.id || "",
+      );
+      setOwnerOrganizationId(
+        (current) => current || organizationResult.organizations[0]?.id || "",
+      );
+      setMemberId((current) => current || accountResult.users[0]?.id || "");
+      setOwnerId((current) => current || accountResult.users[0]?.id || "");
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : t[RSC.AUTH_ERROR_ALERT],
+      );
+    }
+  }
+  async function createOrganization(event: React.FormEvent) {
+    event.preventDefault();
+    if (!name.trim()) return;
+    try {
+      await api(
+        "/api/organizations",
+        {
+          method: "POST",
+          body: JSON.stringify({ name, parentId: parentId || null }),
+        },
+        token,
+      );
+      setName("");
+      await loadOrganizations();
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : t[RSC.AUTH_ERROR_ALERT],
+      );
+    }
+  }
+  async function assignMember(event: React.FormEvent) {
+    event.preventDefault();
+    try {
+      await api(
+        `/api/organizations/${memberOrganizationId}/members`,
+        { method: "POST", body: JSON.stringify({ userId: memberId }) },
+        token,
+      );
+      await loadOrganizations();
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : t[RSC.AUTH_ERROR_ALERT],
+      );
+    }
+  }
+  async function assignOwner(event: React.FormEvent) {
+    event.preventDefault();
+    try {
+      await api(
+        `/api/organizations/${ownerOrganizationId}/responsibilities`,
+        {
+          method: "POST",
+          body: JSON.stringify({ userId: ownerId, scope: ownerScope }),
+        },
+        token,
+      );
+      await loadOrganizations();
     } catch (reason) {
       setError(
         reason instanceof Error ? reason.message : t[RSC.AUTH_ERROR_ALERT],
@@ -305,6 +385,128 @@ function OrganizationScreen({ token }: { token: string }) {
           {error}
         </p>
       )}
+      <div className="organization-actions">
+        <Card>
+          <CardHeader>
+            <CardTitle>{t[RSC.ADMIN_ORGANIZATIONS_TITLE]}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form className="form-stack" onSubmit={createOrganization}>
+              <label>
+                {t[RSC.ADMIN_ORGANIZATIONS_TITLE]}
+                <input
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  required
+                />
+              </label>
+              <label>
+                {t[RSC.ADMIN_ORGANIZATIONS_MESSAGE]}
+                <select
+                  value={parentId}
+                  onChange={(event) => setParentId(event.target.value)}
+                >
+                  <option value="">{t[RSC.ADMIN_NAV_DASHBOARD]}</option>
+                  {snapshot.organizations.map((organization) => (
+                    <option value={organization.id} key={organization.id}>
+                      {organization.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <Button type="submit">{t[RSC.ADMIN_SAVE_BUTTON]}</Button>
+            </form>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>{t[RSC.ADMIN_ACCOUNT_TAB_APPROVAL]}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form className="form-stack" onSubmit={assignMember}>
+              <label>
+                {t[RSC.ADMIN_ORGANIZATIONS_TITLE]}
+                <select
+                  value={memberOrganizationId}
+                  onChange={(event) =>
+                    setMemberOrganizationId(event.target.value)
+                  }
+                >
+                  {snapshot.organizations.map((organization) => (
+                    <option value={organization.id} key={organization.id}>
+                      {organization.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                {t[RSC.ADMIN_NAV_ACCOUNTS]}
+                <select
+                  value={memberId}
+                  onChange={(event) => setMemberId(event.target.value)}
+                >
+                  {accounts.map((account) => (
+                    <option value={account.id} key={account.id}>
+                      {account.email}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <Button type="submit">{t[RSC.ADMIN_APPROVE_BUTTON]}</Button>
+            </form>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>{t[RSC.ADMIN_ACCOUNT_TAB_POLICY]}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form className="form-stack" onSubmit={assignOwner}>
+              <label>
+                {t[RSC.ADMIN_ORGANIZATIONS_TITLE]}
+                <select
+                  value={ownerOrganizationId}
+                  onChange={(event) =>
+                    setOwnerOrganizationId(event.target.value)
+                  }
+                >
+                  {snapshot.organizations.map((organization) => (
+                    <option value={organization.id} key={organization.id}>
+                      {organization.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                {t[RSC.ADMIN_NAV_ACCOUNTS]}
+                <select
+                  value={ownerId}
+                  onChange={(event) => setOwnerId(event.target.value)}
+                >
+                  {accounts.map((account) => (
+                    <option value={account.id} key={account.id}>
+                      {account.email}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                {t[RSC.ADMIN_ACCOUNT_TAB_POLICY]}
+                <select
+                  value={ownerScope}
+                  onChange={(event) =>
+                    setOwnerScope(event.target.value as "node" | "subtree")
+                  }
+                >
+                  <option value="node">{t[RSC.ADMIN_AUTO_OPTION]}</option>
+                  <option value="subtree">{t[RSC.ADMIN_FILTER_OPTION]}</option>
+                </select>
+              </label>
+              <Button type="submit">{t[RSC.ADMIN_APPROVE_BUTTON]}</Button>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
       <div
         className="organization-tree"
         aria-label={t[RSC.ADMIN_ORGANIZATIONS_TITLE]}
