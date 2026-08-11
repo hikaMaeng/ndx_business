@@ -1,0 +1,188 @@
+.organization-panel {
+  max-width: 1080px;
+}
+
+.organization-panel .page-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.organization-panel .page-heading p {
+  margin: 2px 0 0;
+  color: var(--text-description);
+}
+
+.organization-tree {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-bg);
+}
+
+.organization-node {
+  width: 100%;
+  padding: 8px 10px;
+  color: var(--text-primary);
+  border: 1px solid var(--input-border);
+  border-radius: 8px;
+  background: var(--input-bg);
+  text-align: start;
+  cursor: pointer;
+  transition: background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.organization-node:hover {
+  border-color: var(--input-hover-border);
+  background: var(--surface-hover-bg);
+}
+
+.organization-node:focus-visible {
+  border-color: var(--primary);
+  outline: 0;
+  box-shadow: 0 0 0 2px var(--primary-focus);
+}
+
+.organization-branch {
+  display: grid;
+  gap: 8px;
+}
+
+.organization-children {
+  display: grid;
+  gap: 8px;
+  margin-inline-start: 28px;
+  padding-inline-start: 18px;
+  border-inline-start: 1px solid var(--input-border);
+}
+
+.organization-node-heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--text-primary);
+}
+
+.organization-node-heading svg {
+  color: var(--primary);
+}
+
+.organization-node-heading span {
+  margin-inline-start: auto;
+  color: var(--text-description);
+  font-size: 12px;
+}
+
+.organization-node-actions {
+  display: inline-flex;
+  gap: 4px;
+  margin-inline-start: 12px;
+}
+
+.organization-node-actions button {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
+  color: var(--text-secondary);
+  border: 1px solid var(--divider);
+  border-radius: 8px;
+  background: var(--selection-bg);
+  cursor: pointer;
+}
+
+.organization-node-actions button:hover {
+  color: var(--text-primary);
+  background: var(--surface-hover-bg);
+}
+
+.organization-node-actions button:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 2px var(--primary-focus);
+}
+
+.organization-meta {
+  margin: 4px 0 0 25px;
+  color: var(--text-description);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.organization-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: var(--overlay);
+  backdrop-filter: blur(3px);
+}
+
+.organization-modal {
+  width: min(100%, 560px);
+  max-height: min(90vh, 760px);
+  overflow: auto;
+  padding: 14px;
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-bg);
+  box-shadow: 0 18px 52px var(--shadow-modal);
+}
+
+.organization-modal-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+
+.organization-modal h2 {
+  margin: 4px 0 0;
+  color: var(--text-primary);
+}
+
+.organization-modal form {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--divider);
+}
+
+.organization-actions {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .organization-panel .page-heading {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .organization-panel .page-heading > div:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .organization-tree {
+    padding: 10px;
+  }
+
+  .organization-children {
+    margin-inline-start: 10px;
+    padding-inline-start: 10px;
+  }
+
+  .organization-node-heading {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .organization-node-heading span {
+    margin-inline-start: 0;
+  }
+}

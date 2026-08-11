@@ -1,0 +1,82 @@
+.ui-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 32px;
+  padding: 5px 10px;
+  color: var(--on-primary);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--primary);
+  font-size: 12px;
+  font-weight: 650;
+  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease, box-shadow 180ms ease;
+}
+
+.ui-button:hover {
+  background: var(--primary-hover);
+}
+
+.ui-button:active {
+  background: var(--primary-active);
+}
+
+.ui-button:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 2px var(--primary-focus);
+}
+
+.ui-button:disabled {
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+.ui-button-outline {
+  color: var(--text-secondary);
+  border-color: var(--input-border);
+  background: transparent;
+}
+
+.ui-button-outline:hover {
+  color: var(--text-primary);
+  border-color: var(--input-hover-border);
+  background: var(--surface-hover-bg);
+}
+
+.ui-button-small {
+  height: 28px;
+  padding: 4px 8px;
+}
+
+.ui-card {
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-bg);
+  box-shadow: none;
+}
+
+.ui-card-header {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px 8px;
+}
+
+.ui-card-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 20px;
+  letter-spacing: 0;
+}
+
+.ui-card-content {
+  padding: 0 16px 14px;
+}
+
+.ui-card p {
+  margin: 0;
+  color: var(--text-description);
+}

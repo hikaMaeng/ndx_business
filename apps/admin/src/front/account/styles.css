@@ -1,0 +1,128 @@
+.admin-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+.account-tabs {
+  display: flex;
+  width: fit-content;
+  min-height: 34px;
+  gap: 4px;
+  margin-block-end: 10px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--sidebar-bg);
+}
+
+.account-tabs button {
+  min-width: 108px;
+  padding: 5px 10px;
+  color: var(--text-description);
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.account-tabs button:hover {
+  color: var(--text-primary);
+  background: var(--surface-hover-bg);
+}
+
+.account-tabs button.is-active {
+  color: var(--text-primary);
+  background: var(--selection-bg);
+  box-shadow: inset 0 -2px 0 var(--primary);
+}
+
+.account-tabs button:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 2px var(--primary-focus);
+}
+
+.session-list {
+  display: grid;
+  gap: 8px;
+}
+
+.session-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--divider);
+}
+
+.session-row:last-child {
+  border-bottom: 0;
+}
+
+.session-row div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.session-row span {
+  color: var(--text-description);
+  font-size: 12px;
+}
+
+.session-row code {
+  color: var(--text-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.session-devices {
+  display: grid;
+  gap: 5px;
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--divider);
+}
+
+.session-devices > strong {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.device-row {
+  display: grid;
+  gap: 2px;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.device-row small {
+  color: var(--text-description);
+  font-size: 11px;
+}
+
+.decision-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+@media (max-width: 680px) {
+  .account-tabs {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .account-tabs button {
+    min-width: 0;
+    padding-inline: 8px;
+  }
+
+  .session-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

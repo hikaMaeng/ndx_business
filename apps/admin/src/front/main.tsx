@@ -852,20 +852,20 @@ function Admin({ token, onLogout }: { token: string; onLogout: () => void }) {
       </aside>
       <main className="admin-main">
         <div className="admin-content">
-          <div className="page-heading">
-            <div>
-              <div className="eyebrow">{t[RSC.ADMIN_BADGE_TEXT]}</div>
-              <h1>
-                {activeView === "dashboard"
-                  ? t[RSC.ADMIN_OVERVIEW_TITLE]
-                  : activeView === "system"
-                    ? t[RSC.ADMIN_SYSTEM_TITLE]
-                    : activeView === "organizations"
-                      ? t[RSC.ADMIN_ORGANIZATIONS_TITLE]
+          {activeView !== "organizations" && (
+            <div className="page-heading">
+              <div>
+                <div className="eyebrow">{t[RSC.ADMIN_BADGE_TEXT]}</div>
+                <h1>
+                  {activeView === "dashboard"
+                    ? t[RSC.ADMIN_OVERVIEW_TITLE]
+                    : activeView === "system"
+                      ? t[RSC.ADMIN_SYSTEM_TITLE]
                       : t[RSC.ADMIN_NAV_ACCOUNTS]}
-              </h1>
+                </h1>
+              </div>
             </div>
-          </div>
+          )}
           {activeView === "dashboard" ? (
             <Card>
               <CardHeader>
