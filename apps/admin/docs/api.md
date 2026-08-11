@@ -16,6 +16,7 @@
 | `GET/POST /api/models` | Lists persisted provider endpoints or creates one. | `src/server/app.ts#createApp` |
 | `PUT /api/models/:endpointId` | Updates an endpoint's name, URL, optional header, and provider type. | `src/server/app.ts#createApp` |
 | `POST /api/models/:endpointId/refresh` | Retrieves provider models and excludes identifiers containing `embedding`. | `src/server/app.ts#createApp` |
+| `POST /api/models/:endpointId/models` | Manually registers one model definition for an endpoint. | `src/server/app.ts#createApp` |
 | `PUT /api/models/:endpointId/models/:modelId` | Persists model sampling, reasoning, and modality capabilities. | `src/server/app.ts#createApp` |
 
 Authenticated routes accept `Authorization: Bearer <token>`, the configured

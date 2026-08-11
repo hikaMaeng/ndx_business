@@ -3,11 +3,11 @@ import { ArrowLeft, Boxes, Plus, RefreshCw, Save, X } from "lucide-react";
 import { ensureModelsFeatureModel } from "admin_domain/front";
 import {
   parseModelCatalogSnapshot,
+  type CreateModelDefinitionRequest,
   type CreateModelEndpointRequest,
   type ModelDefinition,
   type ModelEndpoint,
   type ModelEndpointType,
-  type UpdateModelDefinitionRequest,
 } from "admin_domain/common";
 import { Button } from "../components/ui/button";
 import { resolveLanguage, texts } from "../i18n";
@@ -19,11 +19,8 @@ import "./styles.css";
 export type { ModelsRequestApi } from "./types";
 
 type EndpointDraft = CreateModelEndpointRequest;
+type ModelDefinitionDraft = CreateModelDefinitionRequest;
 type EndpointSave = { (draft: EndpointDraft): Promise<void> };
-type ModelDefinitionSave = {
-  (endpointId: string, modelId: string, draft: UpdateModelDefinitionRequest): Promise<void>;
-};
-
 const endpointTypes: Array<[ModelEndpointType, RSC]> = [
   ["openai-chat-completion", RSC.MODELS_TYPE_OPENAI_CHAT_COMPLETION_LABEL],
   ["openai-responses", RSC.MODELS_TYPE_OPENAI_RESPONSES_LABEL],
@@ -46,6 +43,38 @@ function createEndpointDraft(endpoint?: ModelEndpoint): EndpointDraft {
         headerName: "",
         headerValue: "",
         type: "openai-chat-completion",
+      };
+}
+
+function createModelDefinitionDraft(item?: ModelDefinition): ModelDefinitionDraft {
+  return item
+    ? {
+        identifier: item.identifier,
+        contextSize: item.contextSize,
+        temperature: item.temperature,
+        minP: item.minP,
+        topP: item.topP,
+        topK: item.topK,
+        repeatPenalty: item.repeatPenalty,
+        reasoning: item.reasoning,
+        supportsText: item.supportsText,
+        supportsImage: item.supportsImage,
+        supportsSound: item.supportsSound,
+        supportsVideo: item.supportsVideo,
+      }
+    : {
+        identifier: "",
+        contextSize: 0,
+        temperature: 1,
+        minP: 0,
+        topP: 1,
+        topK: 0,
+        repeatPenalty: 1,
+        reasoning: false,
+        supportsText: true,
+        supportsImage: false,
+        supportsSound: false,
+        supportsVideo: false,
       };
 }
 
@@ -142,47 +171,31 @@ function EndpointForm({
   );
 }
 
-function ModelDefinitionEditor({
-  endpoint,
+function ModelDefinitionForm({
   item,
   busy,
+  error,
   text,
   onSave,
+  onCancel,
 }: {
-  endpoint: ModelEndpoint;
-  item: ModelDefinition;
+  item?: ModelDefinition;
   busy: boolean;
+  error?: string;
   text: Record<string, string>;
-  onSave: ModelDefinitionSave;
+  onSave: { (draft: ModelDefinitionDraft): Promise<void> };
+  onCancel: () => void;
 }) {
-  const [draft, setDraft] = useState<UpdateModelDefinitionRequest>({
-    identifier: item.identifier,
-    contextSize: item.contextSize,
-    temperature: item.temperature,
-    minP: item.minP,
-    topP: item.topP,
-    topK: item.topK,
-    repeatPenalty: item.repeatPenalty,
-    reasoning: item.reasoning,
-    supportsText: item.supportsText,
-    supportsImage: item.supportsImage,
-    supportsSound: item.supportsSound,
-    supportsVideo: item.supportsVideo,
-  });
+  const [draft, setDraft] = useState(() => createModelDefinitionDraft(item));
 
   return (
-    <details className="models-definition" key={item.id}>
-      <summary>
-        <strong>{item.identifier}</strong>
-        <span>{item.contextSize.toLocaleString()}</span>
-      </summary>
-      <form
-        className="models-definition-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void onSave(endpoint.id, item.id, draft);
-        }}
-      >
+    <form
+      className="models-definition-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void onSave(draft);
+      }}
+    >
         <label>
           {text[RSC.MODELS_MODEL_IDENTIFIER_LABEL]}
           <input
@@ -282,8 +295,12 @@ function ModelDefinitionEditor({
           <Save aria-hidden="true" />
           {text[RSC.MODELS_MODEL_SAVE_BUTTON]}
         </Button>
-      </form>
-    </details>
+        <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
+          <X aria-hidden="true" />
+          {text[RSC.MODELS_ENDPOINT_CANCEL_BUTTON]}
+        </Button>
+        {error && <p role="alert" className="error-text">{error}</p>}
+    </form>
   );
 }
 
@@ -295,6 +312,7 @@ export function ModelsScreen({ token, request }: { token: string; request: Model
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [modelDialog, setModelDialog] = useState<ModelDefinition | "create" | null>(null);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
 
@@ -361,12 +379,27 @@ export function ModelsScreen({ token, request }: { token: string; request: Model
     }
   }
 
-  async function saveDefinition(endpointId: string, modelId: string, draft: UpdateModelDefinitionRequest): Promise<void> {
+  async function createDefinition(endpointId: string, draft: ModelDefinitionDraft): Promise<void> {
+    setBusy(true);
+    setError("");
+    try {
+      await applyCatalog(`/api/models/${endpointId}/models`, { method: "POST", body: JSON.stringify(draft) });
+      setModelDialog(null);
+      setStatus(text[RSC.MODELS_MODEL_CREATED_STATUS]);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : text[RSC.AUTH_ERROR_ALERT]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveDefinition(endpointId: string, modelId: string, draft: ModelDefinitionDraft): Promise<void> {
     setBusy(true);
     setError("");
     try {
       await applyCatalog(`/api/models/${endpointId}/models/${modelId}`, { method: "PUT", body: JSON.stringify(draft) });
-      setStatus(text[RSC.MODELS_MODEL_SAVED_STATUS]);
+      setModelDialog(null);
+      setStatus(text[RSC.MODELS_MODEL_UPDATED_STATUS]);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : text[RSC.AUTH_ERROR_ALERT]);
     } finally {
@@ -407,25 +440,58 @@ export function ModelsScreen({ token, request }: { token: string; request: Model
               <div className="eyebrow">{text[RSC.MODELS_ENDPOINT_MODELS_LABEL]}</div>
               <h2>{selectedEndpoint.name}</h2>
             </div>
-            <Button type="button" variant="outline" onClick={() => refreshEndpoint(selectedEndpoint.id)} disabled={busy}>
-              <RefreshCw aria-hidden="true" />
-              {text[RSC.MODELS_ENDPOINT_REFRESH_BUTTON]}
-            </Button>
+            <div className="models-list-actions">
+              <Button type="button" onClick={() => setModelDialog("create")} disabled={busy}>
+                <Plus aria-hidden="true" />
+                {text[RSC.MODELS_MODEL_ADD_BUTTON]}
+              </Button>
+              <Button type="button" variant="outline" onClick={() => refreshEndpoint(selectedEndpoint.id)} disabled={busy}>
+                <RefreshCw aria-hidden="true" />
+                {text[RSC.MODELS_ENDPOINT_REFRESH_BUTTON]}
+              </Button>
+            </div>
           </div>
           {selectedModels.length === 0 ? (
             <p className="models-empty">{text[RSC.MODELS_ENDPOINT_MODELS_EMPTY_MESSAGE]}</p>
           ) : (
             <div className="models-definitions" aria-label={text[RSC.MODELS_ENDPOINT_MODELS_LABEL]}>
               {selectedModels.map((item) => (
-                <ModelDefinitionEditor
+                <button
+                  className="models-definition"
                   key={item.id}
-                  endpoint={selectedEndpoint}
-                  item={item}
-                  busy={busy}
-                  text={text}
-                  onSave={saveDefinition}
-                />
+                  type="button"
+                  onClick={() => setModelDialog(item)}
+                  aria-label={item.identifier}
+                >
+                  <strong>{item.identifier}</strong>
+                  <span>{item.contextSize.toLocaleString()}</span>
+                </button>
               ))}
+            </div>
+          )}
+          {modelDialog && (
+            <div className="models-dialog-backdrop" role="presentation">
+              <section
+                className="models-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-label={text[modelDialog === "create" ? RSC.MODELS_MODEL_ADD_TEXT : RSC.MODELS_MODEL_EDIT_TEXT]}
+              >
+                <div className="models-dialog-heading">
+                  <h2>{text[modelDialog === "create" ? RSC.MODELS_MODEL_ADD_TEXT : RSC.MODELS_MODEL_EDIT_TEXT]}</h2>
+                </div>
+                <ModelDefinitionForm
+                  key={modelDialog === "create" ? "create" : modelDialog.id}
+                  item={modelDialog === "create" ? undefined : modelDialog}
+                  busy={busy}
+                  error={error}
+                  text={text}
+                  onSave={(draft) => modelDialog === "create"
+                    ? createDefinition(selectedEndpoint.id, draft)
+                    : saveDefinition(selectedEndpoint.id, modelDialog.id, draft)}
+                  onCancel={() => setModelDialog(null)}
+                />
+              </section>
             </div>
           )}
         </>

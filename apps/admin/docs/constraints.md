@@ -45,6 +45,7 @@ Approved locators, which tests may rely on:
 | `role=tab` names from `organization.node.*.tab.button`                | Information and member modal surfaces; member tab includes its live count. |
 | `role=listbox` name from `organization.node.member.suggestions.label` | Account autocomplete shown while typing.                                   |
 | `role=dialog` name from `models.add.endpoint.button` | New endpoint form surface. |
+| `role=dialog` name from `models.model.add.text` or `models.model.edit.text` | Manual model creation and list-item editing form surfaces. |
 | `role=status` from `models.*.status` | Model endpoint save and refresh result. |
 
 Removing or renaming any of these is a breaking change for the smoke tests.

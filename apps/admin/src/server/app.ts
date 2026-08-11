@@ -5,6 +5,7 @@ import {
   assignMember,
   assignResponsible,
   createOrganization,
+  createModelDefinition,
   createModelEndpoint,
   deleteOrganization,
   getSettings,
@@ -105,6 +106,13 @@ export function createApp(database: DatabaseSync = openAuthDatabase(process.env.
       response.json(await refreshModelEndpoint(database, String(request.params.endpointId)));
     } catch (error) {
       response.status(400).json({ error: error instanceof Error ? error.message : "Model refresh failed" });
+    }
+  });
+  app.post("/api/models/:endpointId/models", (request, response) => {
+    try {
+      response.status(201).json(createModelDefinition(database, String(request.params.endpointId), body(request) as never));
+    } catch (error) {
+      response.status(400).json({ error: error instanceof Error ? error.message : "Model definition creation failed" });
     }
   });
   app.put("/api/models/:endpointId/models/:modelId", (request, response) => {

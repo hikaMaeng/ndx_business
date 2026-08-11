@@ -8,7 +8,7 @@
 | `admin_domain/server` | `apps/admin/src/server/app.ts`                     | `node` permits node edits/member management only; `subtree` additionally permits child creation and `subtree` delegation; only master permits roots and deletion. |
 | `admin_domain/front`  | `apps/admin/src/front/organization`                | Models are token-keyed and live outside React; snapshot, account, and selection slices emit independently.                                           |
 | `admin_domain/common` | `apps/admin/src/front/models`, `apps/admin/src/server/app.ts` | Model endpoint and definition payloads are parsed at the browser boundary and have one runtime-neutral route/type source. |
-| `admin_domain/server` | `apps/admin/src/server/app.ts` | Provider refresh never persists identifiers containing `embedding` and keeps each configured header scoped to that provider request. |
+| `admin_domain/server` | `apps/admin/src/server/app.ts` | Provider refresh never persists identifiers containing `embedding` and keeps each configured header scoped to that provider request; manual model identifiers remain unique within an endpoint. |
 | `admin_domain/front` | `apps/admin/src/front/models` | Catalog and endpoint selection are independent token-keyed slices outside React. |
 
 - This is the only domain package for `apps/admin`.

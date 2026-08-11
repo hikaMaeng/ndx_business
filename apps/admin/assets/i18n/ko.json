@@ -152,6 +152,10 @@
   "models.model.image.label": "이미지",
   "models.model.sound.label": "사운드",
   "models.model.video.label": "비디오",
+  "models.model.add.button": "모델 추가",
+  "models.model.add.text": "모델 추가",
+  "models.model.edit.text": "모델 수정",
   "models.model.save.button": "모델 저장",
-  "models.model.saved.status": "모델이 저장되었습니다."
+  "models.model.created.status": "모델이 추가되었습니다.",
+  "models.model.updated.status": "모델이 저장되었습니다."
 }

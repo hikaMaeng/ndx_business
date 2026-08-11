@@ -27,6 +27,7 @@ Public exports:
 | `ModelCatalogSnapshot` and parser | Shared endpoint/model wire contract with route bindings. | `src/common/protocol/models/index.ts#ModelCatalogSnapshot` |
 | `createModelEndpoint`, `updateModelEndpoint` | Validate and persist endpoint name, URL, optional header, and type. | `src/server/models/index.ts#createModelEndpoint` |
 | `refreshModelEndpoint` | Calls the type-specific models endpoint and persists non-embedding identifiers. | `src/server/models/index.ts#refreshModelEndpoint` |
+| `createModelDefinition` | Validates and persists one manually supplied model definition. | `src/server/models/index.ts#createModelDefinition` |
 | `updateModelDefinition` | Persists sampling, reasoning, and modality options. | `src/server/models/index.ts#updateModelDefinition` |
 | `ensureModelsFeatureModel` | Token-keyed catalog and selected-endpoint front slices. | `src/front/models/model/store.ts#ensureModelsFeatureModel` |
 

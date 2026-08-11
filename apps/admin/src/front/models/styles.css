@@ -33,8 +33,7 @@
   background: var(--surface-hover-bg);
 }
 
-.models-endpoint-card:focus-visible,
-.models-definition summary:focus-visible {
+.models-endpoint-card:focus-visible {
   outline: 0;
   box-shadow: 0 0 0 2px var(--primary-focus);
 }
@@ -165,6 +164,12 @@
   gap: 10px;
 }
 
+.models-list-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .models-list-heading {
   margin: 24px 0 10px;
 }
@@ -192,36 +197,49 @@
 }
 
 .models-definition {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface-bg);
-}
-
-.models-definition summary {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
+  width: 100%;
   padding: 11px 14px;
   color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-bg);
   cursor: pointer;
+  text-align: start;
+  transition: border-color 150ms ease, background-color 150ms ease;
 }
 
-.models-definition summary strong {
+.models-definition:hover {
+  border-color: var(--input-hover-border);
+  background: var(--surface-hover-bg);
+}
+
+.models-definition:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 2px var(--primary-focus);
+}
+
+.models-definition-form {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 12px;
+}
+
+.models-definition-form > .error-text {
+  grid-column: 1 / -1;
+}
+
+.models-definition strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.models-definition summary span {
+.models-definition span {
   color: var(--text-description);
   font-size: 12px;
-}
-
-.models-definition-form {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  margin: 0 8px 8px;
-  padding: 12px;
 }
 
 .models-definition-form fieldset {

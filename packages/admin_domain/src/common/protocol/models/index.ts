@@ -65,10 +65,13 @@ export type UpdateModelDefinitionRequest = Pick<
   | "supportsVideo"
 >;
 
+export type CreateModelDefinitionRequest = UpdateModelDefinitionRequest;
+
 export const modelCatalogRoute = { path: "/api/models", method: "GET" } as const;
 export const createModelEndpointRoute = { path: "/api/models", method: "POST" } as const;
 export const updateModelEndpointRoute = { path: "/api/models/:endpointId", method: "PUT" } as const;
 export const refreshModelEndpointRoute = { path: "/api/models/:endpointId/refresh", method: "POST" } as const;
+export const createModelDefinitionRoute = { path: "/api/models/:endpointId/models", method: "POST" } as const;
 export const updateModelDefinitionRoute = { path: "/api/models/:endpointId/models/:modelId", method: "PUT" } as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {

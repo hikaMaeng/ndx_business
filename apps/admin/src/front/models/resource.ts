@@ -42,6 +42,10 @@ export enum RSC {
   MODELS_MODEL_IMAGE_LABEL = "models.model.image.label",
   MODELS_MODEL_SOUND_LABEL = "models.model.sound.label",
   MODELS_MODEL_VIDEO_LABEL = "models.model.video.label",
+  MODELS_MODEL_ADD_BUTTON = "models.model.add.button",
+  MODELS_MODEL_ADD_TEXT = "models.model.add.text",
+  MODELS_MODEL_EDIT_TEXT = "models.model.edit.text",
   MODELS_MODEL_SAVE_BUTTON = "models.model.save.button",
-  MODELS_MODEL_SAVED_STATUS = "models.model.saved.status",
+  MODELS_MODEL_CREATED_STATUS = "models.model.created.status",
+  MODELS_MODEL_UPDATED_STATUS = "models.model.updated.status",
 }

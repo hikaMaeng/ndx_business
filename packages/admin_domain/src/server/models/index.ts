@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import {
   MODEL_ENDPOINT_TYPES,
+  type CreateModelDefinitionRequest,
   type CreateModelEndpointRequest,
   type ModelCatalogSnapshot,
   type ModelDefinition,
@@ -225,6 +226,28 @@ export async function refreshModelEndpoint(
     database.exec("COMMIT");
   } catch (error) {
     database.exec("ROLLBACK");
+    throw error;
+  }
+  return listModelCatalog(database);
+}
+
+export function createModelDefinition(
+  database: DatabaseSync,
+  endpointId: string,
+  input: CreateModelDefinitionRequest,
+): ModelCatalogSnapshot {
+  assertModelInput(input);
+  getEndpoint(database, endpointId);
+  const now = new Date().toISOString();
+  try {
+    database
+      .prepare(
+        "INSERT INTO model_definitions (id, endpoint_id, identifier, context_size, temperature, min_p, top_p, top_k, repeat_penalty, reasoning, supports_text, supports_image, supports_sound, supports_video, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(randomUUID(), endpointId, input.identifier.trim(), input.contextSize, input.temperature, input.minP, input.topP, input.topK, input.repeatPenalty, Number(input.reasoning), Number(input.supportsText), Number(input.supportsImage), Number(input.supportsSound), Number(input.supportsVideo), now, now);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("UNIQUE constraint failed"))
+      throw new Error("A model with this identifier already exists for the endpoint");
     throw error;
   }
   return listModelCatalog(database);

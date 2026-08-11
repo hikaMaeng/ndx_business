@@ -152,6 +152,10 @@
   "models.model.image.label": "Image",
   "models.model.sound.label": "Sound",
   "models.model.video.label": "Video",
+  "models.model.add.button": "Add model",
+  "models.model.add.text": "Add model",
+  "models.model.edit.text": "Edit model",
   "models.model.save.button": "Save model",
-  "models.model.saved.status": "Model saved."
+  "models.model.created.status": "Model added.",
+  "models.model.updated.status": "Model saved."
 }

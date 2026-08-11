@@ -54,10 +54,10 @@ exclusive `admin` / `admin all` toggles, and member removal. It also confirms
 node creation is absent from the node modal.
 
 Model verification creates an endpoint through the accessible dialog, opens its
-card, and checks the endpoint editor plus the empty-model refresh action. The
-HTTP integration test mocks a provider response, proves the derived `/models`
-request and configured header, filters `embedding`, and persists every model
-option.
+card, adds a manual model, opens a listed model for editing, and checks the
+endpoint editor plus the empty-model refresh action. The HTTP integration test
+mocks a provider response, proves the derived `/models` request and configured
+header, filters `embedding`, and persists every model option.
 
 The delegated-account scenario must also assert that Account and System are
 absent from the sidebar; node-only admins have no root/sibling/child/delete or
