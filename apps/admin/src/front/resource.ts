@@ -84,4 +84,13 @@ export enum RSC {
   ,ADMIN_ORGANIZATIONS_TITLE = "admin.organizations.title"
   ,ADMIN_ORGANIZATIONS_MESSAGE = "admin.organizations.message"
   ,ADMIN_ORGANIZATIONS_REFRESH_BUTTON = "admin.organizations.refresh.button"
+  ,ORGANIZATION_NODE_DETAIL_TEXT = "organization.node.detail.text"
+  ,ORGANIZATION_NODE_CREATE_CHILD_BUTTON = "organization.node.create.child.button"
+  ,ORGANIZATION_NODE_MEMBER_LABEL = "organization.node.member.label"
+  ,ORGANIZATION_NODE_RESPONSIBLE_LABEL = "organization.node.responsible.label"
+  ,ORGANIZATION_NODE_SCOPE_LABEL = "organization.node.scope.label"
+  ,ORGANIZATION_NODE_ASSIGN_MEMBER_BUTTON = "organization.node.assign.member.button"
+  ,ORGANIZATION_NODE_ASSIGN_RESPONSIBLE_BUTTON = "organization.node.assign.responsible.button"
+  ,ORGANIZATION_NODE_CLOSE_BUTTON = "organization.node.close.button"
+  ,ORGANIZATION_NODE_EMPTY_MESSAGE = "organization.node.empty.message"
 }

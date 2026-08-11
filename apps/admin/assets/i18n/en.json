@@ -75,5 +75,14 @@
   "admin.nav.organizations": "Organizations",
   "admin.organizations.title": "Organizations",
   "admin.organizations.message": "Create multiple roots, nested nodes, members, and node or subtree responsibilities.",
-  "admin.organizations.refresh.button": "Refresh organizations"
+  "admin.organizations.refresh.button": "Refresh organizations",
+  "organization.node.detail.text": "Node details",
+  "organization.node.create.child.button": "Create child node",
+  "organization.node.member.label": "Assign member",
+  "organization.node.responsible.label": "Responsible account",
+  "organization.node.scope.label": "Permission scope",
+  "organization.node.assign.member.button": "Assign member",
+  "organization.node.assign.responsible.button": "Assign responsible",
+  "organization.node.close.button": "Close",
+  "organization.node.empty.message": "No members or responsibilities assigned."
 }

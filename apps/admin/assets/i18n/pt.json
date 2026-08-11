@@ -75,5 +75,14 @@
   "admin.nav.organizations": "Organizações",
   "admin.organizations.title": "Organizações",
   "admin.organizations.message": "Crie várias raízes, nós hierárquicos e atribua membros e responsáveis.",
-  "admin.organizations.refresh.button": "Atualizar organizações"
+  "admin.organizations.refresh.button": "Atualizar organizações",
+  "organization.node.detail.text": "Detalhes do nó",
+  "organization.node.create.child.button": "Criar nó filho",
+  "organization.node.member.label": "Atribuir membro",
+  "organization.node.responsible.label": "Conta responsável",
+  "organization.node.scope.label": "Escopo da permissão",
+  "organization.node.assign.member.button": "Atribuir membro",
+  "organization.node.assign.responsible.button": "Atribuir responsável",
+  "organization.node.close.button": "Fechar",
+  "organization.node.empty.message": "Nenhum membro ou responsável atribuído."
 }

@@ -75,5 +75,14 @@
   "admin.nav.organizations": "Organisations",
   "admin.organizations.title": "Organisations",
   "admin.organizations.message": "Créez plusieurs racines, des nœuds hiérarchiques et assignez membres et responsables.",
-  "admin.organizations.refresh.button": "Actualiser les organisations"
+  "admin.organizations.refresh.button": "Actualiser les organisations",
+  "organization.node.detail.text": "Détails du nœud",
+  "organization.node.create.child.button": "Créer un nœud enfant",
+  "organization.node.member.label": "Assigner un membre",
+  "organization.node.responsible.label": "Compte responsable",
+  "organization.node.scope.label": "Portée de l’autorisation",
+  "organization.node.assign.member.button": "Assigner le membre",
+  "organization.node.assign.responsible.button": "Assigner le responsable",
+  "organization.node.close.button": "Fermer",
+  "organization.node.empty.message": "Aucun membre ni responsable assigné."
 }

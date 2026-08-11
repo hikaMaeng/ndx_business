@@ -75,5 +75,14 @@
   "admin.nav.organizations": "组织",
   "admin.organizations.title": "组织",
   "admin.organizations.message": "创建多个根节点和层级节点，并分配成员及节点或子树负责人。",
-  "admin.organizations.refresh.button": "刷新组织"
+  "admin.organizations.refresh.button": "刷新组织",
+  "organization.node.detail.text": "节点详情",
+  "organization.node.create.child.button": "创建子节点",
+  "organization.node.member.label": "分配成员",
+  "organization.node.responsible.label": "负责人账户",
+  "organization.node.scope.label": "权限范围",
+  "organization.node.assign.member.button": "分配成员",
+  "organization.node.assign.responsible.button": "指定负责人",
+  "organization.node.close.button": "关闭",
+  "organization.node.empty.message": "尚未分配成员或负责人。"
 }

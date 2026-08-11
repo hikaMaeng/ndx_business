@@ -75,5 +75,14 @@
   "admin.nav.organizations": "संगठन",
   "admin.organizations.title": "संगठन",
   "admin.organizations.message": "कई रूट, पदानुक्रमित नोड, सदस्य और नोड या सबट्री जिम्मेदार बनाएं।",
-  "admin.organizations.refresh.button": "संगठन रीफ्रेश करें"
+  "admin.organizations.refresh.button": "संगठन रीफ्रेश करें",
+  "organization.node.detail.text": "नोड विवरण",
+  "organization.node.create.child.button": "चाइल्ड नोड बनाएं",
+  "organization.node.member.label": "सदस्य असाइन करें",
+  "organization.node.responsible.label": "जिम्मेदार खाता",
+  "organization.node.scope.label": "अनुमति दायरा",
+  "organization.node.assign.member.button": "सदस्य असाइन करें",
+  "organization.node.assign.responsible.button": "जिम्मेदार असाइन करें",
+  "organization.node.close.button": "बंद करें",
+  "organization.node.empty.message": "कोई सदस्य या जिम्मेदार असाइन नहीं है।"
 }

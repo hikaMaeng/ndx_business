@@ -60,11 +60,22 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { border-color
 .organization-panel { max-width: 1080px; margin: 0 auto; }
 .organization-panel .page-heading { align-items: flex-start; }
 .organization-tree { display: grid; gap: 10px; margin-top: 28px; padding: 22px; border: 1px solid #2b2c30; border-radius: 12px; background: #1b1c1f; }
-.organization-node { padding: 13px 15px; border: 1px solid #2c4b58; border-radius: 9px; background: linear-gradient(100deg, #102b39, #1d2024); }
+.organization-node { width: 100%; padding: 13px 15px; border: 1px solid #2c4b58; border-radius: 9px; background: linear-gradient(100deg, #102b39, #1d2024); color: #f2ffff; text-align: start; cursor: pointer; }
+.organization-node:hover, .organization-node:focus-visible { border-color: #62d4c8; background: linear-gradient(100deg, #153c4d, #23282d); outline: 0; box-shadow: 0 0 0 2px rgba(98, 212, 200, .25); }
+.organization-branch { display: grid; gap: 8px; }
+.organization-children { display: grid; gap: 8px; margin-inline-start: 28px; padding-inline-start: 18px; border-inline-start: 1px solid #31525d; }
 .organization-node-heading { display: flex; align-items: center; gap: 9px; color: #f2ffff; }
 .organization-node-heading svg { color: #62d4c8; }
 .organization-node-heading span { margin-inline-start: auto; color: #9db5c3; font-size: .78rem; }
 .organization-meta { margin: 7px 0 0 25px; color: #9db5c3; font-size: .78rem; overflow-wrap: anywhere; }
+.organization-modal-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 24px; background: rgba(0, 0, 0, .72); }
+.organization-modal { width: min(100%, 560px); max-height: min(90vh, 760px); overflow: auto; padding: 24px; border: 1px solid #31525d; border-radius: 14px; background: #202124; color: #f5f5f5; box-shadow: 0 24px 80px rgba(0, 0, 0, .5); }
+.organization-modal-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.organization-modal h2 { margin: 4px 0 0; color: #f2ffff; }
+.organization-modal form { margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, .08); }
+.organization-modal label { color: #b8d0d8; }
+.organization-modal input, .organization-modal select { border-color: #31525d; background: #091722; color: #f2ffff; }
+.organization-actions { display: none; }
 .organization-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
 .organization-actions > * { min-width: 0; }
 @media (max-width: 900px) { .organization-actions { grid-template-columns: 1fr; } }

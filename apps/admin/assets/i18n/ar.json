@@ -75,5 +75,14 @@
   "admin.nav.organizations": "المنظمات",
   "admin.organizations.title": "المنظمات",
   "admin.organizations.message": "أنشئ جذوراً متعددة وعقداً هرمية وعيّن أعضاء ومسؤولين للعقد أو الشجرة الفرعية.",
-  "admin.organizations.refresh.button": "تحديث المنظمات"
+  "admin.organizations.refresh.button": "تحديث المنظمات",
+  "organization.node.detail.text": "تفاصيل العقدة",
+  "organization.node.create.child.button": "إنشاء عقدة فرعية",
+  "organization.node.member.label": "تعيين عضو",
+  "organization.node.responsible.label": "حساب المسؤول",
+  "organization.node.scope.label": "نطاق الصلاحية",
+  "organization.node.assign.member.button": "تعيين عضو",
+  "organization.node.assign.responsible.button": "تعيين مسؤول",
+  "organization.node.close.button": "إغلاق",
+  "organization.node.empty.message": "لا يوجد أعضاء أو مسؤولون معينون."
 }

@@ -75,5 +75,14 @@
   "admin.nav.organizations": "Organizaciones",
   "admin.organizations.title": "Organizaciones",
   "admin.organizations.message": "Crea varias raíces, nodos jerárquicos, miembros y responsables de nodo o subárbol.",
-  "admin.organizations.refresh.button": "Actualizar organizaciones"
+  "admin.organizations.refresh.button": "Actualizar organizaciones",
+  "organization.node.detail.text": "Detalles del nodo",
+  "organization.node.create.child.button": "Crear nodo hijo",
+  "organization.node.member.label": "Asignar miembro",
+  "organization.node.responsible.label": "Cuenta responsable",
+  "organization.node.scope.label": "Alcance del permiso",
+  "organization.node.assign.member.button": "Asignar miembro",
+  "organization.node.assign.responsible.button": "Asignar responsable",
+  "organization.node.close.button": "Cerrar",
+  "organization.node.empty.message": "No hay miembros ni responsables asignados."
 }
