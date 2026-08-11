@@ -19,7 +19,34 @@ export function signup(database: DatabaseSync, email: string, password: string, 
 
 export function login(database: DatabaseSync, email: string, password: string, metadata: Record<string, unknown> = {}): LoginResponse { const row = database.prepare("SELECT id, email, password_hash, status FROM users WHERE email = ?").get(normalizeEmail(email)) as UserRow | undefined; if (!row || !verifyPassword(password, row.password_hash) || row.status !== "active") throw new Error("Invalid credentials or account is not active"); const settings = readSettings(database); const now = new Date(); const existing = database.prepare("SELECT s.*, u.email, u.status FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.user_id = ? AND s.revoked_at IS NULL AND s.expires_at > ? ORDER BY s.last_used_at DESC LIMIT 1").get(row.id, now.toISOString()) as SessionRow | undefined; const token = existing?.token_value ?? randomBytes(32).toString("base64url"); const sessionId = existing?.id ?? randomUUID(); const expiresAt = new Date(now.getTime() + settings.sessionIdleTimeoutSeconds * 1000).toISOString(); if (existing) { database.prepare("UPDATE sessions SET last_used_at = ?, expires_at = ?, token_value = ?, token_hash = ?, metadata_json = ? WHERE id = ?").run(now.toISOString(), expiresAt, token, tokenHash(token), JSON.stringify(metadata), sessionId); database.prepare("UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND id <> ? AND revoked_at IS NULL").run(now.toISOString(), row.id, sessionId); } else { database.prepare("INSERT INTO sessions (id, user_id, token_hash, token_value, created_at, last_used_at, expires_at, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(sessionId, row.id, tokenHash(token), token, now.toISOString(), now.toISOString(), expiresAt, JSON.stringify(metadata)); } cleanExpired(database, settings); return { sessionToken: token, expiresAt, user: toUserSummary(row) }; }
 
-export function authenticate(database: DatabaseSync, token: string, deviceKey = "unknown-client", label = "Unknown client", request?: { method: string; path: string }): UserSummary { const row = database.prepare("SELECT s.*, u.email, u.status FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?").get(tokenHash(token)) as SessionRow | undefined; const now = new Date(); if (!row || row.revoked_at || row.status !== "active" || new Date(row.expires_at) <= now) { if (row) database.prepare("UPDATE sessions SET revoked_at = ? WHERE id = ?").run(now.toISOString(), row.id); throw new Error("Session expired or invalid"); } const expiresAt = new Date(now.getTime() + readSettings(database).sessionIdleTimeoutSeconds * 1000).toISOString(); database.prepare("UPDATE sessions SET last_used_at = ?, expires_at = ? WHERE id = ? AND revoked_at IS NULL").run(now.toISOString(), expiresAt, row.id); let device = database.prepare("SELECT id FROM session_devices WHERE session_id = ? AND device_key = ?").get(row.id, deviceKey) as { id: string } | undefined; if (!device) { device = { id: randomUUID() }; database.prepare("INSERT INTO session_devices (id, session_id, device_key, label, first_seen_at, last_request_at, request_count) VALUES (?, ?, ?, ?, ?, ?, 1)").run(device.id, row.id, deviceKey, label, now.toISOString(), now.toISOString()); } else { database.prepare("UPDATE session_devices SET last_request_at = ?, request_count = request_count + 1, label = ?, revoked_at = NULL WHERE id = ?").run(now.toISOString(), label, device.id); } if (request) database.prepare("INSERT INTO session_request_logs (id, session_id, device_id, requested_at, method, path) VALUES (?, ?, ?, ?, ?, ?)").run(randomUUID(), row.id, device.id, now.toISOString(), request.method, request.path); return { id: row.user_id, email: row.email, status: row.status, isMasterAdmin: masterEmails().has(row.email.toLowerCase()) }; }
+export function authenticate(database: DatabaseSync, token: string, deviceKey = "unknown-client", label = "Unknown client", request?: { method: string; path: string }): UserSummary {
+  const row = database.prepare("SELECT s.*, u.email, u.status FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?").get(tokenHash(token)) as SessionRow | undefined;
+  const now = new Date();
+  if (!row || row.revoked_at || row.status !== "active" || new Date(row.expires_at) <= now) {
+    if (row) database.prepare("UPDATE sessions SET revoked_at = ? WHERE id = ?").run(now.toISOString(), row.id);
+    throw new Error("Session expired or invalid");
+  }
+
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    const expiresAt = new Date(now.getTime() + readSettings(database).sessionIdleTimeoutSeconds * 1000).toISOString();
+    database.prepare("UPDATE sessions SET last_used_at = ?, expires_at = ? WHERE id = ? AND revoked_at IS NULL").run(now.toISOString(), expiresAt, row.id);
+    let device = database.prepare("SELECT id FROM session_devices WHERE session_id = ? AND device_key = ?").get(row.id, deviceKey) as { id: string } | undefined;
+    if (!device) {
+      device = { id: randomUUID() };
+      database.prepare("INSERT INTO session_devices (id, session_id, device_key, label, first_seen_at, last_request_at, request_count) VALUES (?, ?, ?, ?, ?, ?, 1)").run(device.id, row.id, deviceKey, label, now.toISOString(), now.toISOString());
+    } else {
+      database.prepare("UPDATE session_devices SET last_request_at = ?, request_count = request_count + 1, label = ?, revoked_at = NULL WHERE id = ?").run(now.toISOString(), label, device.id);
+    }
+    if (request) database.prepare("INSERT INTO session_request_logs (id, session_id, device_id, requested_at, method, path) VALUES (?, ?, ?, ?, ?, ?)").run(randomUUID(), row.id, device.id, now.toISOString(), request.method, request.path);
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+
+  return { id: row.user_id, email: row.email, status: row.status, isMasterAdmin: masterEmails().has(row.email.toLowerCase()) };
+}
 
 export function revokeSession(database: DatabaseSync, token: string): void { database.prepare("UPDATE sessions SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL").run(new Date().toISOString(), tokenHash(token)); }
 export function revokeSessionById(database: DatabaseSync, id: string): void { database.prepare("UPDATE sessions SET revoked_at = ? WHERE id = ?").run(new Date().toISOString(), id); }

@@ -1,0 +1,6 @@
+.git
+.codex
+.turbo
+node_modules
+test
+*.log

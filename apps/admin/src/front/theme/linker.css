@@ -26,6 +26,18 @@
   --error-focus: rgba(208, 208, 208, 0.22);
   --overlay: rgba(0, 0, 0, 0.76);
   --shadow-modal: rgba(0, 0, 0, 0.58);
+  --node-slate: #a3a3a3;
+  --node-slate-soft: rgba(163, 163, 163, 0.15);
+  --node-blue: #60a5fa;
+  --node-blue-soft: rgba(96, 165, 250, 0.15);
+  --node-cyan: #22d3ee;
+  --node-cyan-soft: rgba(34, 211, 238, 0.14);
+  --node-green: #4ade80;
+  --node-green-soft: rgba(74, 222, 128, 0.14);
+  --node-amber: #fbbf24;
+  --node-amber-soft: rgba(251, 191, 36, 0.14);
+  --node-rose: #fb7185;
+  --node-rose-soft: rgba(251, 113, 133, 0.14);
   color: var(--text-primary);
   background: var(--app-bg);
   color-scheme: dark;

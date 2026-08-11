@@ -1,42 +1,35 @@
 import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { authenticate, createOrganization, deleteOrganization, getSettings, listOrganizations, listPendingUsers, listUsers, login, revokeSession, revokeSessionById, saveSettings, setUserStatus, signup, readSettings, assignMember, assignResponsible } from "admin_domain/server";
-import { openAuthDatabase } from "admin_domain/server";
+import {
+  assignMember,
+  assignResponsible,
+  createOrganization,
+  createModelEndpoint,
+  deleteOrganization,
+  getSettings,
+  listOrganizationAccounts,
+  listOrganizations,
+  listModelCatalog,
+  listPendingUsers,
+  listUsers,
+  login,
+  openAuthDatabase,
+  readSettings,
+  removeMember,
+  removeResponsible,
+  revokeSession,
+  revokeSessionById,
+  saveSettings,
+  setUserStatus,
+  signup,
+  refreshModelEndpoint,
+  updateModelDefinition,
+  updateModelEndpoint,
+  updateOrganization,
+} from "admin_domain/server";
 import type { DatabaseSync } from "node:sqlite";
-
-type AuthenticatedRequest = express.Request & { user?: { id: string; email: string; status: "active" | "pending" | "rejected"; isMasterAdmin?: boolean }; sessionToken?: string };
-function isMaster(user: { id: string; email: string; status: "active" | "pending" | "rejected"; isMasterAdmin?: boolean } | undefined): boolean { return Boolean(user?.isMasterAdmin || (process.env.MASTER_ADMIN_EMAILS ?? "").split(",").map((email) => email.trim().toLowerCase()).includes(user?.email.toLowerCase() ?? "")); }
-
-function readCookie(request: express.Request, name: string): string | undefined {
-  const header = request.header("cookie") ?? "";
-  return header.split(";").map((part) => part.trim()).map((part) => part.split("=")).find(([key]) => key === name)?.slice(1).join("=");
-}
-
-function readSessionToken(request: express.Request, settings: ReturnType<typeof readSettings>): string {
-  const bearer = request.header("authorization");
-  const bearerToken = bearer?.startsWith("Bearer ") ? bearer.slice(7).trim() : undefined;
-  const headerToken = request.header(settings.sessionHeaderName) ?? undefined;
-  const cookieToken = readCookie(request, settings.sessionCookieName);
-  const tokens = [bearerToken, headerToken, cookieToken].filter((value): value is string => Boolean(value));
-  if (new Set(tokens).size > 1) throw new Error("Conflicting session credentials");
-  if (!tokens[0]) throw new Error("Authentication required");
-  return tokens[0];
-}
-
-function protectedRoute(database: DatabaseSync) {
-  return (request: AuthenticatedRequest, response: express.Response, next: express.NextFunction) => {
-    try {
-      const settings = readSettings(database);
-      const token = readSessionToken(request, settings);
-      request.sessionToken = token;
-      request.user = authenticate(database, token, request.header("x-session-device") ?? "unknown-client", request.header("user-agent") ?? "Unknown client", { method: request.method, path: request.path });
-      next();
-    } catch (error) {
-      response.status(401).json({ error: error instanceof Error ? error.message : "Authentication required" });
-    }
-  };
-}
+import { apiPermissionMiddleware, type AuthenticatedRequest } from "./permission/index.js";
 
 function body(request: express.Request): Record<string, unknown> {
   return request.body && typeof request.body === "object" ? request.body as Record<string, unknown> : {};
@@ -54,10 +47,10 @@ export function createApp(database: DatabaseSync = openAuthDatabase(process.env.
     });
   };
 
+  app.use(express.json({ limit: "64kb" }));
+  app.use(apiPermissionMiddleware(database));
   app.get("/health", health);
   app.get("/api/health", health);
-
-  app.use(express.json({ limit: "64kb" }));
   app.post("/api/auth/signup", (request, response) => {
     try {
       const input = body(request);
@@ -78,33 +71,65 @@ export function createApp(database: DatabaseSync = openAuthDatabase(process.env.
     }
   });
 
-  const requireSession = protectedRoute(database);
-  app.post("/api/auth/logout", requireSession, (request: AuthenticatedRequest, response) => {
+  app.post("/api/auth/logout", (request: AuthenticatedRequest, response) => {
     revokeSession(database, request.sessionToken!);
     response.json({ ok: true });
   });
-  app.get("/api/organizations", requireSession, (_request, response) => response.json(listOrganizations(database)));
-  app.post("/api/organizations", requireSession, (request: AuthenticatedRequest, response) => { try { response.status(201).json(createOrganization(database, request.user!.id, isMaster(request.user), body(request) as never)); } catch (error) { response.status(403).json({ error: error instanceof Error ? error.message : "Organization update failed" }); } });
-  app.post("/api/organizations/:id/members", requireSession, (request: AuthenticatedRequest, response) => { try { response.json(assignMember(database, request.user!.id, isMaster(request.user), String(request.params.id), body(request) as never)); } catch (error) { response.status(403).json({ error: error instanceof Error ? error.message : "Member assignment failed" }); } });
-  app.post("/api/organizations/:id/responsibilities", requireSession, (request: AuthenticatedRequest, response) => { try { response.json(assignResponsible(database, request.user!.id, isMaster(request.user), String(request.params.id), body(request) as never)); } catch (error) { response.status(403).json({ error: error instanceof Error ? error.message : "Responsibility assignment failed" }); } });
-  app.delete("/api/organizations/:id", requireSession, (request: AuthenticatedRequest, response) => { try { response.json(deleteOrganization(database, request.user!.id, isMaster(request.user), String(request.params.id))); } catch (error) { response.status(403).json({ error: error instanceof Error ? error.message : "Organization deletion failed" }); } });
-  app.get("/api/auth/me", requireSession, (request: AuthenticatedRequest, response) => response.json(request.user));
-  app.get("/api/admin/settings", requireSession, (_request, response) => response.json(getSettings(database)));
-  app.put("/api/admin/settings", requireSession, (request, response) => {
+  app.get("/api/organizations", (request: AuthenticatedRequest, response) => response.json(listOrganizations(database, request.user!.id, Boolean(request.user!.isMasterAdmin))));
+  app.get("/api/organizations/users", (request: AuthenticatedRequest, response) => { try { response.json(listOrganizationAccounts(database, request.user!.id, Boolean(request.user!.isMasterAdmin))); } catch (error) { response.status(403).json({ error: error instanceof Error ? error.message : "Organization account access failed" }); } });
+  app.post("/api/organizations", (request: AuthenticatedRequest, response) => { try { response.status(201).json(createOrganization(database, request.user!.id, Boolean(request.user!.isMasterAdmin), body(request) as never)); } catch (error) { response.status(403).json({ error: error instanceof Error ? error.message : "Organization update failed" }); } });
+  app.put("/api/organizations/:id", (request: AuthenticatedRequest, response) => { try { response.json(updateOrganization(database, request.user!.id, Boolean(request.user!.isMasterAdmin), String(request.params.id), body(request) as never)); } catch (error) { response.status(403).json({ error: error instanceof Error ? error.message : "Organization update failed" }); } });
+  app.post("/api/organizations/:id/members", (request: AuthenticatedRequest, response) => { try { response.json(assignMember(database, request.user!.id, Boolean(request.user!.isMasterAdmin), String(request.params.id), body(request) as never)); } catch (error) { response.status(403).json({ error: error instanceof Error ? error.message : "Member assignment failed" }); } });
+  app.delete("/api/organizations/:id/members/:userId", (request: AuthenticatedRequest, response) => { try { response.json(removeMember(database, request.user!.id, Boolean(request.user!.isMasterAdmin), String(request.params.id), String(request.params.userId))); } catch (error) { response.status(403).json({ error: error instanceof Error ? error.message : "Member removal failed" }); } });
+  app.post("/api/organizations/:id/responsibilities", (request: AuthenticatedRequest, response) => { try { response.json(assignResponsible(database, request.user!.id, Boolean(request.user!.isMasterAdmin), String(request.params.id), body(request) as never)); } catch (error) { response.status(403).json({ error: error instanceof Error ? error.message : "Responsibility assignment failed" }); } });
+  app.delete("/api/organizations/:id/responsibilities/:userId", (request: AuthenticatedRequest, response) => { try { response.json(removeResponsible(database, request.user!.id, Boolean(request.user!.isMasterAdmin), String(request.params.id), String(request.params.userId))); } catch (error) { response.status(403).json({ error: error instanceof Error ? error.message : "Responsibility removal failed" }); } });
+  app.delete("/api/organizations/:id", (request: AuthenticatedRequest, response) => { try { response.json(deleteOrganization(database, request.user!.id, Boolean(request.user!.isMasterAdmin), String(request.params.id))); } catch (error) { response.status(403).json({ error: error instanceof Error ? error.message : "Organization deletion failed" }); } });
+  app.get("/api/auth/me", (request: AuthenticatedRequest, response) => response.json(request.user));
+  app.get("/api/models", (_request, response) => response.json(listModelCatalog(database)));
+  app.post("/api/models", (request, response) => {
+    try {
+      response.status(201).json(createModelEndpoint(database, body(request) as never));
+    } catch (error) {
+      response.status(400).json({ error: error instanceof Error ? error.message : "Model endpoint creation failed" });
+    }
+  });
+  app.put("/api/models/:endpointId", (request, response) => {
+    try {
+      response.json(updateModelEndpoint(database, String(request.params.endpointId), body(request) as never));
+    } catch (error) {
+      response.status(400).json({ error: error instanceof Error ? error.message : "Model endpoint update failed" });
+    }
+  });
+  app.post("/api/models/:endpointId/refresh", async (request, response) => {
+    try {
+      response.json(await refreshModelEndpoint(database, String(request.params.endpointId)));
+    } catch (error) {
+      response.status(400).json({ error: error instanceof Error ? error.message : "Model refresh failed" });
+    }
+  });
+  app.put("/api/models/:endpointId/models/:modelId", (request, response) => {
+    try {
+      response.json(updateModelDefinition(database, String(request.params.endpointId), String(request.params.modelId), body(request) as never));
+    } catch (error) {
+      response.status(400).json({ error: error instanceof Error ? error.message : "Model definition update failed" });
+    }
+  });
+  app.get("/api/admin/settings", (_request, response) => response.json(getSettings(database)));
+  app.put("/api/admin/settings", (request, response) => {
     try {
       response.json(saveSettings(database, body(request)));
     } catch (error) {
       response.status(400).json({ error: error instanceof Error ? error.message : "Settings update failed" });
     }
   });
-  app.delete("/api/admin/sessions/:id", requireSession, (request, response) => {
+  app.delete("/api/admin/sessions/:id", (request, response) => {
     revokeSessionById(database, String(request.params.id));
     response.json({ ok: true });
   });
-  app.get("/api/admin/pending-users", requireSession, (_request, response) => response.json({ users: listPendingUsers(database) }));
-  app.get("/api/admin/users", requireSession, (_request, response) => response.json({ users: listUsers(database) }));
-  app.post("/api/admin/users/:id/approve", requireSession, (request, response) => { setUserStatus(database, String(request.params.id), "active"); response.json({ ok: true }); });
-  app.post("/api/admin/users/:id/reject", requireSession, (request, response) => { setUserStatus(database, String(request.params.id), "rejected"); response.json({ ok: true }); });
+  app.get("/api/admin/pending-users", (_request, response) => response.json({ users: listPendingUsers(database) }));
+  app.get("/api/admin/users", (_request, response) => response.json({ users: listUsers(database) }));
+  app.post("/api/admin/users/:id/approve", (request, response) => { setUserStatus(database, String(request.params.id), "active"); response.json({ ok: true }); });
+  app.post("/api/admin/users/:id/reject", (request, response) => { setUserStatus(database, String(request.params.id), "rejected"); response.json({ ok: true }); });
 
   app.use(express.static(frontDir));
   app.get("/{*path}", (_request, response) => {

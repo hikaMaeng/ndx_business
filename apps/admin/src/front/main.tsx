@@ -3,21 +3,23 @@ import ReactDOM from "react-dom/client";
 import adminPackage from "../../package.json";
 import {
   Building2,
-  ChevronDown,
+  Boxes,
   Globe2,
   KeyRound,
   LayoutDashboard,
   LogOut,
   Server,
   ShieldCheck,
-  Plus,
   Trash2,
   Users,
 } from "lucide-react";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
+import { parseUserSummary, type UserSummary } from "admin_domain/common";
 import { direction, resolveLanguage, texts } from "./i18n";
 import { RSC } from "./resource";
+import { OrganizationScreen } from "./organization";
+import { ModelsScreen } from "./models";
 import "./styles.css";
 
 const language = resolveLanguage();
@@ -58,35 +60,6 @@ type PendingUser = {
   createdAt: string;
   metadata: Record<string, unknown>;
 };
-type Organization = {
-  id: string;
-  name: string;
-  parentId: string | null;
-  createdAt: string;
-};
-type OrganizationMember = {
-  organizationId: string;
-  userId: string;
-  email: string;
-};
-type OrganizationResponsibility = {
-  organizationId: string;
-  userId: string;
-  scope: "node" | "subtree";
-  email: string;
-};
-type OrganizationSnapshot = {
-  organizations: Organization[];
-  members: OrganizationMember[];
-  responsibilities: OrganizationResponsibility[];
-};
-type Account = {
-  id: string;
-  email: string;
-  status: "active" | "pending" | "rejected";
-  isMasterAdmin?: boolean;
-};
-
 async function api(path: string, options: RequestInit = {}, token?: string) {
   const deviceKey =
     localStorage.getItem("admin.device") ??
@@ -232,510 +205,40 @@ function LanguageSwitcher() {
   );
 }
 
-function OrganizationScreen({ token }: { token: string }) {
-  const [snapshot, setSnapshot] = useState<OrganizationSnapshot | null>(null);
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [selectedNode, setSelectedNode] = useState<Organization | null>(null);
-  const [createParentId, setCreateParentId] = useState<string | null>(null);
-  const [createMode, setCreateMode] = useState<"root" | "sibling" | "child">(
-    "root",
-  );
-  const [name, setName] = useState("");
-  const [parentId, setParentId] = useState("");
-  const [memberOrganizationId, setMemberOrganizationId] = useState("");
-  const [memberId, setMemberId] = useState("");
-  const [ownerOrganizationId, setOwnerOrganizationId] = useState("");
-  const [ownerId, setOwnerId] = useState("");
-  const [ownerScope, setOwnerScope] = useState<"node" | "subtree">("node");
-  const [error, setError] = useState("");
-  async function loadOrganizations() {
-    try {
-      const [organizationResult, accountResult] = await Promise.all([
-        api("/api/organizations", {}, token),
-        api("/api/admin/users", {}, token),
-      ]);
-      setSnapshot(organizationResult);
-      setAccounts(accountResult.users);
-      setMemberOrganizationId(
-        (current) => current || organizationResult.organizations[0]?.id || "",
-      );
-      setOwnerOrganizationId(
-        (current) => current || organizationResult.organizations[0]?.id || "",
-      );
-      setMemberId((current) => current || accountResult.users[0]?.id || "");
-      setOwnerId((current) => current || accountResult.users[0]?.id || "");
-    } catch (reason) {
-      setError(
-        reason instanceof Error ? reason.message : t[RSC.AUTH_ERROR_ALERT],
-      );
-    }
-  }
-  async function createOrganization(event: React.FormEvent) {
-    event.preventDefault();
-    if (!name.trim()) return;
-    try {
-      await api(
-        "/api/organizations",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            name,
-            parentId: createMode === "root" ? null : createParentId,
-          }),
-        },
-        token,
-      );
-      setName("");
-      await loadOrganizations();
-    } catch (reason) {
-      setError(
-        reason instanceof Error ? reason.message : t[RSC.AUTH_ERROR_ALERT],
-      );
-    }
-  }
-  function openCreate(mode: "root" | "sibling" | "child", node?: Organization) {
-    setCreateMode(mode);
-    setCreateParentId(
-      mode === "root"
-        ? null
-        : mode === "child"
-          ? (node?.id ?? null)
-          : (node?.parentId ?? null),
-    );
-    setSelectedNode({
-      id: mode === "root" ? "" : (node?.id ?? ""),
-      name:
-        mode === "root" ? t[RSC.ADMIN_ORGANIZATIONS_TITLE] : (node?.name ?? ""),
-      parentId: node?.parentId ?? null,
-      createdAt: "",
-    });
-    setName("");
-  }
-  async function removeOrganization(organization: Organization) {
-    if (!window.confirm(organization.name)) return;
-    try {
-      await api(
-        `/api/organizations/${organization.id}`,
-        { method: "DELETE" },
-        token,
-      );
-      await loadOrganizations();
-    } catch (reason) {
-      setError(
-        reason instanceof Error ? reason.message : t[RSC.AUTH_ERROR_ALERT],
-      );
-    }
-  }
-  async function assignMember(event: React.FormEvent) {
-    event.preventDefault();
-    try {
-      await api(
-        `/api/organizations/${memberOrganizationId}/members`,
-        { method: "POST", body: JSON.stringify({ userId: memberId }) },
-        token,
-      );
-      await loadOrganizations();
-    } catch (reason) {
-      setError(
-        reason instanceof Error ? reason.message : t[RSC.AUTH_ERROR_ALERT],
-      );
-    }
-  }
-  async function assignOwner(event: React.FormEvent) {
-    event.preventDefault();
-    try {
-      await api(
-        `/api/organizations/${ownerOrganizationId}/responsibilities`,
-        {
-          method: "POST",
-          body: JSON.stringify({ userId: ownerId, scope: ownerScope }),
-        },
-        token,
-      );
-      await loadOrganizations();
-    } catch (reason) {
-      setError(
-        reason instanceof Error ? reason.message : t[RSC.AUTH_ERROR_ALERT],
-      );
-    }
-  }
-  useEffect(() => {
-    loadOrganizations();
-  }, []);
-  function children(parentId: string | null): Organization[] {
-    return (
-      snapshot?.organizations.filter(
-        (organization) => organization.parentId === parentId,
-      ) ?? []
-    );
-  }
-  function renderNode(organization: Organization): React.ReactNode {
-    const members =
-      snapshot?.members.filter(
-        (member) => member.organizationId === organization.id,
-      ) ?? [];
-    const owners =
-      snapshot?.responsibilities.filter(
-        (responsibility) => responsibility.organizationId === organization.id,
-      ) ?? [];
-    return (
-      <div className="organization-branch" key={organization.id}>
-        <div
-          className="organization-node"
-          role="button"
-          tabIndex={0}
-          onClick={() => {
-            setSelectedNode(organization);
-            setMemberOrganizationId(organization.id);
-            setOwnerOrganizationId(organization.id);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") setSelectedNode(organization);
-          }}
-        >
-          <div className="organization-node-heading">
-            <Building2 aria-hidden="true" />
-            <strong>{organization.name}</strong>
-            <span>
-              {members.length} · {owners.length}
-            </span>
-            <span
-              className="organization-node-actions"
-              onClick={(event) => event.stopPropagation()}
-            >
-              <button
-                aria-label={t[RSC.ORGANIZATION_NODE_CREATE_CHILD_BUTTON]}
-                onClick={() => openCreate("sibling", organization)}
-              >
-                <Plus aria-hidden="true" />
-              </button>
-              <button
-                aria-label={t[RSC.ORGANIZATION_NODE_CREATE_CHILD_BUTTON]}
-                onClick={() => openCreate("child", organization)}
-              >
-                <ChevronDown aria-hidden="true" />
-              </button>
-              <button
-                aria-label={t[RSC.ORGANIZATION_NODE_CLOSE_BUTTON]}
-                onClick={() => removeOrganization(organization)}
-              >
-                <Trash2 aria-hidden="true" />
-              </button>
-            </span>
-          </div>
-        </div>
-        {members.length > 0 && (
-          <p className="organization-meta">
-            {members.map((member) => member.email).join(", ")}
-          </p>
-        )}
-        {owners.length > 0 && (
-          <p className="organization-meta">
-            {owners
-              .map((owner) => `${owner.email} (${owner.scope})`)
-              .join(", ")}
-          </p>
-        )}
-        {children(organization.id).length > 0 && (
-          <div className="organization-children">
-            {children(organization.id).map((child) => renderNode(child))}
-          </div>
-        )}
-      </div>
-    );
-  }
-  if (!snapshot)
-    return (
-      <main className="auth-layout">
-        <p role="status">{t[RSC.ADMIN_LOADING_STATUS]}</p>
-      </main>
-    );
-  return (
-    <div className="organization-panel">
-      <div className="page-heading">
-        <div>
-          <div className="eyebrow">{t[RSC.ADMIN_BADGE_TEXT]}</div>
-          <h1>{t[RSC.ADMIN_ORGANIZATIONS_TITLE]}</h1>
-          <p>{t[RSC.ADMIN_ORGANIZATIONS_MESSAGE]}</p>
-        </div>
-        <Button variant="outline" onClick={loadOrganizations}>
-          {t[RSC.ADMIN_ORGANIZATIONS_REFRESH_BUTTON]}
-        </Button>
-        <Button
-          variant="outline"
-          data-testid="organization-root-create"
-          aria-label={t[RSC.ORGANIZATION_NODE_CREATE_CHILD_BUTTON]}
-          onClick={() => openCreate("root")}
-        >
-          <Plus aria-hidden="true" />
-        </Button>
-      </div>
-      {error && (
-        <p role="alert" className="error-text">
-          {error}
-        </p>
-      )}
-      <div className="organization-actions">
-        <Card>
-          <CardHeader>
-            <CardTitle>{t[RSC.ADMIN_ORGANIZATIONS_TITLE]}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form className="form-stack" onSubmit={createOrganization}>
-              <label>
-                {t[RSC.ADMIN_ORGANIZATIONS_TITLE]}
-                <input
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                  required
-                />
-              </label>
-              <label>
-                {t[RSC.ADMIN_ORGANIZATIONS_MESSAGE]}
-                <select
-                  value={parentId}
-                  onChange={(event) => setParentId(event.target.value)}
-                >
-                  <option value="">{t[RSC.ADMIN_NAV_DASHBOARD]}</option>
-                  {snapshot.organizations.map((organization) => (
-                    <option value={organization.id} key={organization.id}>
-                      {organization.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <Button type="submit">{t[RSC.ADMIN_SAVE_BUTTON]}</Button>
-            </form>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>{t[RSC.ADMIN_ACCOUNT_TAB_APPROVAL]}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {selectedNode && (
-              <form className="form-stack" onSubmit={assignMember}>
-                <label>
-                  {t[RSC.ADMIN_ORGANIZATIONS_TITLE]}
-                  <select
-                    value={memberOrganizationId}
-                    onChange={(event) =>
-                      setMemberOrganizationId(event.target.value)
-                    }
-                  >
-                    {snapshot.organizations.map((organization) => (
-                      <option value={organization.id} key={organization.id}>
-                        {organization.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  {t[RSC.ADMIN_NAV_ACCOUNTS]}
-                  <select
-                    value={memberId}
-                    onChange={(event) => setMemberId(event.target.value)}
-                  >
-                    {accounts.map((account) => (
-                      <option value={account.id} key={account.id}>
-                        {account.email}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <Button type="submit">{t[RSC.ADMIN_APPROVE_BUTTON]}</Button>
-              </form>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>{t[RSC.ADMIN_ACCOUNT_TAB_POLICY]}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form className="form-stack" onSubmit={assignOwner}>
-              <label>
-                {t[RSC.ADMIN_ORGANIZATIONS_TITLE]}
-                <select
-                  value={ownerOrganizationId}
-                  onChange={(event) =>
-                    setOwnerOrganizationId(event.target.value)
-                  }
-                >
-                  {snapshot.organizations.map((organization) => (
-                    <option value={organization.id} key={organization.id}>
-                      {organization.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                {t[RSC.ADMIN_NAV_ACCOUNTS]}
-                <select
-                  value={ownerId}
-                  onChange={(event) => setOwnerId(event.target.value)}
-                >
-                  {accounts.map((account) => (
-                    <option value={account.id} key={account.id}>
-                      {account.email}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                {t[RSC.ADMIN_ACCOUNT_TAB_POLICY]}
-                <select
-                  value={ownerScope}
-                  onChange={(event) =>
-                    setOwnerScope(event.target.value as "node" | "subtree")
-                  }
-                >
-                  <option value="node">
-                    {t[RSC.ORGANIZATION_SCOPE_NODE_OPTION]}
-                  </option>
-                  <option value="subtree">
-                    {t[RSC.ORGANIZATION_SCOPE_SUBTREE_OPTION]}
-                  </option>
-                </select>
-              </label>
-              <Button type="submit">{t[RSC.ADMIN_APPROVE_BUTTON]}</Button>
-            </form>
-          </CardContent>
-        </Card>
-      </div>
-      <div
-        className="organization-tree"
-        aria-label={t[RSC.ADMIN_ORGANIZATIONS_TITLE]}
-      >
-        {snapshot.organizations.length === 0 ? (
-          <p>{t[RSC.ADMIN_ORGANIZATIONS_MESSAGE]}</p>
-        ) : (
-          children(null).map((root) => renderNode(root))
-        )}
-      </div>
-      {selectedNode && (
-        <div
-          className="organization-modal-backdrop"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setSelectedNode(null);
-          }}
-        >
-          <section
-            className="organization-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="organization-node-dialog-title"
-          >
-            <div className="organization-modal-heading">
-              <div>
-                <div className="eyebrow">
-                  {t[RSC.ORGANIZATION_NODE_DETAIL_TEXT]}
-                </div>
-                <h2 id="organization-node-dialog-title">{selectedNode.name}</h2>
-              </div>
-              <Button variant="outline" onClick={() => setSelectedNode(null)}>
-                {t[RSC.ORGANIZATION_NODE_CLOSE_BUTTON]}
-              </Button>
-            </div>
-            <form
-              className="form-stack"
-              onSubmit={async (event) => {
-                event.preventDefault();
-                await createOrganization(event);
-                setSelectedNode(null);
-              }}
-            >
-              <label>
-                {t[RSC.ORGANIZATION_NODE_CREATE_CHILD_BUTTON]}
-                <input
-                  value={name}
-                  onChange={(event) => {
-                    setName(event.target.value);
-                    setParentId(selectedNode.id);
-                  }}
-                  required
-                />
-              </label>
-              <Button type="submit">
-                {t[RSC.ORGANIZATION_NODE_CREATE_CHILD_BUTTON]}
-              </Button>
-            </form>
-            {selectedNode.id && (
-              <form className="form-stack" onSubmit={assignMember}>
-                <label>
-                  {t[RSC.ORGANIZATION_NODE_MEMBER_LABEL]}
-                  <select
-                    value={memberId}
-                    onChange={(event) => setMemberId(event.target.value)}
-                  >
-                    {accounts.map((account) => (
-                      <option value={account.id} key={account.id}>
-                        {account.email}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <Button type="submit">
-                  {t[RSC.ORGANIZATION_NODE_ASSIGN_MEMBER_BUTTON]}
-                </Button>
-              </form>
-            )}
-            {selectedNode.id && (
-              <form className="form-stack" onSubmit={assignOwner}>
-                <label>
-                  {t[RSC.ORGANIZATION_NODE_RESPONSIBLE_LABEL]}
-                  <select
-                    value={ownerId}
-                    onChange={(event) => setOwnerId(event.target.value)}
-                  >
-                    {accounts.map((account) => (
-                      <option value={account.id} key={account.id}>
-                        {account.email}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  {t[RSC.ORGANIZATION_NODE_SCOPE_LABEL]}
-                  <select
-                    value={ownerScope}
-                    onChange={(event) =>
-                      setOwnerScope(event.target.value as "node" | "subtree")
-                    }
-                  >
-                    <option value="node">
-                      {t[RSC.ORGANIZATION_SCOPE_NODE_OPTION]}
-                    </option>
-                    <option value="subtree">
-                      {t[RSC.ORGANIZATION_SCOPE_SUBTREE_OPTION]}
-                    </option>
-                  </select>
-                </label>
-                <Button type="submit">
-                  {t[RSC.ORGANIZATION_NODE_ASSIGN_RESPONSIBLE_BUTTON]}
-                </Button>
-              </form>
-            )}
-          </section>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function Admin({ token, onLogout }: { token: string; onLogout: () => void }) {
+  const [currentUser, setCurrentUser] = useState<UserSummary | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [pendingUsers, setPendingUsers] = useState<PendingUser[]>([]);
   const [filterText, setFilterText] = useState("");
   const [message, setMessage] = useState("");
+  const [accountDataStatus, setAccountDataStatus] = useState<
+    "idle" | "loading" | "ready"
+  >("idle");
   const [activeView, setActiveView] = useState<
-    "dashboard" | "accounts" | "system" | "organizations"
+    "dashboard" | "accounts" | "system" | "organizations" | "models"
   >("dashboard");
   const [accountTab, setAccountTab] = useState<
     "approval" | "sessions" | "policy"
   >("approval");
+  const isMasterAdmin = Boolean(currentUser?.isMasterAdmin);
+  useEffect(() => {
+    api("/api/auth/me", {}, token)
+      .then((value) => {
+        const user = parseUserSummary(value);
+        if (!user) throw new Error(t[RSC.AUTH_ERROR_ALERT]);
+        setCurrentUser(user);
+      })
+      .catch(() => onLogout());
+  }, [token]);
+  useEffect(() => {
+    if (
+      currentUser &&
+      !isMasterAdmin &&
+      (activeView === "accounts" || activeView === "system" || activeView === "models")
+    )
+      setActiveView("dashboard");
+  }, [activeView, currentUser, isMasterAdmin]);
   async function load() {
     const result = await api("/api/admin/settings", {}, token);
     setSettings(result.settings);
@@ -748,8 +251,17 @@ function Admin({ token, onLogout }: { token: string; onLogout: () => void }) {
     );
   }
   useEffect(() => {
-    load().catch(() => onLogout());
-  }, []);
+    if (
+      !isMasterAdmin ||
+      activeView !== "accounts" ||
+      accountDataStatus !== "idle"
+    )
+      return;
+    setAccountDataStatus("loading");
+    load()
+      .then(() => setAccountDataStatus("ready"))
+      .catch(() => onLogout());
+  }, [accountDataStatus, activeView]);
   async function save(event: React.FormEvent) {
     event.preventDefault();
     if (!settings) return;
@@ -782,12 +294,9 @@ function Admin({ token, onLogout }: { token: string; onLogout: () => void }) {
     await api(`/api/admin/users/${id}/${decision}`, { method: "POST" }, token);
     setPendingUsers(pendingUsers.filter((user) => user.id !== id));
   }
-  if (!settings)
-    return (
-      <main className="auth-layout">
-        <p role="status">{t[RSC.ADMIN_LOADING_STATUS]}</p>
-      </main>
-    );
+  if (!currentUser)
+    return <main className="auth-layout" aria-busy="true" />;
+
   const nav = [
     {
       id: "dashboard",
@@ -801,18 +310,29 @@ function Admin({ token, onLogout }: { token: string; onLogout: () => void }) {
       label: t[RSC.ADMIN_NAV_ORGANIZATIONS],
       count: undefined,
     },
-    {
-      id: "accounts",
-      icon: Users,
-      label: t[RSC.ADMIN_NAV_ACCOUNTS],
-      count: pendingUsers.length,
-    },
-    {
-      id: "system",
-      icon: Server,
-      label: t[RSC.ADMIN_NAV_SYSTEM],
-      count: undefined,
-    },
+    ...(isMasterAdmin
+      ? [
+          {
+            id: "models" as const,
+            icon: Boxes,
+            label: t[RSC.ADMIN_NAV_MODELS],
+            count: undefined,
+          },
+          {
+            id: "accounts" as const,
+            icon: Users,
+            label: t[RSC.ADMIN_NAV_ACCOUNTS],
+            count:
+              accountDataStatus === "ready" ? pendingUsers.length : undefined,
+          },
+          {
+            id: "system" as const,
+            icon: Server,
+            label: t[RSC.ADMIN_NAV_SYSTEM],
+            count: undefined,
+          },
+        ]
+      : []),
   ] as const;
   return (
     <div className="admin-shell">
@@ -852,7 +372,7 @@ function Admin({ token, onLogout }: { token: string; onLogout: () => void }) {
       </aside>
       <main className="admin-main">
         <div className="admin-content">
-          {activeView !== "organizations" && (
+          {activeView !== "organizations" && activeView !== "models" && (
             <div className="page-heading">
               <div>
                 <div className="eyebrow">{t[RSC.ADMIN_BADGE_TEXT]}</div>
@@ -885,7 +405,9 @@ function Admin({ token, onLogout }: { token: string; onLogout: () => void }) {
               </CardContent>
             </Card>
           ) : activeView === "organizations" ? (
-            <OrganizationScreen token={token} />
+            <OrganizationScreen token={token} request={api} />
+          ) : activeView === "models" ? (
+            <ModelsScreen token={token} request={api} />
           ) : (
             <>
               {activeView === "accounts" && (
@@ -921,132 +443,134 @@ function Admin({ token, onLogout }: { token: string; onLogout: () => void }) {
                 </div>
               )}
               <div className="admin-grid">
-                {activeView === "accounts" && accountTab === "policy" && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>{t[RSC.ADMIN_POLICY_TITLE_TEXT]}</CardTitle>
-                      <p>{t[RSC.ADMIN_POLICY_SUBTITLE_TEXT]}</p>
-                    </CardHeader>
-                    <CardContent>
-                      <form className="form-stack" onSubmit={save}>
-                        <label>
-                          {t[RSC.ADMIN_ACCEPTANCE_LABEL]}
-                          <select
-                            value={settings.signupAcceptanceMode}
-                            onChange={(event) =>
-                              setSettings({
-                                ...settings,
-                                signupAcceptanceMode: event.target
-                                  .value as Settings["signupAcceptanceMode"],
-                              })
-                            }
-                          >
-                            <option value="auto">
-                              {t[RSC.ADMIN_AUTO_OPTION]}
-                            </option>
-                            <option value="filter">
-                              {t[RSC.ADMIN_FILTER_OPTION]}
-                            </option>
-                            <option value="approval">
-                              {t[RSC.ADMIN_APPROVAL_OPTION]}
-                            </option>
-                          </select>
-                        </label>
-                        <label>
-                          {t[RSC.ADMIN_FILTER_LABEL]}
-                          <textarea
-                            rows={5}
-                            value={filterText}
-                            onChange={(event) =>
-                              setFilterText(event.target.value)
-                            }
-                            placeholder={t[RSC.ADMIN_FILTER_PLACEHOLDER]}
-                          />
-                        </label>
-                        <label>
-                          {t[RSC.ADMIN_IDLE_LABEL]}
-                          <input
-                            min={60}
-                            type="number"
-                            value={settings.sessionIdleTimeoutSeconds}
-                            onChange={(event) =>
-                              setSettings({
-                                ...settings,
-                                sessionIdleTimeoutSeconds: Number(
-                                  event.target.value,
-                                ),
-                              })
-                            }
-                          />
-                        </label>
-                        <label>
-                          {t[RSC.ADMIN_RETENTION_MODE_LABEL]}
-                          <select
-                            value={settings.expiredSessionRetentionMode}
-                            onChange={(event) =>
-                              setSettings({
-                                ...settings,
-                                expiredSessionRetentionMode: event.target
-                                  .value as Settings["expiredSessionRetentionMode"],
-                              })
-                            }
-                          >
-                            <option value="none">
-                              {t[RSC.ADMIN_RETENTION_NONE_OPTION]}
-                            </option>
-                            <option value="retain">
-                              {t[RSC.ADMIN_RETENTION_RETAIN_OPTION]}
-                            </option>
-                          </select>
-                        </label>
-                        <label>
-                          {t[RSC.ADMIN_RETENTION_SECONDS_LABEL]}
-                          <input
-                            min={0}
-                            type="number"
-                            value={settings.expiredSessionRetentionSeconds}
-                            onChange={(event) =>
-                              setSettings({
-                                ...settings,
-                                expiredSessionRetentionSeconds: Number(
-                                  event.target.value,
-                                ),
-                              })
-                            }
-                          />
-                        </label>
-                        <label>
-                          {t[RSC.ADMIN_SESSION_HEADER_LABEL]}
-                          <input
-                            value={settings.sessionHeaderName}
-                            onChange={(event) =>
-                              setSettings({
-                                ...settings,
-                                sessionHeaderName: event.target.value,
-                              })
-                            }
-                          />
-                        </label>
-                        <label>
-                          {t[RSC.ADMIN_SESSION_COOKIE_LABEL]}
-                          <input
-                            value={settings.sessionCookieName}
-                            onChange={(event) =>
-                              setSettings({
-                                ...settings,
-                                sessionCookieName: event.target.value,
-                              })
-                            }
-                          />
-                        </label>
-                        {message && <p role="status">{message}</p>}
-                        <Button type="submit">
-                          {t[RSC.ADMIN_SAVE_BUTTON]}
-                        </Button>
-                      </form>
-                    </CardContent>
-                  </Card>
-                )}
+                {activeView === "accounts" &&
+                  accountTab === "policy" &&
+                  settings && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>{t[RSC.ADMIN_POLICY_TITLE_TEXT]}</CardTitle>
+                        <p>{t[RSC.ADMIN_POLICY_SUBTITLE_TEXT]}</p>
+                      </CardHeader>
+                      <CardContent>
+                        <form className="form-stack" onSubmit={save}>
+                          <label>
+                            {t[RSC.ADMIN_ACCEPTANCE_LABEL]}
+                            <select
+                              value={settings.signupAcceptanceMode}
+                              onChange={(event) =>
+                                setSettings({
+                                  ...settings,
+                                  signupAcceptanceMode: event.target
+                                    .value as Settings["signupAcceptanceMode"],
+                                })
+                              }
+                            >
+                              <option value="auto">
+                                {t[RSC.ADMIN_AUTO_OPTION]}
+                              </option>
+                              <option value="filter">
+                                {t[RSC.ADMIN_FILTER_OPTION]}
+                              </option>
+                              <option value="approval">
+                                {t[RSC.ADMIN_APPROVAL_OPTION]}
+                              </option>
+                            </select>
+                          </label>
+                          <label>
+                            {t[RSC.ADMIN_FILTER_LABEL]}
+                            <textarea
+                              rows={5}
+                              value={filterText}
+                              onChange={(event) =>
+                                setFilterText(event.target.value)
+                              }
+                              placeholder={t[RSC.ADMIN_FILTER_PLACEHOLDER]}
+                            />
+                          </label>
+                          <label>
+                            {t[RSC.ADMIN_IDLE_LABEL]}
+                            <input
+                              min={60}
+                              type="number"
+                              value={settings.sessionIdleTimeoutSeconds}
+                              onChange={(event) =>
+                                setSettings({
+                                  ...settings,
+                                  sessionIdleTimeoutSeconds: Number(
+                                    event.target.value,
+                                  ),
+                                })
+                              }
+                            />
+                          </label>
+                          <label>
+                            {t[RSC.ADMIN_RETENTION_MODE_LABEL]}
+                            <select
+                              value={settings.expiredSessionRetentionMode}
+                              onChange={(event) =>
+                                setSettings({
+                                  ...settings,
+                                  expiredSessionRetentionMode: event.target
+                                    .value as Settings["expiredSessionRetentionMode"],
+                                })
+                              }
+                            >
+                              <option value="none">
+                                {t[RSC.ADMIN_RETENTION_NONE_OPTION]}
+                              </option>
+                              <option value="retain">
+                                {t[RSC.ADMIN_RETENTION_RETAIN_OPTION]}
+                              </option>
+                            </select>
+                          </label>
+                          <label>
+                            {t[RSC.ADMIN_RETENTION_SECONDS_LABEL]}
+                            <input
+                              min={0}
+                              type="number"
+                              value={settings.expiredSessionRetentionSeconds}
+                              onChange={(event) =>
+                                setSettings({
+                                  ...settings,
+                                  expiredSessionRetentionSeconds: Number(
+                                    event.target.value,
+                                  ),
+                                })
+                              }
+                            />
+                          </label>
+                          <label>
+                            {t[RSC.ADMIN_SESSION_HEADER_LABEL]}
+                            <input
+                              value={settings.sessionHeaderName}
+                              onChange={(event) =>
+                                setSettings({
+                                  ...settings,
+                                  sessionHeaderName: event.target.value,
+                                })
+                              }
+                            />
+                          </label>
+                          <label>
+                            {t[RSC.ADMIN_SESSION_COOKIE_LABEL]}
+                            <input
+                              value={settings.sessionCookieName}
+                              onChange={(event) =>
+                                setSettings({
+                                  ...settings,
+                                  sessionCookieName: event.target.value,
+                                })
+                              }
+                            />
+                          </label>
+                          {message && <p role="status">{message}</p>}
+                          <Button type="submit">
+                            {t[RSC.ADMIN_SAVE_BUTTON]}
+                          </Button>
+                        </form>
+                      </CardContent>
+                    </Card>
+                  )}
                 {activeView === "accounts" && accountTab === "approval" && (
                   <Card>
                     <CardHeader>
