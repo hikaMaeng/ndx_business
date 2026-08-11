@@ -1,7 +1,7 @@
 import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { authenticate, createOrganization, getSettings, listOrganizations, listPendingUsers, listUsers, login, revokeSession, revokeSessionById, saveSettings, setUserStatus, signup, readSettings, assignMember, assignResponsible } from "admin_domain/server";
+import { authenticate, createOrganization, deleteOrganization, getSettings, listOrganizations, listPendingUsers, listUsers, login, revokeSession, revokeSessionById, saveSettings, setUserStatus, signup, readSettings, assignMember, assignResponsible } from "admin_domain/server";
 import { openAuthDatabase } from "admin_domain/server";
 import type { DatabaseSync } from "node:sqlite";
 
@@ -87,6 +87,7 @@ export function createApp(database: DatabaseSync = openAuthDatabase(process.env.
   app.post("/api/organizations", requireSession, (request: AuthenticatedRequest, response) => { try { response.status(201).json(createOrganization(database, request.user!.id, isMaster(request.user), body(request) as never)); } catch (error) { response.status(403).json({ error: error instanceof Error ? error.message : "Organization update failed" }); } });
   app.post("/api/organizations/:id/members", requireSession, (request: AuthenticatedRequest, response) => { try { response.json(assignMember(database, request.user!.id, isMaster(request.user), String(request.params.id), body(request) as never)); } catch (error) { response.status(403).json({ error: error instanceof Error ? error.message : "Member assignment failed" }); } });
   app.post("/api/organizations/:id/responsibilities", requireSession, (request: AuthenticatedRequest, response) => { try { response.json(assignResponsible(database, request.user!.id, isMaster(request.user), String(request.params.id), body(request) as never)); } catch (error) { response.status(403).json({ error: error instanceof Error ? error.message : "Responsibility assignment failed" }); } });
+  app.delete("/api/organizations/:id", requireSession, (request: AuthenticatedRequest, response) => { try { response.json(deleteOrganization(database, request.user!.id, isMaster(request.user), String(request.params.id))); } catch (error) { response.status(403).json({ error: error instanceof Error ? error.message : "Organization deletion failed" }); } });
   app.get("/api/auth/me", requireSession, (request: AuthenticatedRequest, response) => response.json(request.user));
   app.get("/api/admin/settings", requireSession, (_request, response) => response.json(getSettings(database)));
   app.put("/api/admin/settings", requireSession, (request, response) => {

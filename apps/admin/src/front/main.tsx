@@ -2,12 +2,14 @@ import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import {
   Building2,
+  ChevronDown,
   Globe2,
   KeyRound,
   LayoutDashboard,
   LogOut,
   Server,
   ShieldCheck,
+  Plus,
   Trash2,
   Users,
 } from "lucide-react";
@@ -232,6 +234,10 @@ function OrganizationScreen({ token }: { token: string }) {
   const [snapshot, setSnapshot] = useState<OrganizationSnapshot | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedNode, setSelectedNode] = useState<Organization | null>(null);
+  const [createParentId, setCreateParentId] = useState<string | null>(null);
+  const [createMode, setCreateMode] = useState<"root" | "sibling" | "child">(
+    "root",
+  );
   const [name, setName] = useState("");
   const [parentId, setParentId] = useState("");
   const [memberOrganizationId, setMemberOrganizationId] = useState("");
@@ -270,11 +276,47 @@ function OrganizationScreen({ token }: { token: string }) {
         "/api/organizations",
         {
           method: "POST",
-          body: JSON.stringify({ name, parentId: parentId || null }),
+          body: JSON.stringify({
+            name,
+            parentId: createMode === "root" ? null : createParentId,
+          }),
         },
         token,
       );
       setName("");
+      await loadOrganizations();
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : t[RSC.AUTH_ERROR_ALERT],
+      );
+    }
+  }
+  function openCreate(mode: "root" | "sibling" | "child", node?: Organization) {
+    setCreateMode(mode);
+    setCreateParentId(
+      mode === "root"
+        ? null
+        : mode === "child"
+          ? (node?.id ?? null)
+          : (node?.parentId ?? null),
+    );
+    setSelectedNode({
+      id: mode === "root" ? "" : (node?.id ?? ""),
+      name:
+        mode === "root" ? t[RSC.ADMIN_ORGANIZATIONS_TITLE] : (node?.name ?? ""),
+      parentId: node?.parentId ?? null,
+      createdAt: "",
+    });
+    setName("");
+  }
+  async function removeOrganization(organization: Organization) {
+    if (!window.confirm(organization.name)) return;
+    try {
+      await api(
+        `/api/organizations/${organization.id}`,
+        { method: "DELETE" },
+        token,
+      );
       await loadOrganizations();
     } catch (reason) {
       setError(
@@ -336,12 +378,17 @@ function OrganizationScreen({ token }: { token: string }) {
       ) ?? [];
     return (
       <div className="organization-branch" key={organization.id}>
-        <button
+        <div
           className="organization-node"
+          role="button"
+          tabIndex={0}
           onClick={() => {
             setSelectedNode(organization);
             setMemberOrganizationId(organization.id);
             setOwnerOrganizationId(organization.id);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") setSelectedNode(organization);
           }}
         >
           <div className="organization-node-heading">
@@ -350,8 +397,31 @@ function OrganizationScreen({ token }: { token: string }) {
             <span>
               {members.length} · {owners.length}
             </span>
+            <span
+              className="organization-node-actions"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <button
+                aria-label={t[RSC.ORGANIZATION_NODE_CREATE_CHILD_BUTTON]}
+                onClick={() => openCreate("sibling", organization)}
+              >
+                <Plus aria-hidden="true" />
+              </button>
+              <button
+                aria-label={t[RSC.ORGANIZATION_NODE_CREATE_CHILD_BUTTON]}
+                onClick={() => openCreate("child", organization)}
+              >
+                <ChevronDown aria-hidden="true" />
+              </button>
+              <button
+                aria-label={t[RSC.ORGANIZATION_NODE_CLOSE_BUTTON]}
+                onClick={() => removeOrganization(organization)}
+              >
+                <Trash2 aria-hidden="true" />
+              </button>
+            </span>
           </div>
-        </button>
+        </div>
         {members.length > 0 && (
           <p className="organization-meta">
             {members.map((member) => member.email).join(", ")}
@@ -388,6 +458,13 @@ function OrganizationScreen({ token }: { token: string }) {
         </div>
         <Button variant="outline" onClick={loadOrganizations}>
           {t[RSC.ADMIN_ORGANIZATIONS_REFRESH_BUTTON]}
+        </Button>
+        <Button
+          variant="outline"
+          aria-label={t[RSC.ORGANIZATION_NODE_CREATE_CHILD_BUTTON]}
+          onClick={() => openCreate("root")}
+        >
+          <Plus aria-hidden="true" />
         </Button>
       </div>
       {error && (
@@ -433,37 +510,39 @@ function OrganizationScreen({ token }: { token: string }) {
             <CardTitle>{t[RSC.ADMIN_ACCOUNT_TAB_APPROVAL]}</CardTitle>
           </CardHeader>
           <CardContent>
-            <form className="form-stack" onSubmit={assignMember}>
-              <label>
-                {t[RSC.ADMIN_ORGANIZATIONS_TITLE]}
-                <select
-                  value={memberOrganizationId}
-                  onChange={(event) =>
-                    setMemberOrganizationId(event.target.value)
-                  }
-                >
-                  {snapshot.organizations.map((organization) => (
-                    <option value={organization.id} key={organization.id}>
-                      {organization.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                {t[RSC.ADMIN_NAV_ACCOUNTS]}
-                <select
-                  value={memberId}
-                  onChange={(event) => setMemberId(event.target.value)}
-                >
-                  {accounts.map((account) => (
-                    <option value={account.id} key={account.id}>
-                      {account.email}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <Button type="submit">{t[RSC.ADMIN_APPROVE_BUTTON]}</Button>
-            </form>
+            {selectedNode && (
+              <form className="form-stack" onSubmit={assignMember}>
+                <label>
+                  {t[RSC.ADMIN_ORGANIZATIONS_TITLE]}
+                  <select
+                    value={memberOrganizationId}
+                    onChange={(event) =>
+                      setMemberOrganizationId(event.target.value)
+                    }
+                  >
+                    {snapshot.organizations.map((organization) => (
+                      <option value={organization.id} key={organization.id}>
+                        {organization.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  {t[RSC.ADMIN_NAV_ACCOUNTS]}
+                  <select
+                    value={memberId}
+                    onChange={(event) => setMemberId(event.target.value)}
+                  >
+                    {accounts.map((account) => (
+                      <option value={account.id} key={account.id}>
+                        {account.email}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <Button type="submit">{t[RSC.ADMIN_APPROVE_BUTTON]}</Button>
+              </form>
+            )}
           </CardContent>
         </Card>
         <Card>
@@ -579,58 +658,62 @@ function OrganizationScreen({ token }: { token: string }) {
                 {t[RSC.ORGANIZATION_NODE_CREATE_CHILD_BUTTON]}
               </Button>
             </form>
-            <form className="form-stack" onSubmit={assignMember}>
-              <label>
-                {t[RSC.ORGANIZATION_NODE_MEMBER_LABEL]}
-                <select
-                  value={memberId}
-                  onChange={(event) => setMemberId(event.target.value)}
-                >
-                  {accounts.map((account) => (
-                    <option value={account.id} key={account.id}>
-                      {account.email}
+            {selectedNode.id && (
+              <form className="form-stack" onSubmit={assignMember}>
+                <label>
+                  {t[RSC.ORGANIZATION_NODE_MEMBER_LABEL]}
+                  <select
+                    value={memberId}
+                    onChange={(event) => setMemberId(event.target.value)}
+                  >
+                    {accounts.map((account) => (
+                      <option value={account.id} key={account.id}>
+                        {account.email}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <Button type="submit">
+                  {t[RSC.ORGANIZATION_NODE_ASSIGN_MEMBER_BUTTON]}
+                </Button>
+              </form>
+            )}
+            {selectedNode.id && (
+              <form className="form-stack" onSubmit={assignOwner}>
+                <label>
+                  {t[RSC.ORGANIZATION_NODE_RESPONSIBLE_LABEL]}
+                  <select
+                    value={ownerId}
+                    onChange={(event) => setOwnerId(event.target.value)}
+                  >
+                    {accounts.map((account) => (
+                      <option value={account.id} key={account.id}>
+                        {account.email}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  {t[RSC.ORGANIZATION_NODE_SCOPE_LABEL]}
+                  <select
+                    value={ownerScope}
+                    onChange={(event) =>
+                      setOwnerScope(event.target.value as "node" | "subtree")
+                    }
+                  >
+                    <option value="node">
+                      {t[RSC.ORGANIZATION_SCOPE_NODE_OPTION]}
                     </option>
-                  ))}
-                </select>
-              </label>
-              <Button type="submit">
-                {t[RSC.ORGANIZATION_NODE_ASSIGN_MEMBER_BUTTON]}
-              </Button>
-            </form>
-            <form className="form-stack" onSubmit={assignOwner}>
-              <label>
-                {t[RSC.ORGANIZATION_NODE_RESPONSIBLE_LABEL]}
-                <select
-                  value={ownerId}
-                  onChange={(event) => setOwnerId(event.target.value)}
-                >
-                  {accounts.map((account) => (
-                    <option value={account.id} key={account.id}>
-                      {account.email}
+                    <option value="subtree">
+                      {t[RSC.ORGANIZATION_SCOPE_SUBTREE_OPTION]}
                     </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                {t[RSC.ORGANIZATION_NODE_SCOPE_LABEL]}
-                <select
-                  value={ownerScope}
-                  onChange={(event) =>
-                    setOwnerScope(event.target.value as "node" | "subtree")
-                  }
-                >
-                  <option value="node">
-                    {t[RSC.ORGANIZATION_SCOPE_NODE_OPTION]}
-                  </option>
-                  <option value="subtree">
-                    {t[RSC.ORGANIZATION_SCOPE_SUBTREE_OPTION]}
-                  </option>
-                </select>
-              </label>
-              <Button type="submit">
-                {t[RSC.ORGANIZATION_NODE_ASSIGN_RESPONSIBLE_BUTTON]}
-              </Button>
-            </form>
+                  </select>
+                </label>
+                <Button type="submit">
+                  {t[RSC.ORGANIZATION_NODE_ASSIGN_RESPONSIBLE_BUTTON]}
+                </Button>
+              </form>
+            )}
           </section>
         </div>
       )}
