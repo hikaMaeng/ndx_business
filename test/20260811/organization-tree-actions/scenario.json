@@ -6,7 +6,7 @@
   { "action": "click", "role": "button", "name": "로그인" },
   { "action": "click", "role": "button", "name": "조직" },
   { "action": "screenshot", "name": "organization-tree-actions" },
-  { "action": "click", "css": ".organization-node-actions button:nth-child(1)" },
+  { "action": "click", "testId": "organization-root-create" },
   { "action": "assertRole", "role": "dialog" },
   { "action": "screenshot", "name": "organization-sibling-create-modal" }
 ]
