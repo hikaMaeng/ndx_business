@@ -1,0 +1,12 @@
+[
+  { "action": "goto", "url": "/" },
+  { "action": "assertRole", "role": "main" },
+  { "action": "fill", "label": "이메일 주소", "value": "screenshot-admin@example.test" },
+  { "action": "fill", "label": "비밀번호", "value": "screenshot-admin-pass" },
+  { "action": "click", "role": "button", "name": "로그인" },
+  { "action": "click", "role": "button", "name": "조직" },
+  { "action": "screenshot", "name": "organization-tree-actions" },
+  { "action": "click", "css": ".organization-node-actions button:nth-child(1)" },
+  { "action": "assertRole", "role": "dialog" },
+  { "action": "screenshot", "name": "organization-sibling-create-modal" }
+]

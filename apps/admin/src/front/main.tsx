@@ -461,6 +461,7 @@ function OrganizationScreen({ token }: { token: string }) {
         </Button>
         <Button
           variant="outline"
+          data-testid="organization-root-create"
           aria-label={t[RSC.ORGANIZATION_NODE_CREATE_CHILD_BUTTON]}
           onClick={() => openCreate("root")}
         >
