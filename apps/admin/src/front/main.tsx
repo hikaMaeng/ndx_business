@@ -619,8 +619,12 @@ function OrganizationScreen({ token }: { token: string }) {
                     setOwnerScope(event.target.value as "node" | "subtree")
                   }
                 >
-                  <option value="node">{t[RSC.ADMIN_AUTO_OPTION]}</option>
-                  <option value="subtree">{t[RSC.ADMIN_FILTER_OPTION]}</option>
+                  <option value="node">
+                    {t[RSC.ORGANIZATION_SCOPE_NODE_OPTION]}
+                  </option>
+                  <option value="subtree">
+                    {t[RSC.ORGANIZATION_SCOPE_SUBTREE_OPTION]}
+                  </option>
                 </select>
               </label>
               <Button type="submit">
