@@ -67,16 +67,24 @@ export type UpdateModelDefinitionRequest = Pick<
 
 export type CreateModelDefinitionRequest = UpdateModelDefinitionRequest;
 
+function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === "object"; }
+function endpointRequest(value: unknown): CreateModelEndpointRequest | null {
+  return isRecord(value) && typeof value.name === "string" && typeof value.url === "string" && typeof value.headerName === "string" && typeof value.headerValue === "string" && MODEL_ENDPOINT_TYPES.includes(value.type as ModelEndpointType)
+    ? { name: value.name, url: value.url, headerName: value.headerName, headerValue: value.headerValue, type: value.type as ModelEndpointType } : null;
+}
+export const parseCreateModelEndpointRequest = endpointRequest;
+export const parseUpdateModelEndpointRequest = endpointRequest;
+export function parseModelDefinitionRequest(value: unknown): UpdateModelDefinitionRequest | null {
+  if (!isRecord(value) || typeof value.identifier !== "string" || typeof value.contextSize !== "number" || typeof value.temperature !== "number" || typeof value.minP !== "number" || typeof value.topP !== "number" || typeof value.topK !== "number" || typeof value.repeatPenalty !== "number" || typeof value.reasoning !== "boolean" || typeof value.supportsText !== "boolean" || typeof value.supportsImage !== "boolean" || typeof value.supportsSound !== "boolean" || typeof value.supportsVideo !== "boolean") return null;
+  return { identifier: value.identifier, contextSize: value.contextSize, temperature: value.temperature, minP: value.minP, topP: value.topP, topK: value.topK, repeatPenalty: value.repeatPenalty, reasoning: value.reasoning, supportsText: value.supportsText, supportsImage: value.supportsImage, supportsSound: value.supportsSound, supportsVideo: value.supportsVideo };
+}
+
 export const modelCatalogRoute = { path: "/api/models", method: "GET" } as const;
 export const createModelEndpointRoute = { path: "/api/models", method: "POST" } as const;
 export const updateModelEndpointRoute = { path: "/api/models/:endpointId", method: "PUT" } as const;
 export const refreshModelEndpointRoute = { path: "/api/models/:endpointId/refresh", method: "POST" } as const;
 export const createModelDefinitionRoute = { path: "/api/models/:endpointId/models", method: "POST" } as const;
 export const updateModelDefinitionRoute = { path: "/api/models/:endpointId/models/:modelId", method: "PUT" } as const;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object";
-}
 
 function isEndpoint(value: unknown): value is ModelEndpoint {
   return (

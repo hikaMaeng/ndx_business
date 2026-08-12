@@ -101,6 +101,57 @@ export type SettingsResponse = {
 
 export type UpdateSettingsRequest = Partial<AuthSettings>;
 
+export function parseSignupRequest(value: unknown): SignupRequest | null {
+  if (!isRecord(value) || typeof value.email !== "string" || typeof value.password !== "string") return null;
+  return { email: value.email, password: value.password, metadata: value.metadata && isRecord(value.metadata) ? value.metadata : undefined };
+}
+
+export function parseLoginRequest(value: unknown): LoginRequest | null {
+  if (!isRecord(value) || typeof value.email !== "string" || typeof value.password !== "string") return null;
+  return { email: value.email, password: value.password, metadata: value.metadata && isRecord(value.metadata) ? value.metadata : undefined };
+}
+
+export function parseUpdateSettingsRequest(value: unknown): UpdateSettingsRequest | null {
+  return isRecord(value) ? value as UpdateSettingsRequest : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object";
+}
+
+export function parseSignupResponse(value: unknown): SignupResponse | null {
+  if (!isRecord(value) || typeof value.userId !== "string") return null;
+  return value.status === "active" || value.status === "pending"
+    ? { userId: value.userId, status: value.status }
+    : null;
+}
+
+export function parseLoginResponse(value: unknown): LoginResponse | null {
+  if (!isRecord(value) || typeof value.sessionToken !== "string" || typeof value.expiresAt !== "string") return null;
+  const user = parseUserSummary(value.user);
+  return user ? { sessionToken: value.sessionToken, expiresAt: value.expiresAt, user } : null;
+}
+
+function parseSettings(value: unknown): AuthSettings | null {
+  if (!isRecord(value)) return null;
+  return (value.signupAcceptanceMode === "auto" || value.signupAcceptanceMode === "filter" || value.signupAcceptanceMode === "approval") &&
+    (value.signupFilter === null || isRecord(value.signupFilter)) &&
+    typeof value.sessionIdleTimeoutSeconds === "number" &&
+    (value.expiredSessionRetentionMode === "none" || value.expiredSessionRetentionMode === "retain") &&
+    typeof value.expiredSessionRetentionSeconds === "number" &&
+    typeof value.sessionHeaderName === "string" &&
+    typeof value.sessionCookieName === "string"
+    ? value as AuthSettings
+    : null;
+}
+
+export function parseSettingsResponse(value: unknown): SettingsResponse | null {
+  if (!isRecord(value) || !Array.isArray(value.sessions) || !Array.isArray(value.pendingUsers)) return null;
+  const settings = parseSettings(value.settings);
+  if (!settings) return null;
+  return { settings, sessions: value.sessions as SessionSummary[], pendingUsers: value.pendingUsers as PendingUser[] };
+}
+
 export type ApiErrorResponse = {
   error: string;
 };

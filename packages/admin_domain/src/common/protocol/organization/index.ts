@@ -101,6 +101,21 @@ export type AssignResponsibleRequest = {
 export type AssignOrganizationInferenceServiceRequest = { endpointId: string };
 export type UpdateOrganizationInferenceModelRequest = { active: boolean };
 
+function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === "object"; }
+
+export function parseCreateOrganizationRequest(value: unknown): CreateOrganizationRequest | null {
+  if (!isRecord(value) || typeof value.name !== "string" || !["root", "sibling", "child"].includes(String(value.mode))) return null;
+  return { name: value.name, mode: value.mode as CreateOrganizationRequest["mode"], parentId: value.parentId === null || typeof value.parentId === "string" ? value.parentId : undefined };
+}
+export function parseUpdateOrganizationRequest(value: unknown): UpdateOrganizationRequest | null {
+  return isRecord(value) && typeof value.name === "string" && ORGANIZATION_COLORS.includes(value.color as OrganizationColor) && ORGANIZATION_ICONS.includes(value.icon as OrganizationIcon)
+    ? { name: value.name, color: value.color as OrganizationColor, icon: value.icon as OrganizationIcon } : null;
+}
+export function parseAssignMemberRequest(value: unknown): AssignMemberRequest | null { return isRecord(value) && typeof value.userId === "string" ? { userId: value.userId } : null; }
+export function parseAssignResponsibleRequest(value: unknown): AssignResponsibleRequest | null { return isRecord(value) && typeof value.userId === "string" && (value.scope === "node" || value.scope === "subtree") ? { userId: value.userId, scope: value.scope } : null; }
+export function parseAssignOrganizationInferenceServiceRequest(value: unknown): AssignOrganizationInferenceServiceRequest | null { return isRecord(value) && typeof value.endpointId === "string" ? { endpointId: value.endpointId } : null; }
+export function parseUpdateOrganizationInferenceModelRequest(value: unknown): UpdateOrganizationInferenceModelRequest | null { return isRecord(value) && typeof value.active === "boolean" ? { active: value.active } : null; }
+
 export const addOrganizationInferenceServiceRoute = {
   path: "/api/organizations/:id/inference-services",
   method: "POST",
