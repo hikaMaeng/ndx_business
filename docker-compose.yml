@@ -1,6 +1,51 @@
 name: ndx-business
 
 services:
+  postgres:
+    build:
+      context: .
+      dockerfile: apps/agent/docker/postgres/Dockerfile
+    image: ndx-business-postgres:latest
+    container_name: postgres
+    # The official PostgreSQL entrypoint must start as root to repair/check
+    # named-volume permissions before dropping to the postgres server user.
+    user: "0:0"
+    init: true
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ndx_business
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      PGDATA: /var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_HOST_PORT:-15432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ndx_business"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - ndx-business_internal
+  agent:
+    build:
+      context: .
+      dockerfile: apps/agent/docker/Dockerfile
+    image: ndx-business-agent:latest
+    container_name: agent
+    init: true
+    restart: unless-stopped
+    env_file:
+      - path: apps/agent/docker/.env
+        required: false
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${AGENT_HOST_PORT:-18081}:18081"
+    networks:
+      - ndx-business_internal
   admin:
     build:
       context: .
@@ -18,12 +63,17 @@ services:
         required: false
     ports:
       - "${ADMIN_HOST_PORT:-18080}:18080"
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
       - admin_data:/app/data
     networks:
       - ndx-business_internal
 
 volumes:
+  postgres_data:
+    name: ndx-business_postgres_data
   admin_data:
     name: ndx-business_admin_data
 
