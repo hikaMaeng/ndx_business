@@ -1,9 +1,10 @@
 import { createApp } from "./app.js";
 import { readEnv } from "./env.js";
-import { openAuthDatabase } from "admin_domain/server";
+import { Pool } from "pg";
 
 const env = readEnv();
-const app = createApp(openAuthDatabase(env.databasePath));
+const database = new Pool({ connectionString: env.databaseUrl });
+const app = createApp(database);
 
 const server = app.listen(env.port, () => {
   console.log(`admin listening on ${env.port}`);
@@ -14,6 +15,6 @@ const server = app.listen(env.port, () => {
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, () => {
     console.log(`admin received ${signal}, closing`);
-    server.close(() => process.exit(0));
+    server.close(() => void database.end().finally(() => process.exit(0)));
   });
 }

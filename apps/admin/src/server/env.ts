@@ -1,7 +1,7 @@
 export type ServerEnv = {
   port: number;
   nodeEnv: "development" | "test" | "production";
-  databasePath: string;
+  databaseUrl: string;
 };
 
 export function readEnv(source: NodeJS.ProcessEnv = process.env): ServerEnv {
@@ -20,6 +20,6 @@ export function readEnv(source: NodeJS.ProcessEnv = process.env): ServerEnv {
   return {
     port: parsedPort,
     nodeEnv,
-    databasePath: source.AUTH_DATABASE_PATH ?? "./data/admin.sqlite"
+    databaseUrl: source.DATABASE_URL ?? "postgres://postgres:postgres@127.0.0.1:15432/ndx_business"
   };
 }

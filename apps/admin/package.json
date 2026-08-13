@@ -9,7 +9,7 @@
   "scripts": {
     "build": "npm run build:front && npm run build:server",
     "build:front": "vite build --config vite.config.ts",
-    "build:server": "esbuild src/server/index.ts --bundle --platform=node --target=node26 --format=esm --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\" --outfile=dist/server/index.js",
+    "build:server": "esbuild src/server/index.ts --bundle --platform=node --target=node26 --format=esm --alias:admin_domain=../../packages/admin_domain/src --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\" --outfile=dist/server/index.js",
     "migrate:postgres": "node --import tsx src/server/migration/index.ts",
     "test": "node --import tsx --test src/server/*.test.ts",
     "lint": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.server.json"

@@ -19,6 +19,10 @@
       "types": "./dist/server/index.d.ts",
       "import": "./dist/server/index.js"
     },
+    "./server/postgres": {
+      "types": "./dist/server/postgres/index.d.ts",
+      "import": "./dist/server/postgres/index.js"
+    },
     "./front": {
       "types": "./dist/front/index.d.ts",
       "import": "./dist/front/index.js"
@@ -38,6 +42,10 @@
   "devDependencies": {
     "@types/node": "26.1.1",
     "tsx": "4.21.0",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "@types/pg": "8.21.0"
+  },
+  "dependencies": {
+    "pg": "8.23.0"
   }
 }

@@ -1,7 +1,7 @@
 import express from "express";
-import type { DatabaseSync } from "node:sqlite";
+import type { PostgresDatabase } from "admin_domain/server/postgres";
 import type { UserSummary } from "admin_domain/common";
-import { authenticate, readSettings } from "admin_domain/server";
+import { authenticate, readSettings } from "admin_domain/server/postgres";
 
 export type AuthenticatedRequest = express.Request & {
   user?: UserSummary;
@@ -42,14 +42,14 @@ function readSessionToken(request: express.Request, settings: ReturnType<typeof 
 }
 
 // see apps/admin/docs/constraints.md#blast-radius
-export function apiPermissionMiddleware(database: DatabaseSync): express.RequestHandler {
-  return (request: AuthenticatedRequest, response, next) => {
+export function apiPermissionMiddleware(database: PostgresDatabase): express.RequestHandler {
+  return async (request: AuthenticatedRequest, response, next) => {
     const permission = permissionFor(request);
     if (permission === "public") return next();
     try {
-      const token = readSessionToken(request, readSettings(database));
+      const token = readSessionToken(request, await readSettings(database));
       request.sessionToken = token;
-      request.user = authenticate(
+      request.user = await authenticate(
         database,
         token,
         request.header("x-session-device") ?? "unknown-client",

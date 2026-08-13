@@ -6,7 +6,13 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "noEmit": false,
-    "types": ["node"]
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "admin_domain/common": ["../../packages/admin_domain/src/common/index.ts"],
+      "admin_domain/server": ["../../packages/admin_domain/src/server/index.ts"],
+      "admin_domain/server/postgres": ["../../packages/admin_domain/src/server/postgres/index.ts"]
+    }
   },
   "include": ["src/server/**/*.ts"]
 }

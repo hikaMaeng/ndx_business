@@ -1,15 +1,14 @@
 import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { DatabaseSync } from "node:sqlite";
-import { openAuthDatabase } from "admin_domain/server";
+import type { PostgresDatabase } from "admin_domain/server/postgres";
 import { apiPermissionMiddleware } from "./permission/index.js";
 import { registerAdminRoutes } from "./routes/admin.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerModelRoutes } from "./routes/models.js";
 import { registerOrganizationRoutes } from "./routes/organizations.js";
 
-export function createApp(database: DatabaseSync = openAuthDatabase(process.env.AUTH_DATABASE_PATH ?? "./data/admin.sqlite")) {
+export function createApp(database: PostgresDatabase) {
   const app = express();
   const serverDir = path.dirname(fileURLToPath(import.meta.url));
   const frontDir = path.resolve(serverDir, "../front");
