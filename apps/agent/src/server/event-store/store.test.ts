@@ -13,8 +13,8 @@ test("append returns the already persisted envelope without reserving another se
   const queries: string[] = [];
   const storedRow = {
     event_id: draft.eventId, stream_id: draft.streamId, sequence: 4, action: draft.action,
-    transaction_key: draft.transactionKey, kind: draft.kind, channel: draft.channel, reply_channel: null,
-    correlation_id: draft.correlationId, source: draft.source, payload: draft.payload, created_at: draft.createdAt,
+    transaction_key: draft.transactionKey, event_version: 1 as const, kind: draft.kind, channel: draft.channel, reply_channel: null,
+    session_id: null, run_id: null, turn_id: null, correlation_id: draft.correlationId, source: draft.source, payload: draft.payload, created_at: draft.createdAt,
   };
   const client = {
     query: async (sql: string) => {
