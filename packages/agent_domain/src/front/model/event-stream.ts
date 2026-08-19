@@ -1,23 +1,5 @@
-export type StreamDirection = "outbound" | "inbound";
-export type StreamState = "queued" | "processing" | "delivered" | "failed";
-
-export interface StreamEventRecord {
-  id: string;
-  transactionKey: string;
-  channel: string;
-  eventType: string;
-  direction: StreamDirection;
-  state: StreamState;
-  payload: Record<string, unknown>;
-  timestamp: string;
-}
-
-export interface StreamSnapshot {
-  channels: string[];
-  subscribedChannels: string[];
-  events: StreamEventRecord[];
-  connection: "online" | "offline" | "connecting";
-}
+import type { StreamEventRecord, StreamSnapshot } from "../../common/protocol/stream/index.js";
+export type { StreamDirection, StreamEventRecord, StreamSnapshot, StreamState } from "../../common/protocol/stream/index.js";
 
 type Listener = () => void;
 

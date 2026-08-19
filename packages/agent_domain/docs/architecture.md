@@ -7,6 +7,7 @@ The planned replacement contract and its migration boundaries are in the [Agent 
 | Edge | Status | Owner |
 | --- | --- | --- |
 | `src/common/protocol/agent` → HTTP/WebSocket/worker boundary | current exported contract | `AgentEvent`, request/result factories |
+| `src/common/protocol/stream` → browser stream model | current exported contract | stream event and snapshot wire shapes |
 | `src/common/protocol/vibe` → typed Vibe callers | current root re-export | alias over the current `AgentEvent` contract |
 | `src/common/protocol/{envelope,session,turn,iteration,tool,process,hook,model,state,approval,artifact}` | unexported legacy stubs; Phase 1 removal | no runtime consumer or public subpath |
 | `src/front/model` → browser stream console | current exported front contract | in-memory view model and subscription signal |
