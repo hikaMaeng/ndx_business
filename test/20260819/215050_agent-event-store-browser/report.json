@@ -1,0 +1,33 @@
+{
+  "status": "passed",
+  "mode": "scenario",
+  "testedUrl": "http://127.0.0.1:18081/",
+  "websocketUrls": [
+    "ws://127.0.0.1:18081/ws"
+  ],
+  "steps": [
+    {
+      "name": "goto",
+      "status": "passed"
+    },
+    {
+      "name": "main-landmark",
+      "status": "passed"
+    },
+    {
+      "name": "websocket-connected",
+      "status": "passed"
+    },
+    {
+      "name": "client-event-frame-sent",
+      "status": "passed"
+    },
+    {
+      "name": "server-worker-result-frame-received",
+      "status": "passed"
+    }
+  ],
+  "consoleErrors": [],
+  "pageErrors": [],
+  "screenshot": "F:\\dev\\ndx_business\\test\\20260819\\215050_agent-event-store-browser\\screenshots\\event-store-cps-flow.png"
+}
