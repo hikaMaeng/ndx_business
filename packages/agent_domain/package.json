@@ -1,0 +1,26 @@
+{
+  "name": "agent_domain",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/common/index.js",
+  "module": "./dist/common/index.js",
+  "types": "./dist/common/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/common/index.d.ts", "import": "./dist/common/index.js" },
+    "./common": { "types": "./dist/common/index.d.ts", "import": "./dist/common/index.js" },
+    "./front": { "types": "./dist/front/index.d.ts", "import": "./dist/front/index.js" },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "README.md", "docs"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --import tsx --test src/**/*.test.ts",
+    "lint": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.1",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "npm run build:front && npm run build:server && npm run build:worker",
+    "build:front": "vite build",
+    "build:server": "esbuild src/server/index.ts --bundle --platform=node --format=esm --target=node26 --alias:agent_domain=../../packages/agent_domain/dist --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\" --outfile=dist/server/index.js",
+    "build:worker": "esbuild src/server/worker/entry.ts --bundle --platform=node --format=esm --target=node26 --outfile=dist/server/worker.js",
+    "test": "node --import tsx --test src/server/**/*.test.ts",
+    "lint": "tsc --noEmit -p tsconfig.server.json && tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "agent_domain": "*",
+    "express": "5.2.1",
+    "pg": "8.23.0",
+    "ws": "8.18.3"
+  },
+  "devDependencies": {
+    "@types/express": "5.0.6",
+    "@types/node": "26.1.1",
+    "@types/pg": "8.21.0",
+    "@types/ws": "8.18.1",
+    "esbuild": "0.28.0",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3",
+    "vite": "8.0.11"
+  }
+}

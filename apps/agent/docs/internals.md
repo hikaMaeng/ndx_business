@@ -1,0 +1,3 @@
+# Internals
+
+`src/server/queue/transport.ts` owns the broker-neutral delivery contract. `src/server/pgmq` owns PGMQ SQL calls and implements that contract. `src/server/database.ts` constructs the separately injected Postgres pool used by `EventLog` and execution state. `src/server/consumer.ts` owns the single async read/process loop, bounded reconnect backoff, CPS-style result transition, and periodic message-visibility extension while one message runs. `src/server/execution` stores the transaction-key claim. `src/server/worker` owns a lazy bounded Worker Thread pool and the worker action allow-list; no worker is created for an empty queue.

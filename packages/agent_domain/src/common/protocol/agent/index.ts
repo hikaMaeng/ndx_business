@@ -1,0 +1,56 @@
+import { randomUUID } from "node:crypto";
+
+export type AgentEventKind = "request" | "result" | "heartbeat";
+
+export interface AgentEvent<TPayload = Record<string, unknown>> {
+  eventId: string;
+  transactionKey: string;
+  kind: AgentEventKind;
+  channel: string;
+  action: string;
+  source: string;
+  replyChannel?: string;
+  createdAt: string;
+  payload: TPayload;
+}
+
+export interface AgentResultPayload {
+  [key: string]: unknown;
+  ok: boolean;
+  value?: unknown;
+  error?: { code: string; message: string };
+}
+
+export function createRequestEvent(input: {
+  transactionKey?: string;
+  action: string;
+  payload: Record<string, unknown>;
+  channel?: string;
+  source?: string;
+  replyChannel?: string;
+}): AgentEvent {
+  return {
+    eventId: randomUUID(),
+    transactionKey: input.transactionKey ?? randomUUID(),
+    kind: "request",
+    channel: input.channel ?? "agent.requests",
+    action: input.action,
+    source: input.source ?? "unknown",
+    replyChannel: input.replyChannel ?? "agent.results",
+    createdAt: new Date().toISOString(),
+    payload: input.payload,
+  };
+}
+
+export function createResultEvent(request: AgentEvent, payload: AgentResultPayload): AgentEvent<AgentResultPayload> {
+  return {
+    eventId: randomUUID(),
+    transactionKey: request.transactionKey,
+    kind: "result",
+    channel: request.replyChannel ?? "agent.results",
+    action: `${request.action}.result`,
+    source: "agent",
+    createdAt: new Date().toISOString(),
+    payload,
+  };
+}

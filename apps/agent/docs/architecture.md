@@ -1,0 +1,31 @@
+# Architecture
+
+The replacement plan and its event-store, attempt, replay, and migration contracts live in [Agent Renewal plan](../../../agentRenewal.md). Update this router with the implementing source path and a code-to-document anchor in the same phase that changes a contract.
+
+The `admin` Compose service owns the PostgreSQL/PGMQ runtime. The agent separates the durable-state Postgres pool from the `EventQueueTransport`; PGMQ is the current adapter, not the consumer contract. The current async consumer loop reads batches with `read_with_poll(... quantity: AGENT_POLL_BATCH_SIZE)`, then processes each message serially before reading again. It claims the transaction key, dispatches bounded CPU work to a lazy Worker Thread pool, publishes a result event, and deletes the source message only after result publication and execution persistence succeed. An empty queue keeps the pool at zero workers; `AGENT_MAX_THREADS` is an explicit upper bound.
+
+Known baseline defect: a duplicate or conflict branch returns from the consumer loop rather than only the current batch item, so one such message can stop subsequent consumption. The old branch is therefore reference/recovery material, not an operational fallback; see the [Agent Renewal plan](../../../agentRenewal.md).
+
+| Source path | Responsibility |
+| --- | --- |
+| `src/server/app.ts` | HTTP ingress and health/readiness |
+| `src/server/database.ts` | explicit durable-state Postgres pool construction |
+| `src/server/queue` | queue transport contract independent of a broker |
+| `src/server/pgmq` | PostgreSQL/PGMQ adapter |
+| `src/server/consumer.ts` | poll, claim, execute, publish, delete |
+| `src/server/execution` | transaction-key idempotency state |
+| `src/server/worker` | lazy bounded Worker Thread pool and allow-listed actions |
+| `src/server/stream` | channel-filtered WebSocket event projection |
+| `src/server/transport/websocket.ts` | `/ws` subscribe and event frames |
+| `src/front` | minimal service shell |
+
+```mermaid
+flowchart LR
+  WS["WebSocket /ws"] --> T["EventQueueTransport"]
+  T --> Q["PGMQ adapter"]
+  Q --> C["Agent consumer"]
+  C --> P["lazy bounded worker_threads"]
+  P --> R["agent_results event"]
+  C --> D["delete source message"]
+  C --> DB["Postgres durable state"]
+```
