@@ -14,7 +14,7 @@ type StoredEventRow = {
 
 function fromRow(row: StoredEventRow): EventEnvelope {
   return {
-    eventId: row.event_id, streamId: row.stream_id, sequence: Number(row.sequence), action: row.action,
+    eventId: row.event_id, streamId: row.stream_id, sequence: String(row.sequence), action: row.action,
     transactionKey: row.transaction_key, kind: row.kind, channel: row.channel,
     ...(row.reply_channel === null ? {} : { replyChannel: row.reply_channel }),
     ...(row.session_id === null ? {} : { sessionId: row.session_id }),
@@ -47,6 +47,9 @@ export class EventStore {
     await this.pool.query("CREATE INDEX IF NOT EXISTS event_store_correlation_idx ON event_store (correlation_id, stored_at)");
     await this.pool.query(`CREATE TABLE IF NOT EXISTS event_stream_sequence (
       stream_id text PRIMARY KEY, last_sequence bigint NOT NULL)`);
+    await this.pool.query(`INSERT INTO event_stream_sequence (stream_id, last_sequence)
+      SELECT stream_id, max(sequence) FROM event_store GROUP BY stream_id
+      ON CONFLICT (stream_id) DO UPDATE SET last_sequence = GREATEST(event_stream_sequence.last_sequence, EXCLUDED.last_sequence)`);
   }
 
   /**
@@ -77,7 +80,7 @@ export class EventStore {
       }
       const next = await client.query<{ sequence: string | number }>(`INSERT INTO event_stream_sequence (stream_id,last_sequence) VALUES ($1,1)
         ON CONFLICT (stream_id) DO UPDATE SET last_sequence = event_stream_sequence.last_sequence + 1 RETURNING last_sequence AS sequence`, [event.streamId]);
-      const sequence = Number(next.rows[0].sequence);
+      const sequence = String(next.rows[0].sequence);
       const inserted = await client.query<StoredEventRow>(`INSERT INTO event_store (${COLUMNS})
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17)
         ON CONFLICT (event_id) DO NOTHING

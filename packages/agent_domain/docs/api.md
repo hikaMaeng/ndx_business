@@ -8,7 +8,7 @@ The public entrypoint exports three shapes from `protocol/event` and the legacy
   stream, or sequence, because the server issues those.
 - `EventDraft` adds server-issued identity minus `sequence`.
 - `EventEnvelope` is the stored and delivered shape: draft plus the per-stream
-  `sequence` assigned at append time, with `causationEventId` linking a derived
+  decimal-string `sequence` assigned at append time, with `causationEventId` linking a derived
   event to its cause.
 
 `createEventDraft` builds a client command into a draft. `createDerivedDraft`

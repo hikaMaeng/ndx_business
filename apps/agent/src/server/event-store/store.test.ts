@@ -36,20 +36,27 @@ test("append returns the already persisted envelope without reserving another se
   const client = stubClient(row(), queries);
   const store = new EventStore({ connect: async () => client } as never);
   const result = await store.append(draft);
-  assert.equal(result.sequence, 4);
+  assert.equal(result.sequence, "4");
   assert.equal(result.streamId, "session:one");
   assert.equal(queries.some((sql) => sql.includes("pg_advisory_xact_lock")), true);
   assert.equal(queries.some((sql) => sql.includes("RETURNING last_sequence")), false);
   assert.equal(queries.some((sql) => sql.includes("ON CONFLICT (event_id) DO NOTHING")), false);
 });
 
-test("a bigint sequence returned as text becomes a number on the envelope", async () => {
+test("a bigint sequence remains an exact decimal string on the envelope", async () => {
   const queries: string[] = [];
   const store = new EventStore({ connect: async () => stubClient(undefined, queries) } as never);
   const result = await store.append({ ...draft, causationEventId: "cause-1" });
-  assert.equal(typeof result.sequence, "number");
-  assert.equal(result.sequence, 12);
+  assert.equal(typeof result.sequence, "string");
+  assert.equal(result.sequence, "12");
   assert.equal(result.causationEventId, "cause-1");
+});
+
+test("sequence counter migration starts after every existing stream position", async () => {
+  const statements: string[] = [];
+  const pool = { query: async (sql: string) => { statements.push(sql); return { rowCount: 0, rows: [] }; } };
+  await new EventStore(pool as never).ensureSchema();
+  assert.ok(statements.some((sql) => sql.includes("SELECT stream_id, max(sequence) FROM event_store GROUP BY stream_id")));
 });
 
 test("append records duplicate and latency metrics", async () => {

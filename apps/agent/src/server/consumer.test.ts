@@ -29,7 +29,8 @@ test("a conflict acknowledges only its message and keeps the consumer loop alive
     database: database as never,
     pool: { run: async () => ({ value: undefined }), destroy: async () => undefined },
     hub: { publish: () => undefined } as never,
-    eventStore: { append: async (draft: { eventId: string }) => { persisted.push(draft.eventId); return { ...draft, sequence: 1 }; } } as never,
+    eventStore: { append: async (draft: { eventId: string }) => { persisted.push(draft.eventId); return { ...draft, sequence: "1" }; } } as never,
+    deliveryStore: { claim: async () => true, complete: async () => undefined } as never,
     metrics: { increment: () => undefined } as never,
     queue: "agent_requests",
     resultQueue: "agent_results",
@@ -44,4 +45,32 @@ test("a conflict acknowledges only its message and keeps the consumer loop alive
   assert.equal(persisted[0], "event-1");
   assert.equal(persisted.length, 2);
   assert.deepEqual(deleted, ["source-message"]);
+});
+
+test("egress failure does not rewrite a completed execution or acknowledge its source", async () => {
+  const event = { eventId: "event-success", transactionKey: "transaction-success", kind: "request" as const, channel: "agent.requests", action: "hash.sha256", source: "test", createdAt: new Date().toISOString(), payload: { input: "value" } };
+  const updates: unknown[][] = [];
+  const deleted: string[] = [];
+  let reads = 0;
+  const queue = {
+    send: async () => { throw new Error("result queue unavailable"); },
+    read: async () => ++reads === 1 ? [{ id: "source-message", event, headers: null }] : await new Promise<never>(() => undefined),
+    delete: async (_queue: string, id: string) => { deleted.push(id); }, extendVisibility: async () => undefined, check: async () => undefined,
+  };
+  const database = { query: async (sql: string, values?: unknown[]) => {
+    if (sql.startsWith("INSERT")) return { rowCount: 1, rows: [] };
+    if (sql.startsWith("UPDATE")) { updates.push(values ?? []); return { rowCount: 1, rows: [] }; }
+    return { rowCount: 0, rows: [] };
+  } };
+  const consumer = startConsumer({
+    queueTransport: queue, database: database as never,
+    pool: { run: async () => ({ value: "ok" }), destroy: async () => undefined }, hub: { publish: () => undefined } as never,
+    eventStore: { append: async (draft: Record<string, unknown>) => ({ ...draft, sequence: "1" }) } as never,
+    deliveryStore: { claim: async () => true, complete: async () => undefined } as never,
+    metrics: { increment: () => undefined } as never, queue: "agent_requests", resultQueue: "agent_results", visibilityTimeoutSeconds: 1, pollSeconds: 1, batchSize: 1,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  consumer.stop();
+  assert.deepEqual(updates.map((values) => values[1]), ["completed"]);
+  assert.deepEqual(deleted, []);
 });

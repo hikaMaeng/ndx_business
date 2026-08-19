@@ -11,7 +11,7 @@ test("a session command derives one server-owned stream and correlation", () => 
 });
 
 test("a derived draft inherits stream identity and records its cause", () => {
-  const cause = { ...createEventDraft({ action: "turn.start", transactionKey: "tx-1", channel: "agent.requests", replyChannel: "agent.results", sessionId: "session-1", runId: "run-1", turnId: "turn-1", payload: {} }, "2026-08-19T00:00:00.000Z"), sequence: 3 };
+  const cause = { ...createEventDraft({ action: "turn.start", transactionKey: "tx-1", channel: "agent.requests", replyChannel: "agent.results", sessionId: "session-1", runId: "run-1", turnId: "turn-1", payload: {} }, "2026-08-19T00:00:00.000Z"), sequence: "3" };
   const derived = createDerivedDraft(cause, { eventId: "derived-1", action: "turn.start.result", kind: "result", payload: { ok: true } });
   assert.equal(derived.streamId, cause.streamId);
   assert.deepEqual([derived.sessionId, derived.runId, derived.turnId], ["session-1", "run-1", "turn-1"]);

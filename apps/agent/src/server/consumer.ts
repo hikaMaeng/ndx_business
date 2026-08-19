@@ -8,16 +8,19 @@ import type { EventStreamHub } from "./stream/hub.js";
 import type { EventStore } from "./event-store/store.js";
 import type { MetricsRegistry } from "./metrics/registry.js";
 import { toEventDraft, toResultDraft } from "./ingress/event-draft.js";
+import type { DeliveryStore } from "./delivery/store.js";
 
 /** One terminal result exists per transaction key, so its identity is derived rather than random. */
 function resultEventId(event: AgentEvent): string { return deterministicEventId(`result:${event.transactionKey}`); }
 
-export function startConsumer(input: { queueTransport: EventQueueTransport; database: import("pg").Pool; pool: WorkerPool; hub: EventStreamHub; eventStore: EventStore; metrics: MetricsRegistry; queue: string; resultQueue: string; visibilityTimeoutSeconds: number; pollSeconds: number; batchSize: number }): { stop: () => void } {
+export function startConsumer(input: { queueTransport: EventQueueTransport; database: import("pg").Pool; pool: WorkerPool; hub: EventStreamHub; eventStore: EventStore; deliveryStore: DeliveryStore; metrics: MetricsRegistry; queue: string; resultQueue: string; visibilityTimeoutSeconds: number; pollSeconds: number; batchSize: number }): { stop: () => void } {
   let stopped = false;
   const publishResult = async (request: EventEnvelope, result: AgentEvent<{ ok: boolean; value?: unknown; error?: { code: string; message: string } }>): Promise<void> => {
-    await input.eventStore.append(toResultDraft(request, result));
+    const envelope = await input.eventStore.append(toResultDraft(request, result));
+    if (!await input.deliveryStore.claim(envelope.eventId)) return;
     await input.queueTransport.send(input.resultQueue, result);
     input.hub.publish(result);
+    await input.deliveryStore.complete(envelope.eventId);
   };
   const acknowledge = async (event: AgentEvent, messageId: string): Promise<void> => {
     await input.queueTransport.delete(input.queue, messageId);
@@ -60,28 +63,28 @@ export function startConsumer(input: { queueTransport: EventQueueTransport; data
         }, Math.max(1000, Math.floor(input.visibilityTimeoutSeconds * 1000 / 2)));
         input.metrics.increment("workerStarted");
         input.metrics.increment("inFlight");
+        let resultEvent: AgentEvent<{ ok: boolean; value?: unknown; error?: { code: string; message: string } }>;
         try {
           console.log(JSON.stringify({ event: "worker.started", action: event.action, eventId: event.eventId, transactionKey: event.transactionKey }));
           const result = await runWorker(input.pool, event);
-          const resultEvent = createResultEvent(event, { ok: true, value: result.value }, resultEventId(event));
+          resultEvent = createResultEvent(event, { ok: true, value: result.value }, resultEventId(event));
           console.log(JSON.stringify({ event: "worker.completed", action: event.action, resultAction: resultEvent.action, eventId: event.eventId, resultEventId: resultEvent.eventId, transactionKey: event.transactionKey }));
           await completeExecution(input.database, event.transactionKey, resultEvent.payload, "completed");
-          await publishResult(persisted, resultEvent);
           input.metrics.increment("workerCompleted");
           console.log(JSON.stringify({ event: "execution.completed", action: event.action, eventId: event.eventId, transactionKey: event.transactionKey }));
-          clearInterval(visibilityTimer);
-          await acknowledge(event, message.id);
         } catch (error) {
-          const resultEvent = createResultEvent(event, { ok: false, error: { code: "worker_failed", message: error instanceof Error ? error.message : "Worker failed" } }, resultEventId(event));
+          resultEvent = createResultEvent(event, { ok: false, error: { code: "worker_failed", message: error instanceof Error ? error.message : "Worker failed" } }, resultEventId(event));
           console.log(JSON.stringify({ event: "worker.failed", action: event.action, resultAction: resultEvent.action, eventId: event.eventId, resultEventId: resultEvent.eventId, transactionKey: event.transactionKey, error: resultEvent.payload }));
           const status = resultEvent.payload.error?.message.includes("timed out") || resultEvent.payload.error?.message.includes("timeout") ? "timed_out" : resultEvent.payload.error?.message.includes("aborted") ? "cancelled" : "failed";
           await completeExecution(input.database, event.transactionKey, resultEvent.payload, status);
-          await publishResult(persisted, resultEvent);
           input.metrics.increment("workerFailed");
           console.log(JSON.stringify({ event: "execution.completed", action: event.action, eventId: event.eventId, transactionKey: event.transactionKey, outcome: "failed" }));
-          clearInterval(visibilityTimer);
+        }
+        try {
+          await publishResult(persisted, resultEvent);
           await acknowledge(event, message.id);
         } finally {
+          clearInterval(visibilityTimer);
           input.metrics.increment("inFlight", -1);
         }
         }

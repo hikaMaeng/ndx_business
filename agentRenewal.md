@@ -250,7 +250,7 @@ type EventEnvelope<TPayload = unknown> = {
   eventVersion: number;
   kind: "command" | "fact" | "result" | "progress" | "failure" | "control";
   streamId: string;
-  sequence: number;
+  sequence: string; // PostgreSQL bigint decimal; JSON precision is preserved
   channel: string;
   replyChannel?: string;
   sessionId?: string;

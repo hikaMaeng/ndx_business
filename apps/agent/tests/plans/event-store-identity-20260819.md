@@ -5,7 +5,7 @@
 
 ## Goal
 Prove, against the deployed database rather than a stubbed pool, that:
-1. a `bigint` sequence reaches the runtime as a number, not text;
+1. a `bigint` sequence reaches the runtime as an exact decimal string, not a lossy number;
 2. a result event stays in its request's stream and records `causation_event_id`;
 3. a redelivered request converges on one stored request row and one stored result row;
 4. rows written before the identity columns existed are backfilled;
@@ -33,7 +33,7 @@ Prove, against the deployed database rather than a stubbed pool, that:
 7. `GET /metrics` without a token, then with `Authorization: Bearer <token>`.
 
 ## Expected Results
-1. `event.persisted` logs `"sequence":1` (number), never `"sequence":"1"`.
+1. `event.persisted` logs `"sequence":"1"` (decimal string), never a JavaScript number coercion.
 2. The result row shares `stream_id` and `session_id` with its request row and its
    `causation_event_id` equals the request `event_id`.
 3. Step 5 yields exactly one `command` row and one `result` row for the transaction key.

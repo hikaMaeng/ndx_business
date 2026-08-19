@@ -5,7 +5,7 @@
 - Stream identity is derived, never client-supplied: `streamIdOf` is the only
   rule, so a session's commands and its results land in one stream and stay
   orderable and projectable together.
-- `sequence` is assigned by the server at append time. A draft has no sequence,
+- `sequence` is assigned by the server at append time as an exact decimal string. A draft has no sequence,
   which is what keeps the ingress and stored shapes separate types rather than
   one optional-field type.
 - `deterministicEventId` exists because delivery is at-least-once. A logical

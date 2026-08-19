@@ -19,7 +19,8 @@ export interface EventEnvelope<TPayload extends Record<string, unknown> = Record
   eventVersion: 1;
   kind: EventKind;
   streamId: string;
-  sequence: number;
+  /** Decimal PostgreSQL bigint. Keep it textual so a cursor never loses precision in JSON. */
+  sequence: string;
   causationEventId?: string;
   correlationId: string;
   source: "client" | "server" | "worker" | "scheduler";

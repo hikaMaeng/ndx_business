@@ -15,6 +15,7 @@ The preserved baseline branch had a duplicate/conflict early-return defect that 
 | `src/server/consumer.ts` | legacy poll, canonical append, claim, execute, publish, delete |
 | `src/server/ingress` | legacy queue event to canonical draft conversion and result derivation |
 | `src/server/event-store` | immutable canonical event persistence, per-stream positions, identity backfill |
+| `src/server/delivery` | lease-backed result-delivery claim and completion ledger |
 | `src/server/execution` | transaction-key idempotency state |
 | `src/server/metrics` | aggregate operator counters behind `GET /metrics` |
 | `src/server/worker` | lazy bounded Worker Thread pool and allow-listed actions |
