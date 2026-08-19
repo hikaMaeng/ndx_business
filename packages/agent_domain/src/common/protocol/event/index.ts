@@ -26,7 +26,9 @@ export interface EventEnvelope<TPayload extends Record<string, unknown> = Record
   payload: TPayload;
 }
 
-export function createEventEnvelope(input: IngressCommand, sequence: number, now = new Date().toISOString()): EventEnvelope {
+export type EventDraft<TPayload extends Record<string, unknown> = Record<string, unknown>> = Omit<EventEnvelope<TPayload>, "sequence">;
+
+export function createEventDraft(input: IngressCommand, now = new Date().toISOString()): EventDraft {
   const streamId = input.sessionId ? `session:${input.sessionId}` : `channel:${input.channel}`;
-  return { ...input, eventId: randomUUID(), eventVersion: 1, kind: "command", streamId, sequence, correlationId: input.correlationId ?? input.transactionKey, source: "client", createdAt: now };
+  return { ...input, eventId: randomUUID(), eventVersion: 1, kind: "command", streamId, correlationId: input.correlationId ?? input.transactionKey, source: "client", createdAt: now };
 }

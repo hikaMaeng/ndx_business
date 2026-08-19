@@ -7,6 +7,7 @@ test("a conflict acknowledges only its message and keeps the consumer loop alive
   const event = { eventId: "event-1", transactionKey: "transaction-1", kind: "request" as const, channel: "agent.requests", action: "hash.sha256", source: "test", createdAt: new Date().toISOString(), payload: { input: "value" } };
   let reads = 0;
   const deleted: string[] = [];
+  const persisted: string[] = [];
   const queue = {
     send: async () => "result-message",
     read: async () => {
@@ -29,6 +30,7 @@ test("a conflict acknowledges only its message and keeps the consumer loop alive
     pool: { run: async () => ({ value: undefined }), destroy: async () => undefined },
     hub: { publish: () => undefined } as never,
     eventLog: { append: async () => undefined } as never,
+    eventStore: { append: async (draft: { eventId: string }) => { persisted.push(draft.eventId); return { ...draft, sequence: 1 }; } } as never,
     queue: "agent_requests",
     resultQueue: "agent_results",
     visibilityTimeoutSeconds: 1,
@@ -39,5 +41,7 @@ test("a conflict acknowledges only its message and keeps the consumer loop alive
   await new Promise((resolve) => setTimeout(resolve, 20));
   consumer.stop();
   assert.ok(reads >= 2);
+  assert.equal(persisted[0], "event-1");
+  assert.equal(persisted.length, 2);
   assert.deepEqual(deleted, ["source-message"]);
 });

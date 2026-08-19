@@ -8,17 +8,20 @@ import { EventStreamHub } from "./stream/hub.js";
 import { EventLog } from "./event-log.js";
 import { ensureExecutionSchema } from "./execution/store.js";
 import { attachWebSocketTransport } from "./transport/websocket.js";
+import { EventStore } from "./event-store/store.js";
 
 const env = readEnv();
 const database = createDatabasePool(env.databaseUrl);
 const pgmq = new PgmqClient(database);
 const eventLog = new EventLog(database);
+const eventStore = new EventStore(database);
 async function initializeDatabase(): Promise<void> {
   let delayMs = 250;
   for (let attempt = 1; attempt <= 12; attempt += 1) {
     try {
       await ensureExecutionSchema(database);
       await eventLog.ensureSchema();
+      await eventStore.ensureSchema();
       return;
     } catch (error) {
       if (attempt === 12) throw error;
@@ -32,7 +35,7 @@ async function initializeDatabase(): Promise<void> {
 await initializeDatabase();
 const pool = createWorkerPool({ minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, maxQueue: env.maxQueue });
 const hub = new EventStreamHub();
-const consumer = startConsumer({ queueTransport: pgmq, database, pool, hub, eventLog, queue: env.queue, resultQueue: env.resultQueue, visibilityTimeoutSeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, batchSize: env.pollBatchSize });
+const consumer = startConsumer({ queueTransport: pgmq, database, pool, hub, eventLog, eventStore, queue: env.queue, resultQueue: env.resultQueue, visibilityTimeoutSeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, batchSize: env.pollBatchSize });
 const server = createApp(env, pgmq, hub, eventLog).listen(env.port, () => console.log(JSON.stringify({ event: "agent.listening", port: env.port, cpuCount: env.cpuCount, minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads })));
 const websocket = attachWebSocketTransport(server, env, pgmq, hub, eventLog);
 
