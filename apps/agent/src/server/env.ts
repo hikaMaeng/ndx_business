@@ -13,6 +13,7 @@ export interface AgentEnv {
   maxWorkerThreads: number;
   maxQueue: number;
   metricsToken: string;
+  deliveryLeaseSeconds: number;
 }
 
 function positive(source: NodeJS.ProcessEnv, name: string, fallback: number, allowZero = false): number {
@@ -26,12 +27,17 @@ export function readEnv(source = process.env): AgentEnv {
   const minWorkerThreads = positive(source, "AGENT_MIN_THREADS", 0, true);
   const maxWorkerThreads = positive(source, "AGENT_MAX_THREADS", Math.min(2, cpuCount), false);
   if (minWorkerThreads > maxWorkerThreads) throw new Error("AGENT_MIN_THREADS must not exceed AGENT_MAX_THREADS");
+  const visibilityTimeoutSeconds = positive(source, "QUEUE_VISIBILITY_TIMEOUT_SECONDS", 60);
+  const deliveryLeaseSeconds = positive(source, "AGENT_DELIVERY_LEASE_SECONDS", 30);
+  // A lease that outlives the queue visibility timeout turns a redelivery into a blocked delivery:
+  // the redelivered message finds the lease still held and cannot make progress.
+  if (deliveryLeaseSeconds >= visibilityTimeoutSeconds) throw new Error("AGENT_DELIVERY_LEASE_SECONDS must be shorter than QUEUE_VISIBILITY_TIMEOUT_SECONDS");
   return {
     port: positive(source, "PORT", 18081),
     databaseUrl: source.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/ndx_business",
     queue: source.AGENT_QUEUE ?? "agent_requests",
     resultQueue: source.AGENT_RESULT_QUEUE ?? "agent_results",
-    visibilityTimeoutSeconds: positive(source, "QUEUE_VISIBILITY_TIMEOUT_SECONDS", 60),
+    visibilityTimeoutSeconds,
     pollSeconds: positive(source, "QUEUE_POLL_SECONDS", 5),
     pollBatchSize: positive(source, "QUEUE_POLL_BATCH_SIZE", 1),
     cpuCount,
@@ -39,5 +45,6 @@ export function readEnv(source = process.env): AgentEnv {
     maxWorkerThreads,
     maxQueue: positive(source, "AGENT_MAX_QUEUE", 64),
     metricsToken: source.AGENT_METRICS_TOKEN ?? "",
+    deliveryLeaseSeconds,
   };
 }

@@ -16,7 +16,7 @@ const database = createDatabasePool(env.databaseUrl);
 const pgmq = new PgmqClient(database);
 const metrics = new MetricsRegistry();
 const eventStore = new EventStore(database, metrics);
-const deliveryStore = new DeliveryStore(database);
+const deliveryStore = new DeliveryStore(database, env.deliveryLeaseSeconds);
 async function initializeDatabase(): Promise<void> {
   let delayMs = 250;
   for (let attempt = 1; attempt <= 12; attempt += 1) {

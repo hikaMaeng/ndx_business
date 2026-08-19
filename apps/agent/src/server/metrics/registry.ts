@@ -13,6 +13,7 @@ export interface MetricsSnapshot {
   workerStarted: number;
   workerCompleted: number;
   workerFailed: number;
+  processingFailures: number;
   inFlight: number;
 }
 
@@ -20,7 +21,7 @@ export class MetricsRegistry {
   private readonly counters: MetricsSnapshot = {
     queueReads: 0, queueMessages: 0, queueDeletes: 0,
     appendTotal: 0, appendDuplicates: 0, appendFailures: 0, appendLatencyMsTotal: 0,
-    workerStarted: 0, workerCompleted: 0, workerFailed: 0, inFlight: 0,
+    workerStarted: 0, workerCompleted: 0, workerFailed: 0, processingFailures: 0, inFlight: 0,
   };
 
   increment(name: keyof MetricsSnapshot, amount = 1): void { this.counters[name] += amount; }
