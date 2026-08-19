@@ -1,9 +1,22 @@
 # API
 
-The public entrypoint exports the legacy `AgentEvent` envelope plus the Vibe
-Coding event families from `protocol/vibe`: session, turn, iteration, tool,
-hook, model, state, process, approval, and artifact.
+The public entrypoint exports three shapes from `protocol/event` and the legacy
+`AgentEvent` from `protocol/agent`.
 
-Every Vibe event carries a session context, transaction key, action, channel,
-state, scope, sequence, and payload. Request, progress, response, and terminal
-events share the same context; callers never wait for a response synchronously.
+- `IngressCommand` is what a client may send: action, transaction key, channel,
+  optional session/run/turn context, and payload. It carries no event ID,
+  stream, or sequence, because the server issues those.
+- `EventDraft` adds server-issued identity minus `sequence`.
+- `EventEnvelope` is the stored and delivered shape: draft plus the per-stream
+  `sequence` assigned at append time, with `causationEventId` linking a derived
+  event to its cause.
+
+`createEventDraft` builds a client command into a draft. `createDerivedDraft`
+builds a follow-up event that inherits stream, session, run, turn, and
+correlation identity from its cause. `deterministicEventId(name)` produces a
+stable UUID-shaped identity for an outcome that may be derived more than once.
+`streamIdOf` is the single stream-identity rule: `session:<sessionId>` when a
+session exists, otherwise `channel:<channel>`.
+
+`protocol/stream` holds the browser stream model. `protocol/vibe` remains an
+alias over the legacy `AgentEvent` contract.

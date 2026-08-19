@@ -8,14 +8,15 @@ The preserved baseline branch had a duplicate/conflict early-return defect that 
 
 | Source path | Responsibility |
 | --- | --- |
-| `src/server/app.ts` | HTTP ingress and health/readiness |
+| `src/server/app.ts` | HTTP ingress, health/readiness, token-guarded metrics |
 | `src/server/database.ts` | explicit durable-state Postgres pool construction |
 | `src/server/queue` | queue transport contract independent of a broker |
 | `src/server/pgmq` | PostgreSQL/PGMQ adapter |
 | `src/server/consumer.ts` | legacy poll, canonical append, claim, execute, publish, delete |
-| `src/server/ingress` | legacy queue event to canonical draft conversion |
-| `src/server/event-store` | immutable canonical event persistence and per-stream positions |
+| `src/server/ingress` | legacy queue event to canonical draft conversion and result derivation |
+| `src/server/event-store` | immutable canonical event persistence, per-stream positions, identity backfill |
 | `src/server/execution` | transaction-key idempotency state |
+| `src/server/metrics` | aggregate operator counters behind `GET /metrics` |
 | `src/server/worker` | lazy bounded Worker Thread pool and allow-listed actions |
 | `src/server/stream` | channel-filtered WebSocket event projection |
 | `src/server/transport/websocket.ts` | `/ws` subscribe and event frames |

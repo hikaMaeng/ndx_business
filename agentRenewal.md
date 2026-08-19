@@ -770,6 +770,15 @@ server-issued field 발급 뒤 domain event로 변환한다.
 - 기존 `agent_events`/`agent_execution`의 처리와 DDL ownership이 실제 migration
   artifact에 기록되고 legacy runtime DDL과 병행되지 않는다.
 
+진행 상태:
+
+- 완료: durable append 선행, event_id 수렴, 파생 이벤트의 stream/causation 승계,
+  bigint sequence 변환, identity backfill, 결정적 result 식별자, token 보호
+  `/metrics`, `agent_events` 동결 결정.
+- 미완료: Thread 1의 no-await 불변식과 ingress/worker backpressure 분리. 현재
+  consumer는 여전히 worker 완료를 await하므로 Phase 2를 완료로 선언하지 않는다.
+  이 항목은 Phase 3의 scheduler와 attempt claim이 들어올 때 함께 닫는다.
+
 ### Phase 3 — Event store와 replay
 
 - immutable event store 구현

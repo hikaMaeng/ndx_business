@@ -1,48 +1,56 @@
-import type { AgentEvent } from "agent_domain/common";
-import { createResultEvent } from "agent_domain/common";
+import type { AgentEvent, EventEnvelope } from "agent_domain/common";
+import { createResultEvent, deterministicEventId } from "agent_domain/common";
 import type { EventQueueTransport } from "./queue/transport.js";
 import { claimExecution, completeExecution } from "./execution/store.js";
 import { runWorker } from "./worker/pool.js";
 import type { WorkerPool } from "./worker/pool.js";
 import type { EventStreamHub } from "./stream/hub.js";
-import type { EventLog } from "./event-log.js";
 import type { EventStore } from "./event-store/store.js";
-import { toEventDraft } from "./ingress/event-draft.js";
+import type { MetricsRegistry } from "./metrics/registry.js";
+import { toEventDraft, toResultDraft } from "./ingress/event-draft.js";
 
-export function startConsumer(input: { queueTransport: EventQueueTransport; database: import("pg").Pool; pool: WorkerPool; hub: EventStreamHub; eventLog: EventLog; eventStore: EventStore; queue: string; resultQueue: string; visibilityTimeoutSeconds: number; pollSeconds: number; batchSize: number }): { stop: () => void } {
+/** One terminal result exists per transaction key, so its identity is derived rather than random. */
+function resultEventId(event: AgentEvent): string { return deterministicEventId(`result:${event.transactionKey}`); }
+
+export function startConsumer(input: { queueTransport: EventQueueTransport; database: import("pg").Pool; pool: WorkerPool; hub: EventStreamHub; eventStore: EventStore; metrics: MetricsRegistry; queue: string; resultQueue: string; visibilityTimeoutSeconds: number; pollSeconds: number; batchSize: number }): { stop: () => void } {
   let stopped = false;
+  const publishResult = async (request: EventEnvelope, result: AgentEvent<{ ok: boolean; value?: unknown; error?: { code: string; message: string } }>): Promise<void> => {
+    await input.eventStore.append(toResultDraft(request, result));
+    await input.queueTransport.send(input.resultQueue, result);
+    input.hub.publish(result);
+  };
+  const acknowledge = async (event: AgentEvent, messageId: string): Promise<void> => {
+    await input.queueTransport.delete(input.queue, messageId);
+    input.metrics.increment("queueDeletes");
+    console.log(JSON.stringify({ event: "event.deleted", action: event.action, eventId: event.eventId, transactionKey: event.transactionKey, messageId }));
+  };
   const loop = async (): Promise<void> => {
     while (!stopped) {
       try {
         const messages = await input.queueTransport.read(input.queue, { visibilityTimeoutSeconds: input.visibilityTimeoutSeconds, quantity: input.batchSize, pollSeconds: input.pollSeconds });
+        input.metrics.increment("queueReads");
+        input.metrics.increment("queueMessages", messages.length);
         for (const message of messages) {
         const event = message.event as AgentEvent;
         console.log(JSON.stringify({ event: "event.received", action: event.action, eventId: event.eventId, transactionKey: event.transactionKey, messageId: message.id }));
         const persisted = await input.eventStore.append(toEventDraft(event));
         console.log(JSON.stringify({ event: "event.persisted", eventId: persisted.eventId, streamId: persisted.streamId, sequence: persisted.sequence, messageId: message.id }));
-        await input.eventLog.append(event);
         const claim = await claimExecution(input.database, event);
         console.log(JSON.stringify({ event: "execution.claim", action: event.action, eventId: event.eventId, transactionKey: event.transactionKey, kind: claim.kind, completed: claim.kind === "duplicate" ? claim.completed : false }));
         if (claim.kind === "conflict") {
           console.log(JSON.stringify({ event: "idempotency.conflict", action: event.action, transactionKey: event.transactionKey, reason: claim.reason }));
-          const conflictEvent = createResultEvent(event, { ok: false, error: { code: "idempotency_conflict", message: claim.reason } });
-          await input.eventStore.append(toEventDraft(conflictEvent));
-          await input.eventLog.append(conflictEvent);
-          await input.queueTransport.send(input.resultQueue, conflictEvent);
-          input.hub.publish(conflictEvent);
-          await input.queueTransport.delete(input.queue, message.id);
+          const conflictEvent = createResultEvent(event, { ok: false, error: { code: "idempotency_conflict", message: claim.reason } }, deterministicEventId(`conflict:${event.eventId}`));
+          await publishResult(persisted, conflictEvent);
+          await acknowledge(event, message.id);
           continue;
         }
         if (claim.kind === "duplicate") {
           if (claim.completed && claim.result) {
-            const resultEvent = createResultEvent(event, claim.result as { ok: boolean; value?: unknown; error?: { code: string; message: string } });
+            const resultEvent = createResultEvent(event, claim.result as { ok: boolean; value?: unknown; error?: { code: string; message: string } }, resultEventId(event));
             console.log(JSON.stringify({ event: "event.replayed", action: resultEvent.action, eventId: resultEvent.eventId, transactionKey: resultEvent.transactionKey }));
-            input.hub.publish(resultEvent);
-            await input.eventStore.append(toEventDraft(resultEvent));
-            await input.eventLog.append(resultEvent);
-            await input.queueTransport.send(input.resultQueue, resultEvent);
+            await publishResult(persisted, resultEvent);
           }
-          if (claim.completed) { await input.queueTransport.delete(input.queue, message.id); console.log(JSON.stringify({ event: "event.deleted", action: event.action, eventId: event.eventId, transactionKey: event.transactionKey, messageId: message.id })); }
+          if (claim.completed) await acknowledge(event, message.id);
           continue;
         }
         const visibilityTimer = setInterval(() => {
@@ -50,33 +58,31 @@ export function startConsumer(input: { queueTransport: EventQueueTransport; data
             console.error(JSON.stringify({ event: "visibility.extend.failed", action: event.action, eventId: event.eventId, transactionKey: event.transactionKey, messageId: message.id, error: error instanceof Error ? error.message : String(error) }));
           });
         }, Math.max(1000, Math.floor(input.visibilityTimeoutSeconds * 1000 / 2)));
+        input.metrics.increment("workerStarted");
+        input.metrics.increment("inFlight");
         try {
           console.log(JSON.stringify({ event: "worker.started", action: event.action, eventId: event.eventId, transactionKey: event.transactionKey }));
           const result = await runWorker(input.pool, event);
-          const resultEvent = createResultEvent(event, { ok: true, value: result.value });
+          const resultEvent = createResultEvent(event, { ok: true, value: result.value }, resultEventId(event));
           console.log(JSON.stringify({ event: "worker.completed", action: event.action, resultAction: resultEvent.action, eventId: event.eventId, resultEventId: resultEvent.eventId, transactionKey: event.transactionKey }));
-          await input.eventStore.append(toEventDraft(resultEvent));
-          await input.eventLog.append(resultEvent);
-          await input.queueTransport.send(input.resultQueue, resultEvent);
           await completeExecution(input.database, event.transactionKey, resultEvent.payload, "completed");
-          input.hub.publish(resultEvent);
+          await publishResult(persisted, resultEvent);
+          input.metrics.increment("workerCompleted");
           console.log(JSON.stringify({ event: "execution.completed", action: event.action, eventId: event.eventId, transactionKey: event.transactionKey }));
           clearInterval(visibilityTimer);
-          await input.queueTransport.delete(input.queue, message.id);
-          console.log(JSON.stringify({ event: "event.deleted", action: event.action, eventId: event.eventId, transactionKey: event.transactionKey, messageId: message.id }));
+          await acknowledge(event, message.id);
         } catch (error) {
-          const resultEvent = createResultEvent(event, { ok: false, error: { code: "worker_failed", message: error instanceof Error ? error.message : "Worker failed" } });
+          const resultEvent = createResultEvent(event, { ok: false, error: { code: "worker_failed", message: error instanceof Error ? error.message : "Worker failed" } }, resultEventId(event));
           console.log(JSON.stringify({ event: "worker.failed", action: event.action, resultAction: resultEvent.action, eventId: event.eventId, resultEventId: resultEvent.eventId, transactionKey: event.transactionKey, error: resultEvent.payload }));
-          await input.eventStore.append(toEventDraft(resultEvent));
-          await input.eventLog.append(resultEvent);
-          await input.queueTransport.send(input.resultQueue, resultEvent);
           const status = resultEvent.payload.error?.message.includes("timed out") || resultEvent.payload.error?.message.includes("timeout") ? "timed_out" : resultEvent.payload.error?.message.includes("aborted") ? "cancelled" : "failed";
           await completeExecution(input.database, event.transactionKey, resultEvent.payload, status);
-          input.hub.publish(resultEvent);
+          await publishResult(persisted, resultEvent);
+          input.metrics.increment("workerFailed");
           console.log(JSON.stringify({ event: "execution.completed", action: event.action, eventId: event.eventId, transactionKey: event.transactionKey, outcome: "failed" }));
           clearInterval(visibilityTimer);
-          await input.queueTransport.delete(input.queue, message.id);
-          console.log(JSON.stringify({ event: "event.deleted", action: event.action, eventId: event.eventId, transactionKey: event.transactionKey, messageId: message.id }));
+          await acknowledge(event, message.id);
+        } finally {
+          input.metrics.increment("inFlight", -1);
         }
         }
       } catch (error) {

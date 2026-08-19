@@ -1,0 +1,32 @@
+/**
+ * In-process operator counters for the ingress handoff.
+ * Aggregate values only: no payloads, channels, or session identifiers ever enter this registry.
+ */
+export interface MetricsSnapshot {
+  queueReads: number;
+  queueMessages: number;
+  queueDeletes: number;
+  appendTotal: number;
+  appendDuplicates: number;
+  appendFailures: number;
+  appendLatencyMsTotal: number;
+  workerStarted: number;
+  workerCompleted: number;
+  workerFailed: number;
+  inFlight: number;
+}
+
+export class MetricsRegistry {
+  private readonly counters: MetricsSnapshot = {
+    queueReads: 0, queueMessages: 0, queueDeletes: 0,
+    appendTotal: 0, appendDuplicates: 0, appendFailures: 0, appendLatencyMsTotal: 0,
+    workerStarted: 0, workerCompleted: 0, workerFailed: 0, inFlight: 0,
+  };
+
+  increment(name: keyof MetricsSnapshot, amount = 1): void { this.counters[name] += amount; }
+
+  snapshot(): MetricsSnapshot & { appendLatencyMsAverage: number } {
+    const appends = this.counters.appendTotal;
+    return { ...this.counters, appendLatencyMsAverage: appends === 0 ? 0 : Math.round(this.counters.appendLatencyMsTotal / appends) };
+  }
+}

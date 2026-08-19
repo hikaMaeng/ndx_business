@@ -12,6 +12,7 @@ export interface AgentEnv {
   minWorkerThreads: number;
   maxWorkerThreads: number;
   maxQueue: number;
+  metricsToken: string;
 }
 
 function positive(source: NodeJS.ProcessEnv, name: string, fallback: number, allowZero = false): number {
@@ -37,5 +38,6 @@ export function readEnv(source = process.env): AgentEnv {
     minWorkerThreads,
     maxWorkerThreads,
     maxQueue: positive(source, "AGENT_MAX_QUEUE", 64),
+    metricsToken: source.AGENT_METRICS_TOKEN ?? "",
   };
 }
