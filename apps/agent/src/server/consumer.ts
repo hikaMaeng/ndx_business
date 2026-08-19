@@ -16,28 +16,28 @@ export function startConsumer(input: { queueTransport: EventQueueTransport; data
         for (const message of messages) {
         const event = message.event as AgentEvent;
         console.log(JSON.stringify({ event: "event.received", action: event.action, eventId: event.eventId, transactionKey: event.transactionKey, messageId: message.id }));
-        input.eventLog.append(event);
+        await input.eventLog.append(event);
         const claim = await claimExecution(input.database, event);
         console.log(JSON.stringify({ event: "execution.claim", action: event.action, eventId: event.eventId, transactionKey: event.transactionKey, kind: claim.kind, completed: claim.kind === "duplicate" ? claim.completed : false }));
         if (claim.kind === "conflict") {
           console.log(JSON.stringify({ event: "idempotency.conflict", action: event.action, transactionKey: event.transactionKey, reason: claim.reason }));
           const conflictEvent = createResultEvent(event, { ok: false, error: { code: "idempotency_conflict", message: claim.reason } });
-          input.eventLog.append(conflictEvent);
+          await input.eventLog.append(conflictEvent);
           await input.queueTransport.send(input.resultQueue, conflictEvent);
           input.hub.publish(conflictEvent);
           await input.queueTransport.delete(input.queue, message.id);
-          return;
+          continue;
         }
         if (claim.kind === "duplicate") {
           if (claim.completed && claim.result) {
             const resultEvent = createResultEvent(event, claim.result as { ok: boolean; value?: unknown; error?: { code: string; message: string } });
             console.log(JSON.stringify({ event: "event.replayed", action: resultEvent.action, eventId: resultEvent.eventId, transactionKey: resultEvent.transactionKey }));
             input.hub.publish(resultEvent);
-            input.eventLog.append(resultEvent);
+            await input.eventLog.append(resultEvent);
             await input.queueTransport.send(input.resultQueue, resultEvent);
           }
           if (claim.completed) { await input.queueTransport.delete(input.queue, message.id); console.log(JSON.stringify({ event: "event.deleted", action: event.action, eventId: event.eventId, transactionKey: event.transactionKey, messageId: message.id })); }
-          return;
+          continue;
         }
         const visibilityTimer = setInterval(() => {
           void input.queueTransport.extendVisibility(input.queue, message.id, input.visibilityTimeoutSeconds).catch((error) => {
@@ -49,7 +49,7 @@ export function startConsumer(input: { queueTransport: EventQueueTransport; data
           const result = await runWorker(input.pool, event);
           const resultEvent = createResultEvent(event, { ok: true, value: result.value });
           console.log(JSON.stringify({ event: "worker.completed", action: event.action, resultAction: resultEvent.action, eventId: event.eventId, resultEventId: resultEvent.eventId, transactionKey: event.transactionKey }));
-          input.eventLog.append(resultEvent);
+          await input.eventLog.append(resultEvent);
           await input.queueTransport.send(input.resultQueue, resultEvent);
           await completeExecution(input.database, event.transactionKey, resultEvent.payload, "completed");
           input.hub.publish(resultEvent);
@@ -60,7 +60,7 @@ export function startConsumer(input: { queueTransport: EventQueueTransport; data
         } catch (error) {
           const resultEvent = createResultEvent(event, { ok: false, error: { code: "worker_failed", message: error instanceof Error ? error.message : "Worker failed" } });
           console.log(JSON.stringify({ event: "worker.failed", action: event.action, resultAction: resultEvent.action, eventId: event.eventId, resultEventId: resultEvent.eventId, transactionKey: event.transactionKey, error: resultEvent.payload }));
-          input.eventLog.append(resultEvent);
+          await input.eventLog.append(resultEvent);
           await input.queueTransport.send(input.resultQueue, resultEvent);
           const status = resultEvent.payload.error?.message.includes("timed out") || resultEvent.payload.error?.message.includes("timeout") ? "timed_out" : resultEvent.payload.error?.message.includes("aborted") ? "cancelled" : "failed";
           await completeExecution(input.database, event.transactionKey, resultEvent.payload, status);

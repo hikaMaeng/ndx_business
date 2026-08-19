@@ -4,7 +4,7 @@ The replacement plan and its event-store, attempt, replay, and migration contrac
 
 The `admin` Compose service owns the PostgreSQL/PGMQ runtime. The agent separates the durable-state Postgres pool from the `EventQueueTransport`; PGMQ is the current adapter, not the consumer contract. The current async consumer loop reads batches with `read_with_poll(... quantity: AGENT_POLL_BATCH_SIZE)`, then processes each message serially before reading again. It claims the transaction key, dispatches bounded CPU work to a lazy Worker Thread pool, publishes a result event, and deletes the source message only after result publication and execution persistence succeed. An empty queue keeps the pool at zero workers; `AGENT_MAX_THREADS` is an explicit upper bound.
 
-Known baseline defect: a duplicate or conflict branch returns from the consumer loop rather than only the current batch item, so one such message can stop subsequent consumption. The old branch is therefore reference/recovery material, not an operational fallback; see the [Agent Renewal plan](../../../agentRenewal.md).
+The preserved baseline branch had a duplicate/conflict early-return defect that could stop consumption. The current Renewal branch continues to the next message after acknowledging a conflict; the old branch remains reference/recovery material, not an operational fallback. See the [Agent Renewal plan](../../../agentRenewal.md).
 
 | Source path | Responsibility |
 | --- | --- |

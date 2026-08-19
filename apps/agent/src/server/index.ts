@@ -38,7 +38,6 @@ const websocket = attachWebSocketTransport(server, env, pgmq, hub, eventLog);
 
 async function shutdown(): Promise<void> {
   consumer.stop();
-  await eventLog.flush();
   await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   websocket.close();
   await database.end();

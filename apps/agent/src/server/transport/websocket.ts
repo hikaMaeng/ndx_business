@@ -30,9 +30,9 @@ export function attachWebSocketTransport(server: Server, env: AgentEnv, queue: E
       }
       if (frame.type !== "event" || !frame.action) return;
       const event = createRequestEvent({ action: frame.action, payload: frame.payload ?? {}, transactionKey: frame.transactionKey, channel: frame.channel ?? "agent.requests", source: frame.source ?? "websocket", replyChannel: frame.replyChannel ?? "agent.results" });
-      void queue.send(env.queue, event).then((messageId) => {
+      void queue.send(env.queue, event).then(async (messageId) => {
         console.log(JSON.stringify({ event: "event.enqueued", transport: "websocket", action: event.action, eventId: event.eventId, transactionKey: event.transactionKey, messageId }));
-        eventLog.append(event);
+        await eventLog.append(event);
         hub.publish(event);
       }).catch((error) => console.error(JSON.stringify({ event: "websocket.enqueue.failed", action: event.action, transactionKey: event.transactionKey, error: error instanceof Error ? error.message : String(error) })));
     });

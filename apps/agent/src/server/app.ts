@@ -20,7 +20,7 @@ export function createApp(env: AgentEnv, queue: EventQueueTransport, hub: EventS
       const event = createRequestEvent({ action: body.action, payload: (body.payload && typeof body.payload === "object" ? body.payload : {}) as Record<string, unknown>, transactionKey: typeof body.transactionKey === "string" ? body.transactionKey : undefined, channel: typeof body.channel === "string" ? body.channel : "agent.requests", source: typeof body.source === "string" ? body.source : "http" , replyChannel: typeof body.replyChannel === "string" ? body.replyChannel : "agent.results" });
       const messageId = await queue.send(env.queue, event);
       console.log(JSON.stringify({ event: "event.enqueued", action: event.action, eventId: event.eventId, transactionKey: event.transactionKey, channel: event.channel, replyChannel: event.replyChannel, messageId }));
-      eventLog.append(event);
+      await eventLog.append(event);
       hub.publish(event);
       return response.status(202).json({ accepted: true, messageId, eventId: event.eventId, transactionKey: event.transactionKey });
     } catch (error) { return response.status(503).json({ error: error instanceof Error ? error.message : "Event enqueue failed" }); }
