@@ -10,10 +10,10 @@ export function runWorker(pool: WorkerPool, event: AgentEvent, signal?: AbortSig
 interface PendingTask { id: string; event: AgentEvent; signal?: AbortSignal; resolve: (result: WorkerResult) => void; reject: (error: Error) => void; abort?: () => void; }
 interface WorkerSlot { worker: Worker; busy: boolean; retired: boolean; task?: PendingTask; }
 
-export function createWorkerPool(options: { minWorkerThreads: number; maxWorkerThreads: number; maxQueue: number }): WorkerPool {
+export function createWorkerPool(options: { minWorkerThreads: number; maxWorkerThreads: number; maxQueue: number; workerUrl?: URL }): WorkerPool {
   const slots: WorkerSlot[] = [];
   const queue: PendingTask[] = [];
-  const workerUrl = new URL("./worker.js", import.meta.url);
+  const workerUrl = options.workerUrl ?? new URL("./worker.js", import.meta.url);
 
   const dispatch = (): void => {
     while (slots.length < options.minWorkerThreads && slots.length < options.maxWorkerThreads) slots.push(createSlot());
@@ -54,7 +54,14 @@ export function createWorkerPool(options: { minWorkerThreads: number; maxWorkerT
       slot.busy = false;
       void replaceSlot(slot);
     });
-    worker.on("exit", (code) => { if (code !== 0 && !slot.retired) { slot.retired = true; if (slot.task) slot.task.reject(new Error(`worker exited with code ${code}`)); slot.task = undefined; slot.busy = false; void replaceSlot(slot); } });
+    worker.on("exit", (code) => {
+      if (slot.retired) return;
+      slot.retired = true;
+      if (slot.task) slot.task.reject(new Error(`worker exited with code ${code}`));
+      slot.task = undefined;
+      slot.busy = false;
+      void replaceSlot(slot);
+    });
     return slot;
   };
   const replaceSlot = async (slot: WorkerSlot): Promise<void> => {
@@ -74,6 +81,7 @@ export function createWorkerPool(options: { minWorkerThreads: number; maxWorkerT
     },
     async destroy(): Promise<void> {
       for (const task of queue.splice(0)) task.reject(new Error("Worker pool stopped"));
+      for (const slot of slots) slot.retired = true;
       await Promise.all(slots.map((slot) => slot.worker.terminate()));
     },
   };
