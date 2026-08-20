@@ -13,6 +13,7 @@ export interface AgentEnv {
   minWorkerThreads: number;
   maxWorkerThreads: number;
   maxQueue: number;
+  databasePoolMax: number;
   metricsToken: string;
   deliveryLeaseSeconds: number;
 }
@@ -46,6 +47,7 @@ export function readEnv(source = process.env): AgentEnv {
     minWorkerThreads,
     maxWorkerThreads,
     maxQueue: positive(source, "AGENT_MAX_QUEUE", 64),
+    databasePoolMax: positive(source, "AGENT_DATABASE_POOL_MAX", Math.min(48, Math.max(16, Math.ceil(maxWorkerThreads / 2)))),
     metricsToken: source.AGENT_METRICS_TOKEN ?? "",
     deliveryLeaseSeconds,
   };
