@@ -796,8 +796,9 @@ server-issued field 발급 뒤 domain event로 변환한다.
 - 완료: scheduler 단독 dispatch, ingress notification wakeup, attempt token fencing,
   processing/execution lease heartbeat와 만료 회수, 지수 backoff·최대 시도·DLQ,
   claim-path partial index, terminal/delivered operational-ledger retention.
-- 미완료: cursor replay/checkpoint 및 projection 재생성은 Phase 6 CQRS/replay 구현과
-  함께 남아 있다. 따라서 이 문서 전체의 Phase 3 완료를 선언하지 않는다.
+- 완료: durable cursor의 subscription fingerprint·stream position/high-water vector,
+  bounded replay page, cursor retention, 그리고 event-store 기반 projection checkpoint
+  rebuild를 Phase 5/6 구현과 함께 실증했다.
 
 완료 조건:
 
@@ -837,7 +838,7 @@ server-issued field 발급 뒤 domain event로 변환한다.
 
 진행 상태:
 
-- 구현 중: terminal result의 `event_store` append와 `event_outbox` 예약은 같은 transaction으로
+- 완료: terminal result의 `event_store` append와 `event_outbox` 예약은 같은 transaction으로
   commit되고, fenced dispatcher만 그 이후 PGMQ/WebSocket 발행을 시도한다. session/run/turn/tool
   projection은 독립 stream-position checkpoint를 가진다. outbox는 capped exponential backoff와
   최대 시도 DLQ를 가진다. 실 DB에서 terminal event의 outbox publish 및 특정 projection의
@@ -868,7 +869,10 @@ server-issued field 발급 뒤 domain event로 변환한다.
 - 완료: canonical channel frame parser, channel-fingerprint-bound opaque cursor,
   event-store high-water/replay, canonical-envelope-only live routing, replay-live handoff,
   connection별 bounded mailbox와 slow-consumer 격리.
-- 미완료: browser reconnect/cursor 수용 테스트와 다채널 공정성·p95/p99 부하 증적.
+- 완료: rendered browser에서 257-event paged replay, deliberate disconnect 뒤 cursor
+  resume, channel 변경 후 reload의 cursor-fingerprint 폐기, capped reconnect를 확인했다.
+  4개 채널 × 128 client request fairness run은 channel별 exact terminal receipt와
+  p50/p95/p99(4,895/6,614/6,780 ms), server cursor advance, backlog zero를 기록했다.
 
 완료 조건:
 
