@@ -4,8 +4,13 @@ import { executeHandler } from "agent_domain/server";
 
 const controllers = new Map<string, AbortController>();
 
-function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, Math.max(0, milliseconds)));
+function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) { reject(new Error("worker operation aborted")); return; }
+    const timer = setTimeout(() => { signal.removeEventListener("abort", abort); resolve(); }, Math.max(0, milliseconds));
+    const abort = () => { clearTimeout(timer); reject(new Error("worker operation aborted")); };
+    signal.addEventListener("abort", abort, { once: true });
+  });
 }
 
 async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, controller: AbortController): Promise<T> {
@@ -22,14 +27,7 @@ async function execute(event: EventEnvelope, controller: AbortController): Promi
   const payload = event.payload as Record<string, unknown>;
   const delayMs = typeof payload.simulateDelayMs === "number" ? payload.simulateDelayMs : 0;
   const timeoutMs = typeof payload.timeoutMs === "number" ? payload.timeoutMs : undefined;
-  const operation = (async () => {
-    const steps = Math.max(1, Math.ceil(delayMs / 10));
-    for (let step = 0; step < steps; step += 1) {
-      if (signal.aborted) throw new Error("worker operation aborted");
-      await delay(delayMs > 0 ? 10 : 0);
-    }
-    return executeHandler(event, signal);
-  })();
+  const operation = delay(delayMs, signal).then(() => executeHandler(event, signal));
   if (timeoutMs !== undefined) return withTimeout(operation, timeoutMs, controller);
   return operation;
 }
