@@ -45,7 +45,7 @@ await Promise.all(replyChannels.map((channel) => new Promise((resolve, reject) =
     if (started === undefined) throw new Error(`unexpected result ${frame.event.transactionKey} on ${channel}`);
     received.get(channel).push({ transactionKey: frame.event.transactionKey, latencyMs: Date.now() - Date.parse(frame.event.createdAt) });
   });
-}))); 
+})));
 
 const total = channels * perChannel;
 let next = 0;
