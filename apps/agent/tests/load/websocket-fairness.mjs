@@ -43,7 +43,7 @@ await Promise.all(replyChannels.map((channel) => new Promise((resolve, reject) =
     if (frame.event.channel !== channel) throw new Error(`cross-channel event ${frame.event.channel} on ${channel}`);
     const started = expected.get(frame.event.transactionKey);
     if (started === undefined) throw new Error(`unexpected result ${frame.event.transactionKey} on ${channel}`);
-    received.get(channel).push({ transactionKey: frame.event.transactionKey, latencyMs: Date.now() - Date.parse(frame.event.createdAt) });
+    received.get(channel).push({ transactionKey: frame.event.transactionKey, latencyMs: Date.now() - started });
   });
 })));
 
