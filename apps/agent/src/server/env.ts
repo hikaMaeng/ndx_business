@@ -27,7 +27,7 @@ function positive(source: NodeJS.ProcessEnv, name: string, fallback: number, all
 export function readEnv(source = process.env): AgentEnv {
   const cpuCount = cpus().length;
   const minWorkerThreads = positive(source, "AGENT_MIN_THREADS", 0, true);
-  const maxWorkerThreads = positive(source, "AGENT_MAX_THREADS", Math.min(2, cpuCount), false);
+  const maxWorkerThreads = positive(source, "AGENT_MAX_THREADS", cpuCount * 2, false);
   if (minWorkerThreads > maxWorkerThreads) throw new Error("AGENT_MIN_THREADS must not exceed AGENT_MAX_THREADS");
   const visibilityTimeoutSeconds = positive(source, "QUEUE_VISIBILITY_TIMEOUT_SECONDS", 60);
   const deliveryLeaseSeconds = positive(source, "AGENT_DELIVERY_LEASE_SECONDS", 30);
