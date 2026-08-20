@@ -58,10 +58,37 @@ function emitFlow(action: string, channel: string, payload: Record<string, unkno
 
 function publishSamples(): void { const samples = [["orders", "order.created", { orderId: "ORD-2048", total: 128 }], ["telemetry", "telemetry.sample", { cpu: 0.42, worker: 3 }], ["notifications", "notification.sent", { recipient: "web-client", template: "ready" }]] as const; samples.forEach(([channel, eventType, payload], index) => { model.addEvent(eventRecord({ channel, eventType, direction: "outbound", state: "delivered", payload })); window.setTimeout(() => model.addEvent(eventRecord({ channel, eventType: `${eventType}.received`, direction: "inbound", state: "delivered", payload: { ...payload, receivedAt: now() } })), 420 + index * 120); }); }
 
-model.subscribe(render); model.setConnection("online"); render();
-let socket: WebSocket | undefined; let cursor: string | undefined;
-function connectStream(): void { socket?.close(); const protocol = location.protocol === "https:" ? "wss:" : "ws:"; socket = new WebSocket(`${protocol}//${location.host}/ws`); socket.onopen = () => { model.setConnection("online"); socket?.send(JSON.stringify({ type: "subscribe", channels: model.getSnapshot().subscribedChannels, ...(cursor ? { cursor } : {}) })); }; socket.onerror = () => model.setConnection("offline"); socket.onclose = () => model.setConnection("offline"); socket.onmessage = (message) => { try { const frame = parseChannelServerFrame(JSON.parse(message.data)); if (!frame) return; if (frame.type === "subscribed" && frame.cursor) { cursor = frame.cursor; return; } if (frame.type === "replay") { cursor = frame.cursor; if (!frame.replayComplete) socket?.send(JSON.stringify({ type: "subscribe", channels: model.getSnapshot().subscribedChannels, cursor })); return; } if (frame.type !== "event") return; cursor = frame.cursor; const event = frame.event; model.addEvent(eventRecord({ id: event.eventId, transactionKey: event.transactionKey, channel: event.channel, eventType: event.action, direction: "inbound", state: "delivered", payload: event.payload, timestamp: event.createdAt })); } catch { /* malformed transport frame */ } }; }
+model.subscribe(render); render();
+const cursorStorageKey = "agent.channel.cursor";
+let socket: WebSocket | undefined; let cursor = sessionStorage.getItem(cursorStorageKey) ?? undefined; let connectionGeneration = 0; let reconnectTimer: number | undefined;
+function setCursor(value: string | undefined): void { cursor = value; if (value) sessionStorage.setItem(cursorStorageKey, value); else sessionStorage.removeItem(cursorStorageKey); }
+function connectStream(): void {
+  const generation = ++connectionGeneration;
+  if (reconnectTimer) { window.clearTimeout(reconnectTimer); reconnectTimer = undefined; }
+  socket?.close();
+  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  socket = new WebSocket(`${protocol}//${location.host}/ws`);
+  socket.onopen = () => { if (generation !== connectionGeneration) return; model.setConnection("online"); socket?.send(JSON.stringify({ type: "subscribe", channels: model.getSnapshot().subscribedChannels, ...(cursor ? { cursor } : {}) })); };
+  socket.onerror = () => { if (generation === connectionGeneration) model.setConnection("offline"); };
+  socket.onclose = () => {
+    if (generation !== connectionGeneration) return;
+    model.setConnection("offline");
+    reconnectTimer = window.setTimeout(() => { if (generation === connectionGeneration) connectStream(); }, 500);
+  };
+  socket.onmessage = (message) => {
+    try {
+      const frame = parseChannelServerFrame(JSON.parse(message.data));
+      if (!frame) return;
+      if (frame.type === "subscribed" && frame.cursor) { setCursor(frame.cursor); return; }
+      if (frame.type === "replay") { setCursor(frame.cursor); if (!frame.replayComplete) socket?.send(JSON.stringify({ type: "subscribe", channels: model.getSnapshot().subscribedChannels, cursor })); return; }
+      if (frame.type !== "event") return;
+      setCursor(frame.cursor);
+      const event = frame.event;
+      model.addEvent(eventRecord({ id: event.eventId, transactionKey: event.transactionKey, channel: event.channel, eventType: event.action, direction: "inbound", state: "delivered", payload: event.payload, timestamp: event.createdAt }));
+    } catch { /* malformed transport frame */ }
+  };
+}
 connectStream();
-app?.addEventListener("change", (event) => { const target = event.target as HTMLInputElement; if (target.matches("[data-channel]")) { model.toggleSubscription(target.dataset.channel ?? ""); connectStream(); } });
+app?.addEventListener("change", (event) => { const target = event.target as HTMLInputElement; if (target.matches("[data-channel]")) { model.toggleSubscription(target.dataset.channel ?? ""); setCursor(undefined); connectStream(); } });
 app?.addEventListener("submit", (event) => { event.preventDefault(); const form = event.target as HTMLFormElement; if (form.dataset.form === "channel") { model.addChannel(String(new FormData(form).get("channel"))); form.reset(); } if (form.dataset.form === "event") { const data = new FormData(form); let payload: Record<string, unknown>; try { payload = JSON.parse(String(data.get("payload"))); } catch { payload = { raw: String(data.get("payload")) }; } emitFlow(String(data.get("eventType")), String(data.get("channel")), payload, String((event.submitter as HTMLButtonElement)?.value ?? "local")); } });
 app?.addEventListener("click", (event) => { const action = (event.target as HTMLElement).dataset.action; if (action === "sample") publishSamples(); if (action === "clear") model.clear(); });
