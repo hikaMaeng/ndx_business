@@ -24,5 +24,5 @@ After all page events have durably advanced the cursor it emits `replay` with
 that same opaque cursor. The client must subscribe again until the frame says
 `replayComplete: true`; only a complete replay joins live routing.
 
-`protocol/stream` holds the browser stream model. `protocol/vibe` remains an
-alias over the legacy `AgentEvent` contract.
+`protocol/stream` holds the browser stream model. There is no legacy `protocol/vibe`
+alias or public legacy stub subpath.
