@@ -2,7 +2,7 @@
 
 The replacement plan and its event-store, attempt, replay, and migration contracts live in [Agent Renewal plan](../../../agentRenewal.md). Update this router with the implementing source path and a code-to-document anchor in the same phase that changes a contract.
 
-The `admin` Compose service owns the PostgreSQL/PGMQ runtime. The agent separates the durable-state Postgres pool from the `EventQueueTransport`; PGMQ is the current adapter, not the consumer contract. The current async consumer loop reads batches with `read_with_poll(... quantity: AGENT_POLL_BATCH_SIZE)`, then processes each message serially before reading again. It claims the transaction key, dispatches bounded CPU work to a lazy Worker Thread pool, publishes a result event, and deletes the source message only after result publication and execution persistence succeed. An empty queue keeps the pool at zero workers; `AGENT_MAX_THREADS` is an explicit upper bound.
+The `admin` Compose service owns the PostgreSQL/PGMQ runtime. The agent separates durable-state Postgres, ingress long-poll, and queue-writer pools. PGMQ is the current `EventQueueTransport` adapter, not the consumer contract. Ingress lanes durably append a canonical envelope and insert its processing job before deleting the source message; scheduler lanes alone claim jobs and dispatch bounded CPU work. An empty queue keeps the worker pool at zero; `AGENT_MAX_THREADS` is an explicit upper bound.
 
 The preserved baseline branch had a duplicate/conflict early-return defect that could stop consumption. The current Renewal branch continues to the next message after acknowledging a conflict; the old branch remains reference/recovery material, not an operational fallback. See the [Agent Renewal plan](../../../agentRenewal.md).
 

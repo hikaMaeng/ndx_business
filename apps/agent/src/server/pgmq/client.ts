@@ -1,5 +1,5 @@
 import { Pool } from "pg";
-import type { AgentEvent } from "agent_domain/common";
+import type { AgentEvent, EventEnvelope } from "agent_domain/common";
 import type { EventQueueMessage, EventQueueTransport } from "../queue/transport.js";
 
 interface PgmqMessage {
@@ -13,7 +13,7 @@ export class PgmqClient implements EventQueueTransport {
 
   async check(): Promise<void> { await this.pool.query("SELECT 1"); }
 
-  async send(queue: string, message: AgentEvent): Promise<string> {
+  async send(queue: string, message: AgentEvent | EventEnvelope): Promise<string> {
     const result = await this.pool.query<{ send: string | number }>("SELECT pgmq.send($1, $2::jsonb) AS send", [queue, JSON.stringify(message)]);
     return String(result.rows[0].send);
   }

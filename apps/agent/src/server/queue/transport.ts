@@ -1,4 +1,4 @@
-import type { AgentEvent } from "agent_domain/common";
+import type { AgentEvent, EventEnvelope } from "agent_domain/common";
 
 export interface EventQueueMessage {
   id: string;
@@ -7,7 +7,7 @@ export interface EventQueueMessage {
 }
 
 export interface EventQueueTransport {
-  send(queue: string, event: AgentEvent): Promise<string>;
+  send(queue: string, event: AgentEvent | EventEnvelope): Promise<string>;
   read(queue: string, options: { visibilityTimeoutSeconds: number; quantity: number; pollSeconds: number }): Promise<EventQueueMessage[]>;
   delete(queue: string, id: string): Promise<void>;
   extendVisibility(queue: string, id: string, seconds: number): Promise<void>;

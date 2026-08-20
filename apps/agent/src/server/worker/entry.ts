@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { parentPort } from "node:worker_threads";
-import type { AgentEvent } from "agent_domain/common";
+import type { EventEnvelope } from "agent_domain/common";
 
 const controllers = new Map<string, AbortController>();
 
@@ -17,7 +17,7 @@ async function withTimeout<T>(operation: Promise<T>, timeoutMs: number, controll
   finally { if (timer) clearTimeout(timer); }
 }
 
-async function execute(event: AgentEvent, controller: AbortController): Promise<unknown> {
+async function execute(event: EventEnvelope, controller: AbortController): Promise<unknown> {
   const signal = controller.signal;
   const payload = event.payload as Record<string, unknown>;
   const delayMs = typeof payload.simulateDelayMs === "number" ? payload.simulateDelayMs : 0;
@@ -35,7 +35,7 @@ async function execute(event: AgentEvent, controller: AbortController): Promise<
   return operation;
 }
 
-parentPort?.on("message", (message: { type: "run" | "abort"; id: string; event?: AgentEvent }) => {
+parentPort?.on("message", (message: { type: "run" | "abort"; id: string; event?: EventEnvelope }) => {
   if (message.type === "abort") { controllers.get(message.id)?.abort(); return; }
   const controller = new AbortController();
   controllers.set(message.id, controller);

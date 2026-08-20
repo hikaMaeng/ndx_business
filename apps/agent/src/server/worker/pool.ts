@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { Worker } from "node:worker_threads";
-import type { AgentEvent } from "agent_domain/common";
+import type { EventEnvelope } from "agent_domain/common";
 
 export interface WorkerResult { value: unknown; }
-export interface WorkerPool { run(event: AgentEvent, signal?: AbortSignal): Promise<WorkerResult>; destroy(): Promise<void>; }
+export interface WorkerPool { run(event: EventEnvelope, signal?: AbortSignal): Promise<WorkerResult>; destroy(): Promise<void>; }
 
-export function runWorker(pool: WorkerPool, event: AgentEvent, signal?: AbortSignal): Promise<WorkerResult> { return pool.run(event, signal); }
+export function runWorker(pool: WorkerPool, event: EventEnvelope, signal?: AbortSignal): Promise<WorkerResult> { return pool.run(event, signal); }
 
-interface PendingTask { id: string; event: AgentEvent; signal?: AbortSignal; resolve: (result: WorkerResult) => void; reject: (error: Error) => void; abort?: () => void; }
+interface PendingTask { id: string; event: EventEnvelope; signal?: AbortSignal; resolve: (result: WorkerResult) => void; reject: (error: Error) => void; abort?: () => void; }
 interface WorkerSlot { worker: Worker; busy: boolean; retired: boolean; task?: PendingTask; }
 
 export function createWorkerPool(options: { minWorkerThreads: number; maxWorkerThreads: number; maxQueue: number; workerUrl?: URL }): WorkerPool {
@@ -75,7 +75,7 @@ export function createWorkerPool(options: { minWorkerThreads: number; maxWorkerT
   console.log(JSON.stringify({ event: "worker.pool.started", minWorkerThreads: options.minWorkerThreads, maxWorkerThreads: options.maxWorkerThreads, maxQueue: options.maxQueue }));
 
   return {
-    run(event: AgentEvent, signal?: AbortSignal): Promise<WorkerResult> {
+    run(event: EventEnvelope, signal?: AbortSignal): Promise<WorkerResult> {
       if (queue.length >= options.maxQueue) return Promise.reject(new Error("Agent worker queue is full"));
       return new Promise<WorkerResult>((resolve, reject) => { queue.push({ id: randomUUID(), event, signal, resolve, reject }); dispatch(); });
     },

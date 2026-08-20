@@ -24,7 +24,7 @@ test("scheduler alone dispatches a durable job and completes it", async () => {
     database: { query: async (sql: string) => sql.startsWith("INSERT") ? { rowCount: 1, rows: [] } : { rowCount: 1, rows: [] } } as never,
     pool: { run: async () => ({ value: "ok" }), destroy: async () => undefined }, hub: { publish: () => undefined } as never,
     eventStore: { append: async (draft: Record<string, unknown>) => ({ ...draft, sequence: "1" }) } as never,
-    deliveryStore: { claim: async () => "claimed", complete: async () => undefined } as never,
+    deliveryStore: { claim: async () => ({ kind: "claimed", attemptId: "delivery-1" }), complete: async () => true } as never,
     processingStore: { claimNext: async () => ++claims === 1 ? { eventId: event.eventId, attemptId: "attempt-1", event } : undefined, complete: async (id: string) => { completed.push(id); return true; }, renew: async () => true, retryLater: async () => true } as never,
     metrics, resultQueue: "agent_results", schedulerIdleMs: 1, executionLeaseSeconds: 60, processingMaxAttempts: 3, processingRetryBaseMs: 1, waitForWork: async () => await new Promise<never>(() => undefined), maxConcurrentDispatches: 1,
   });
@@ -41,7 +41,7 @@ test("scheduler claims up to its dispatch concurrency without waiting for an ear
     database: { query: async () => ({ rowCount: 1, rows: [] }) } as never,
     pool: { run: async () => { started += 1; await workerGate; return { value: "ok" }; }, destroy: async () => undefined }, hub: { publish: () => undefined } as never,
     eventStore: { append: async (draft: Record<string, unknown>) => ({ ...draft, sequence: "1" }) } as never,
-    deliveryStore: { claim: async () => "claimed", complete: async () => undefined } as never,
+    deliveryStore: { claim: async () => ({ kind: "claimed", attemptId: "delivery-1" }), complete: async () => true } as never,
     processingStore: { claimNext: async () => jobs[claimIndex] ? { eventId: jobs[claimIndex]!.eventId, attemptId: `attempt-${claimIndex}`, event: jobs[claimIndex++]! } : undefined, complete: async (id: string) => { completed.push(id); return true; }, renew: async () => true, retryLater: async () => true } as never,
     metrics, resultQueue: "agent_results", schedulerIdleMs: 1, executionLeaseSeconds: 60, processingMaxAttempts: 3, processingRetryBaseMs: 1, waitForWork: async () => await new Promise<never>(() => undefined), maxConcurrentDispatches: 2,
   });
@@ -59,7 +59,7 @@ test("infrastructure delivery failures become a bounded retry rather than comple
     database: { query: async () => ({ rowCount: 1, rows: [] }) } as never,
     pool: { run: async () => ({ value: "ok" }), destroy: async () => undefined }, hub: { publish: () => undefined } as never,
     eventStore: { append: async (draft: Record<string, unknown>) => ({ ...draft, sequence: "1" }) } as never,
-    deliveryStore: { claim: async () => "claimed", complete: async () => undefined } as never,
+    deliveryStore: { claim: async () => ({ kind: "claimed", attemptId: "delivery-1" }), complete: async () => true } as never,
     processingStore: {
       claimNext: async () => retry ? undefined : { eventId: event.eventId, attemptId: "attempt-1", event }, complete: async () => true, renew: async () => true,
       retryLater: async (eventId: string, attemptId: string, maxAttempts: number, baseRetryMs: number) => { retry = { eventId, attemptId, maxAttempts, baseRetryMs }; return "retry"; },
@@ -68,4 +68,19 @@ test("infrastructure delivery failures become a bounded retry rather than comple
   });
   await new Promise((resolve) => setTimeout(resolve, 30)); scheduler.stop();
   assert.deepEqual(retry, { eventId: "event-1", attemptId: "attempt-1", maxAttempts: 4, baseRetryMs: 250 });
+});
+
+test("retry exhaustion persists a deterministic terminal failure and attempts delivery from the DLQ path", async () => {
+  let appends = 0; let claims = 0;
+  const scheduler = startScheduler({
+    queueTransport: { send: async () => { throw new Error("result queue outage"); }, read: async () => [], delete: async () => undefined, extendVisibility: async () => undefined, check: async () => undefined },
+    database: { query: async () => ({ rowCount: 1, rows: [] }) } as never,
+    pool: { run: async () => ({ value: "ok" }), destroy: async () => undefined }, hub: { publish: () => undefined } as never,
+    eventStore: { append: async (draft: Record<string, unknown>) => { appends += 1; return { ...draft, sequence: "1" }; } } as never,
+    deliveryStore: { claim: async () => ({ kind: "claimed", attemptId: "delivery-1" }), complete: async () => true } as never,
+    processingStore: { claimNext: async () => ++claims === 1 ? { eventId: event.eventId, attemptId: "attempt-1", event } : undefined, complete: async () => true, renew: async () => true, retryLater: async () => "dead" } as never,
+    metrics, resultQueue: "agent_results", schedulerIdleMs: 1, executionLeaseSeconds: 60, processingMaxAttempts: 1, processingRetryBaseMs: 1, waitForWork: async () => await new Promise<never>(() => undefined), maxConcurrentDispatches: 1,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30)); scheduler.stop();
+  assert.equal(appends, 2, "initial terminal result and permanent failure result both attempt canonical persistence");
 });

@@ -1,8 +1,10 @@
-import type { AgentEvent } from "agent_domain/common";
+import type { AgentEvent, EventEnvelope } from "agent_domain/common";
+
+export type StreamEvent = AgentEvent | EventEnvelope;
 
 interface Subscriber {
   channels: Set<string>;
-  send: (event: AgentEvent) => void;
+  send: (event: StreamEvent) => void;
 }
 
 export class EventStreamHub {
@@ -15,7 +17,7 @@ export class EventStreamHub {
     return () => this.subscribers.delete(id);
   }
 
-  publish(event: AgentEvent): void {
+  publish(event: StreamEvent): void {
     for (const subscriber of this.subscribers.values()) {
       if (subscriber.channels.has(event.channel)) subscriber.send(event);
     }

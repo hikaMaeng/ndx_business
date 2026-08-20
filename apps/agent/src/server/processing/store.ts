@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
-import type { AgentEvent } from "agent_domain/common";
+import type { EventEnvelope } from "agent_domain/common";
 
-export interface ProcessingJob { eventId: string; attemptId: string; event: AgentEvent; }
+export interface ProcessingJob { eventId: string; attemptId: string; event: EventEnvelope; }
 export interface ProcessingCounts { ready: number; running: number; failed: number; readyOldestMs: number; expiredLeases: number; }
 export interface PrunedOperationalRows { processingJobs: number; deliveries: number; }
 
@@ -31,16 +31,16 @@ export class ProcessingStore {
     await this.pool.query("CREATE INDEX IF NOT EXISTS event_processing_job_running_lease_idx ON event_processing_job (lease_until) WHERE status = 'running'");
   }
 
-  async enqueue(event: AgentEvent): Promise<void> {
+  async enqueue(event: EventEnvelope): Promise<void> {
     await this.pool.query(`INSERT INTO event_processing_job (event_id, event) VALUES ($1, $2::jsonb)
       ON CONFLICT (event_id) DO NOTHING`, [event.eventId, JSON.stringify(event)]);
   }
 
   async claimNext(): Promise<ProcessingJob | undefined> {
     const attemptId = randomUUID();
-    const result = await this.pool.query<{ event_id: string; attempt_id: string; event: AgentEvent }>(`WITH candidate AS (
+    const result = await this.pool.query<{ event_id: string; attempt_id: string; event: EventEnvelope }>(`WITH candidate AS (
       SELECT event_id FROM event_processing_job
-      WHERE (status = 'ready' AND retry_at <= now()) OR (status = 'running' AND lease_until < now())
+      WHERE (status = 'ready' AND retry_at <= now()) OR (status = 'running' AND (lease_until IS NULL OR lease_until < now()))
       ORDER BY retry_at, created_at FOR UPDATE SKIP LOCKED LIMIT 1
     ) UPDATE event_processing_job job SET status = 'running', attempts = attempts + 1, attempt_id = $2,
       lease_until = now() + make_interval(secs => $1), updated_at = now()

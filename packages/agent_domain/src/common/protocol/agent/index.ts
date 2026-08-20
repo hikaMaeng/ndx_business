@@ -46,7 +46,7 @@ export function createRequestEvent(input: {
  * Builds the legacy wire result for a request.
  * `eventId` is supplied by the caller so a redelivered request converges on one result identity.
  */
-export function createResultEvent(request: AgentEvent, payload: AgentResultPayload, eventId: string = randomUUID()): AgentEvent<AgentResultPayload> {
+export function createResultEvent(request: Pick<AgentEvent, "transactionKey" | "replyChannel" | "action">, payload: AgentResultPayload, eventId: string = randomUUID()): AgentEvent<AgentResultPayload> {
   return {
     eventId,
     transactionKey: request.transactionKey,

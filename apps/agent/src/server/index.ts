@@ -55,6 +55,7 @@ const refreshMetrics = async (): Promise<void> => {
 void refreshMetrics();
 const metricsTimer = setInterval(() => { void refreshMetrics().catch((error) => console.error(JSON.stringify({ event: "metrics.refresh.failed", error: error instanceof Error ? error.message : String(error) }))); }, 1000);
 const retentionTimer = setInterval(() => { void processingStore.pruneOperationalLedgers(env.operationalRetentionDays).catch((error) => console.error(JSON.stringify({ event: "operational-ledger.prune.failed", error: error instanceof Error ? error.message : String(error) }))); }, 24 * 60 * 60 * 1000);
+const recoveryTimer = setInterval(() => { void recoverExpiredExecutions(database).then((rows) => { if (rows) console.log(JSON.stringify({ event: "execution.recovered", rows })); }).catch((error) => console.error(JSON.stringify({ event: "execution.recovery.failed", error: error instanceof Error ? error.message : String(error) }))); }, Math.max(1000, Math.floor(env.visibilityTimeoutSeconds * 500)));
 const pool = createWorkerPool({ minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, maxQueue: env.maxQueue });
 const hub = new EventStreamHub();
 const schedulerNotifier = createSchedulerNotifier();
@@ -68,6 +69,7 @@ async function shutdown(): Promise<void> {
   scheduler.stop();
   clearInterval(metricsTimer);
   clearInterval(retentionTimer);
+  clearInterval(recoveryTimer);
   await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   websocket.close();
   await ingressQueueDatabase.end();

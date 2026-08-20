@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import type { Pool } from "pg";
-import type { AgentEvent } from "agent_domain/common";
+import type { EventEnvelope } from "agent_domain/common";
 
 export type Claim = { kind: "claimed" } | { kind: "duplicate"; completed: boolean; result?: unknown } | { kind: "conflict"; reason: string };
 
-function payloadHash(event: AgentEvent): string {
+function payloadHash(event: EventEnvelope): string {
   return createHash("sha256").update(JSON.stringify({ action: event.action, payload: event.payload })).digest("hex");
 }
 
@@ -29,11 +29,11 @@ export async function ensureExecutionSchema(pool: Pool): Promise<void> {
 }
 
 export async function recoverExpiredExecutions(pool: Pool): Promise<number> {
-  const result = await pool.query("UPDATE agent_execution SET status = 'timed_out', updated_at = now(), completed_at = now() WHERE status = 'running' AND (lease_until < now() OR (lease_until IS NULL AND updated_at < now() - interval '60 seconds'))");
+  const result = await pool.query("UPDATE agent_execution SET lease_until = now() - interval '1 millisecond', updated_at = now() WHERE status = 'running' AND lease_until IS NULL AND updated_at < now() - interval '60 seconds'");
   return result.rowCount ?? 0;
 }
 
-export async function claimExecution(pool: Pool, event: AgentEvent, attemptId: string, leaseSeconds: number): Promise<Claim> {
+export async function claimExecution(pool: Pool, event: EventEnvelope, attemptId: string, leaseSeconds: number): Promise<Claim> {
   const hash = payloadHash(event);
   const inserted = await pool.query(
     "INSERT INTO agent_execution (transaction_key, request_event_id, payload_hash, status, attempt_id, lease_until, heartbeat_at, attempts) VALUES ($1, $2, $3, 'running', $4, now() + make_interval(secs => $5), now(), 1) ON CONFLICT (transaction_key) DO NOTHING RETURNING transaction_key",

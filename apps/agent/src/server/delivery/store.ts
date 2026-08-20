@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 
 /**
@@ -6,32 +7,35 @@ import type { Pool } from "pg";
  * acknowledged without sending again. `leased` means another attempt holds the claim and has not
  * finished: the caller must not acknowledge its source, because that attempt may still fail.
  */
-export type DeliveryClaim = "claimed" | "delivered" | "leased";
+export type DeliveryClaim = { kind: "claimed"; attemptId: string } | { kind: "delivered" } | { kind: "leased" };
 
 export class DeliveryStore {
   constructor(private readonly pool: Pool, private readonly leaseSeconds: number) {}
 
   async ensureSchema(): Promise<void> {
     await this.pool.query(`CREATE TABLE IF NOT EXISTS event_delivery (
-      event_id text PRIMARY KEY, delivered_at timestamptz, lease_until timestamptz, attempts integer NOT NULL DEFAULT 0,
+      event_id text PRIMARY KEY, delivered_at timestamptz, lease_until timestamptz, attempt_id text, attempts integer NOT NULL DEFAULT 0,
       created_at timestamptz NOT NULL DEFAULT now())`);
     await this.pool.query("ALTER TABLE event_delivery ADD COLUMN IF NOT EXISTS lease_until timestamptz");
+    await this.pool.query("ALTER TABLE event_delivery ADD COLUMN IF NOT EXISTS attempt_id text");
     await this.pool.query("CREATE INDEX IF NOT EXISTS event_delivery_pending_idx ON event_delivery (created_at) WHERE delivered_at IS NULL");
   }
 
   async claim(eventId: string): Promise<DeliveryClaim> {
-    const claimed = await this.pool.query(`INSERT INTO event_delivery (event_id, attempts, lease_until)
-      VALUES ($1, 1, now() + make_interval(secs => $2))
-      ON CONFLICT (event_id) DO UPDATE SET attempts = event_delivery.attempts + 1, lease_until = now() + make_interval(secs => $2)
+    const attemptId = randomUUID();
+    const claimed = await this.pool.query<{ attempt_id: string }>(`INSERT INTO event_delivery (event_id, attempts, attempt_id, lease_until)
+      VALUES ($1, 1, $3, now() + make_interval(secs => $2))
+      ON CONFLICT (event_id) DO UPDATE SET attempts = event_delivery.attempts + 1, attempt_id = $3, lease_until = now() + make_interval(secs => $2)
       WHERE event_delivery.delivered_at IS NULL AND (event_delivery.lease_until IS NULL OR event_delivery.lease_until < now())
-      RETURNING event_id`, [eventId, this.leaseSeconds]);
-    if (claimed.rowCount) return "claimed";
+      RETURNING attempt_id`, [eventId, this.leaseSeconds, attemptId]);
+    if (claimed.rowCount) return { kind: "claimed", attemptId: claimed.rows[0].attempt_id };
     const existing = await this.pool.query<{ delivered: boolean }>("SELECT delivered_at IS NOT NULL AS delivered FROM event_delivery WHERE event_id = $1", [eventId]);
-    return existing.rows[0]?.delivered ? "delivered" : "leased";
+    return existing.rows[0]?.delivered ? { kind: "delivered" } : { kind: "leased" };
   }
 
-  async complete(eventId: string): Promise<void> {
-    await this.pool.query("UPDATE event_delivery SET delivered_at = now(), lease_until = NULL WHERE event_id = $1", [eventId]);
+  async complete(eventId: string, attemptId: string): Promise<boolean> {
+    const result = await this.pool.query("UPDATE event_delivery SET delivered_at = now(), lease_until = NULL WHERE event_id = $1 AND delivered_at IS NULL AND attempt_id = $2", [eventId, attemptId]);
+    return Boolean(result.rowCount);
   }
 
   async pendingCount(): Promise<number> {
