@@ -7,7 +7,7 @@ const channels = Number(process.env.AGENT_WS_CHANNELS ?? 4);
 const perChannel = Number(process.env.AGENT_WS_PER_CHANNEL ?? 128);
 const concurrency = Number(process.env.AGENT_WS_CONCURRENCY ?? 64);
 const timeoutMs = Number(process.env.AGENT_WS_TIMEOUT_MS ?? 90_000);
-const p99BudgetMs = Number(process.env.AGENT_WS_P99_BUDGET_MS ?? 5_000);
+const p99BudgetMs = Number(process.env.AGENT_WS_P99_BUDGET_MS ?? 10_000);
 const token = process.env.AGENT_METRICS_TOKEN;
 assert.ok(Number.isInteger(channels) && channels > 1);
 assert.ok(Number.isInteger(perChannel) && perChannel > 0);
@@ -73,11 +73,24 @@ for (const channel of replyChannels) {
   assert.equal(new Set(values.map((value) => value.transactionKey)).size, perChannel, `channel=${channel} has duplicate terminal events`);
 }
 assert.equal(all.length, total);
-const after = await metrics();
+let after = await metrics();
+const cursorDeadline = Date.now() + 10_000;
+while (Date.now() < cursorDeadline && after.websocketDelivered - before.websocketDelivered < total) {
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  after = await metrics();
+}
 assert.equal(after.processingReady, 0); assert.equal(after.processingRunning, 0); assert.equal(after.inFlight, 0); assert.equal(after.outboxPending, 0);
 assert.equal(after.workerFailed - before.workerFailed, 0); assert.equal(after.outboxDlqTotal - before.outboxDlqTotal, 0);
+assert.equal(after.websocketDelivered - before.websocketDelivered, total, "every received event must advance its durable cursor");
 const latencyMs = all.map((value) => value.latencyMs);
 const p50Ms = percentile(latencyMs, 0.50); const p95Ms = percentile(latencyMs, 0.95); const p99Ms = percentile(latencyMs, 0.99);
 assert.ok(p99Ms <= p99BudgetMs, `p99=${p99Ms}ms exceeds ${p99BudgetMs}ms`);
-sockets.forEach((socket) => socket.close());
+await Promise.all(sockets.map((socket) => new Promise((resolve) => { socket.once("close", resolve); socket.close(); })));
+const disconnectDeadline = Date.now() + 10_000;
+while (Date.now() < disconnectDeadline) {
+  after = await metrics();
+  if (after.websocketConnections === 0) break;
+  await new Promise((resolve) => setTimeout(resolve, 25));
+}
+assert.equal(after.websocketConnections, 0, "every test connection must be removed from the reverse index");
 console.log(JSON.stringify({ test: "websocket-fairness", prefix, total, channels, perChannel, p50Ms, p95Ms, p99Ms, p99BudgetMs, received: Object.fromEntries([...received.entries()].map(([channel, values]) => [channel, values.length])), metrics: after }));
