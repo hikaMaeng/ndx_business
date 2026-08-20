@@ -6,4 +6,4 @@ Run `npm run lint --workspace agent`, `npm run test --workspace agent`, and `npm
 
 Browser verification drives the `/ws` console at `/`. Prefer role and accessible-name locators; the shell exposes `main` as its landmark.
 
-Run `node apps/agent/tests/load/multichannel.mjs` against a deployed token-enabled Agent for concurrency verification. It distributes requests over four channels and 40 streams, then requires zero scheduler and delivery backlog before passing. Set `AGENT_LOAD_TOTAL` and `AGENT_LOAD_CONCURRENCY` for the intended load envelope.
+Run `node apps/agent/tests/load/multichannel.mjs` against a deployed token-enabled Agent for concurrency verification. It distributes requests over four channels and 40 streams, then requires zero scheduler and delivery backlog before passing. Set `AGENT_LOAD_TOTAL`, `AGENT_LOAD_CONCURRENCY`, and the SLO-bound `AGENT_LOAD_TIMEOUT_MS` for the intended load envelope.
