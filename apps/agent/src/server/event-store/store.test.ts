@@ -57,6 +57,8 @@ test("sequence counter migration starts after every existing stream position", a
   const pool = { query: async (sql: string) => { statements.push(sql); return { rowCount: 0, rows: [] }; } };
   await new EventStore(pool as never).ensureSchema();
   assert.ok(statements.some((sql) => sql.includes("SELECT stream_id, max(sequence) FROM event_store GROUP BY stream_id")));
+  assert.ok(statements.some((sql) => sql.includes("event_store_channel_stream_sequence_idx")));
+  assert.ok(statements.some((sql) => sql.includes("COALESCE(NULLIF(payload->>'sessionKey','')")));
 });
 
 test("append records duplicate and latency metrics", async () => {
@@ -66,4 +68,16 @@ test("append records duplicate and latency metrics", async () => {
   await store.append(draft);
   assert.equal(counts.appendDuplicates, 1);
   assert.equal(counts.appendTotal, 1);
+});
+
+test("channel replay compares stream positions in PostgreSQL and cursor pruning has a retention bound", async () => {
+  const queries: Array<{ sql: string; values: unknown[] | undefined }> = [];
+  const store = new EventStore({ query: async (sql: string, values?: unknown[]) => { queries.push({ sql, values }); return { rowCount: 1, rows: [] }; } } as never);
+  await store.replayChannels(["orders"], { "session:one": "9007199254740992" }, { "session:one": "9007199254740994" });
+  await store.pruneChannelCursors(7);
+  assert.match(queries[0].sql, /jsonb_each_text\(\$3::jsonb\)/);
+  assert.match(queries[0].sql, /event_store\.stream_id = bounds\.stream_id/);
+  assert.deepEqual(queries[0].values, [["orders"], JSON.stringify({ "session:one": "9007199254740992" }), JSON.stringify({ "session:one": "9007199254740994" })]);
+  assert.match(queries[1].sql, /event_subscription_cursor/);
+  assert.deepEqual(queries[1].values, [7]);
 });

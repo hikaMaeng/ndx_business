@@ -35,6 +35,8 @@ async function initializeDatabase(): Promise<void> {
       await processingStore.ensureSchema();
       const pruned = await processingStore.pruneOperationalLedgers(env.operationalRetentionDays);
       if (pruned.processingJobs || pruned.deliveries) console.log(JSON.stringify({ event: "operational-ledger.pruned", retentionDays: env.operationalRetentionDays, ...pruned }));
+      const cursors = await eventStore.pruneChannelCursors(env.cursorRetentionDays);
+      if (cursors) console.log(JSON.stringify({ event: "channel-cursor.pruned", retentionDays: env.cursorRetentionDays, cursors }));
       return;
     } catch (error) {
       if (attempt === 12) throw error;
@@ -54,7 +56,7 @@ const refreshMetrics = async (): Promise<void> => {
 };
 void refreshMetrics();
 const metricsTimer = setInterval(() => { void refreshMetrics().catch((error) => console.error(JSON.stringify({ event: "metrics.refresh.failed", error: error instanceof Error ? error.message : String(error) }))); }, 1000);
-const retentionTimer = setInterval(() => { void processingStore.pruneOperationalLedgers(env.operationalRetentionDays).catch((error) => console.error(JSON.stringify({ event: "operational-ledger.prune.failed", error: error instanceof Error ? error.message : String(error) }))); }, 24 * 60 * 60 * 1000);
+const retentionTimer = setInterval(() => { void Promise.all([processingStore.pruneOperationalLedgers(env.operationalRetentionDays), eventStore.pruneChannelCursors(env.cursorRetentionDays)]).catch((error) => console.error(JSON.stringify({ event: "retention.prune.failed", error: error instanceof Error ? error.message : String(error) }))); }, 24 * 60 * 60 * 1000);
 const recoveryTimer = setInterval(() => { void recoverExpiredExecutions(database).then((rows) => { if (rows) console.log(JSON.stringify({ event: "execution.recovered", rows })); }).catch((error) => console.error(JSON.stringify({ event: "execution.recovery.failed", error: error instanceof Error ? error.message : String(error) }))); }, Math.max(1000, Math.floor(env.visibilityTimeoutSeconds * 500)));
 const pool = createWorkerPool({ minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, maxQueue: env.maxQueue });
 const hub = new EventStreamHub();

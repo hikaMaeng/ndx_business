@@ -12,6 +12,7 @@ export interface AgentEnv {
   processingMaxAttempts: number;
   processingRetryBaseMs: number;
   operationalRetentionDays: number;
+  cursorRetentionDays: number;
   ingressConsumers: number;
   cpuCount: number;
   minWorkerThreads: number;
@@ -52,6 +53,7 @@ export function readEnv(source = process.env): AgentEnv {
     processingMaxAttempts: positive(source, "AGENT_PROCESSING_MAX_ATTEMPTS", 5),
     processingRetryBaseMs: positive(source, "AGENT_PROCESSING_RETRY_BASE_MS", 1_000),
     operationalRetentionDays: positive(source, "AGENT_OPERATIONAL_RETENTION_DAYS", 30),
+    cursorRetentionDays: positive(source, "AGENT_CURSOR_RETENTION_DAYS", 7),
     ingressConsumers: positive(source, "AGENT_INGRESS_CONSUMERS", Math.min(32, maxWorkerThreads)),
     cpuCount,
     minWorkerThreads,

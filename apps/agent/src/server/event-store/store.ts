@@ -4,6 +4,7 @@ import type { EventDraft, EventEnvelope } from "agent_domain/common";
 import type { MetricsRegistry } from "../metrics/registry.js";
 
 const COLUMNS = "event_id,stream_id,sequence,action,transaction_key,event_version,kind,channel,reply_channel,session_id,run_id,turn_id,causation_event_id,correlation_id,source,payload,created_at";
+const QUALIFIED_COLUMNS = COLUMNS.split(",").map((column) => `event_store.${column}`).join(",");
 
 type StoredEventRow = {
   event_id: string; stream_id: string; sequence: string | number; action: string; transaction_key: string;
@@ -45,6 +46,8 @@ export class EventStore {
     await this.pool.query("ALTER TABLE event_store ADD COLUMN IF NOT EXISTS causation_event_id text");
     await this.backfillIdentity();
     await this.pool.query("CREATE INDEX IF NOT EXISTS event_store_stream_sequence_idx ON event_store (stream_id, sequence)");
+    await this.pool.query("CREATE INDEX IF NOT EXISTS event_store_channel_stream_sequence_idx ON event_store (channel, stream_id, sequence)");
+    await this.pool.query("DROP INDEX IF EXISTS event_store_stream_channel_sequence_idx");
     await this.pool.query("CREATE INDEX IF NOT EXISTS event_store_correlation_idx ON event_store (correlation_id, stored_at)");
     await this.pool.query(`CREATE TABLE IF NOT EXISTS event_stream_sequence (
       stream_id text PRIMARY KEY, last_sequence bigint NOT NULL)`);
@@ -64,7 +67,9 @@ export class EventStore {
       session_id = COALESCE(session_id, NULLIF(payload->>'sessionKey',''), NULLIF(substring(stream_id from 'session:(.*)'),'')),
       run_id = COALESCE(run_id, NULLIF(payload->>'runKey','')),
       turn_id = COALESCE(turn_id, NULLIF(payload->>'turnKey',''))
-      WHERE session_id IS NULL OR run_id IS NULL OR turn_id IS NULL`);
+      WHERE (session_id IS NULL AND COALESCE(NULLIF(payload->>'sessionKey',''), NULLIF(substring(stream_id from 'session:(.*)'),'')) IS NOT NULL)
+        OR (run_id IS NULL AND NULLIF(payload->>'runKey','') IS NOT NULL)
+        OR (turn_id IS NULL AND NULLIF(payload->>'turnKey','') IS NOT NULL)`);
     if (filled.rowCount) console.log(JSON.stringify({ event: "event.store.backfilled", rows: filled.rowCount }));
   }
 
@@ -104,12 +109,16 @@ export class EventStore {
   }
 
   async replayChannels(channels: string[], positions: Record<string, string>, highWater: Record<string, string>): Promise<EventEnvelope[]> {
-    const result = await this.pool.query<StoredEventRow>(`SELECT ${COLUMNS} FROM event_store
-      WHERE channel = ANY($1::text[]) ORDER BY stream_id, sequence`, [channels]);
-    return result.rows.filter((row) => {
-      const sequence = BigInt(row.sequence);
-      return sequence > BigInt(positions[row.stream_id] ?? "0") && sequence <= BigInt(highWater[row.stream_id] ?? "0");
-    }).map(fromRow);
+    const result = await this.pool.query<StoredEventRow>(`WITH bounds AS (
+        SELECT high_water.key AS stream_id,
+          COALESCE(($2::jsonb ->> high_water.key)::bigint, 0) AS position,
+          high_water.value::bigint AS high_water
+        FROM jsonb_each_text($3::jsonb) AS high_water
+      )
+      SELECT ${QUALIFIED_COLUMNS} FROM bounds JOIN event_store ON event_store.stream_id = bounds.stream_id
+      WHERE channel = ANY($1::text[]) AND sequence > bounds.position AND sequence <= bounds.high_water
+      ORDER BY event_store.stream_id, event_store.sequence`, [channels, JSON.stringify(positions), JSON.stringify(highWater)]);
+    return result.rows.map(fromRow);
   }
 
   async openChannelCursor(channels: string[], token?: string): Promise<{ token: string; positions: Record<string, string> }> {
@@ -127,7 +136,13 @@ export class EventStore {
   }
 
   async advanceChannelCursor(token: string, positions: Record<string, string>): Promise<void> {
-    await this.pool.query("UPDATE event_subscription_cursor SET positions = $2::jsonb, updated_at = now() WHERE token = $1", [token, JSON.stringify(positions)]);
+    const updated = await this.pool.query("UPDATE event_subscription_cursor SET positions = $2::jsonb, updated_at = now() WHERE token = $1 RETURNING token", [token, JSON.stringify(positions)]);
+    if (!updated.rowCount) throw new Error("channel cursor no longer exists");
+  }
+
+  async pruneChannelCursors(retentionDays: number): Promise<number> {
+    const pruned = await this.pool.query("DELETE FROM event_subscription_cursor WHERE updated_at < now() - make_interval(days => $1)", [retentionDays]);
+    return pruned.rowCount ?? 0;
   }
 
   private record(startedAt: number): void {

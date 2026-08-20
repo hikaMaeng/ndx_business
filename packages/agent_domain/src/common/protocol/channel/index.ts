@@ -30,6 +30,19 @@ export function parseChannelServerFrame(value: unknown): ChannelServerFrame | un
   if ((frame.type === "ready" || frame.type === "subscribed") && Array.isArray(frame.channels) && frame.channels.every((channel) => typeof channel === "string") && (frame.cursor === undefined || typeof frame.cursor === "string")) return { type: frame.type, channels: frame.channels, ...(typeof frame.cursor === "string" ? { cursor: frame.cursor } : {}) };
   if (frame.type !== "event" || typeof frame.cursor !== "string" || !frame.event || typeof frame.event !== "object") return undefined;
   const event = frame.event as Record<string, unknown>;
-  if (typeof event.eventId !== "string" || typeof event.streamId !== "string" || typeof event.sequence !== "string" || typeof event.channel !== "string" || typeof event.transactionKey !== "string" || typeof event.action !== "string" || !event.payload || typeof event.payload !== "object") return undefined;
-  return { type: "event", cursor: frame.cursor, event: event as unknown as EventEnvelope };
+  if (typeof event.eventId !== "string" || typeof event.streamId !== "string" || typeof event.sequence !== "string" || typeof event.channel !== "string" || typeof event.transactionKey !== "string" || typeof event.action !== "string" || typeof event.correlationId !== "string" || typeof event.createdAt !== "string" || event.eventVersion !== 1 || !event.payload || typeof event.payload !== "object" || Array.isArray(event.payload)) return undefined;
+  if (event.kind !== "command" && event.kind !== "fact" && event.kind !== "result" && event.kind !== "progress" && event.kind !== "failure" && event.kind !== "control") return undefined;
+  if (event.source !== "client" && event.source !== "server" && event.source !== "worker" && event.source !== "scheduler") return undefined;
+  if ((event.replyChannel !== undefined && typeof event.replyChannel !== "string") || (event.sessionId !== undefined && typeof event.sessionId !== "string") || (event.runId !== undefined && typeof event.runId !== "string") || (event.turnId !== undefined && typeof event.turnId !== "string") || (event.causationEventId !== undefined && typeof event.causationEventId !== "string")) return undefined;
+  return { type: "event", cursor: frame.cursor, event: {
+    eventId: event.eventId, streamId: event.streamId, sequence: event.sequence, action: event.action,
+    transactionKey: event.transactionKey, eventVersion: 1, kind: event.kind,
+    channel: event.channel, correlationId: event.correlationId, source: event.source,
+    createdAt: event.createdAt, payload: { ...event.payload },
+    ...(typeof event.replyChannel === "string" ? { replyChannel: event.replyChannel } : {}),
+    ...(typeof event.sessionId === "string" ? { sessionId: event.sessionId } : {}),
+    ...(typeof event.runId === "string" ? { runId: event.runId } : {}),
+    ...(typeof event.turnId === "string" ? { turnId: event.turnId } : {}),
+    ...(typeof event.causationEventId === "string" ? { causationEventId: event.causationEventId } : {}),
+  } };
 }

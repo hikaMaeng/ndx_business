@@ -16,10 +16,16 @@ export function attachWebSocketTransport(server: Server, env: AgentEnv, queue: E
     const mailbox = new ConnectionMailbox(env.websocketMailboxMax, (event, done) => {
       if (socket.readyState !== socket.OPEN) { done(); return; }
       if (socket.bufferedAmount >= env.websocketBufferedBytes) { socket.close(1013, "slow consumer"); done(); return; }
-      positions[event.streamId] = event.sequence;
       if (!cursorToken) { done(); return; }
-      void eventStore.advanceChannelCursor(cursorToken, positions).catch(() => socket.close(1011, "cursor persistence failed"));
-      socket.send(JSON.stringify({ type: "event", event, cursor: cursorToken } satisfies ChannelServerFrame), (error) => { if (error) socket.close(1011, "websocket send failed"); done(); });
+      const nextPositions = { ...positions, [event.streamId]: event.sequence };
+      const token = cursorToken;
+      socket.send(JSON.stringify({ type: "event", event, cursor: token } satisfies ChannelServerFrame), (error) => {
+        if (error) { socket.close(1011, "websocket send failed"); done(); return; }
+        void eventStore.advanceChannelCursor(token, nextPositions).then(() => {
+          positions = nextPositions;
+          done();
+        }).catch(() => { socket.close(1011, "cursor persistence failed"); done(); });
+      });
     }, () => socket.close(1013, "slow consumer"));
     let unsubscribe = hub.subscribe(["agent.requests", "agent.results"], (event) => {
       mailbox.enqueue(event);
