@@ -1,7 +1,7 @@
 import type { AgentEvent, EventEnvelope } from "agent_domain/common";
 import { createResultEvent, deterministicEventId } from "agent_domain/common";
 import type { EventQueueTransport } from "./queue/transport.js";
-import { claimExecution, completeExecution } from "./execution/store.js";
+import { claimExecution, completeExecution, renewExecution } from "./execution/store.js";
 import { runWorker } from "./worker/pool.js";
 import type { WorkerPool } from "./worker/pool.js";
 import type { EventStreamHub } from "./stream/hub.js";
@@ -47,7 +47,7 @@ export function startIngressConsumer(input: { queueTransport: EventQueueTranspor
 }
 
 /** Scheduler is the sole worker dispatcher. A durable job claim, not PGMQ visibility, owns execution. */
-export function startScheduler(input: { queueTransport: EventQueueTransport; database: import("pg").Pool; pool: WorkerPool; hub: EventStreamHub; eventStore: EventStore; deliveryStore: DeliveryStore; processingStore: ProcessingStore; metrics: MetricsRegistry; resultQueue: string; schedulerIdleMs: number; waitForWork: () => Promise<void>; maxConcurrentDispatches: number }): Loop {
+export function startScheduler(input: { queueTransport: EventQueueTransport; database: import("pg").Pool; pool: WorkerPool; hub: EventStreamHub; eventStore: EventStore; deliveryStore: DeliveryStore; processingStore: ProcessingStore; metrics: MetricsRegistry; resultQueue: string; schedulerIdleMs: number; executionLeaseSeconds: number; waitForWork: () => Promise<void>; maxConcurrentDispatches: number }): Loop {
   let stopped = false;
   const publish = async (request: EventEnvelope, result: AgentEvent<ResultPayload>): Promise<void> => {
     const envelope = await input.eventStore.append(toResultDraft(request, result)); const delivery = await input.deliveryStore.claim(envelope.eventId);
@@ -56,13 +56,13 @@ export function startScheduler(input: { queueTransport: EventQueueTransport; dat
     await input.queueTransport.send(input.resultQueue, result); input.hub.publish(result); await input.deliveryStore.complete(envelope.eventId);
   };
   const process = async (event: AgentEvent, jobId: string, attemptId: string): Promise<void> => {
-    const request = await input.eventStore.append(toEventDraft(event)); const claim = await claimExecution(input.database, event);
+    const request = await input.eventStore.append(toEventDraft(event)); const claim = await claimExecution(input.database, event, attemptId, input.executionLeaseSeconds);
     if (claim.kind === "conflict") { await publish(request, createResultEvent(event, { ok: false, error: { code: "idempotency_conflict", message: claim.reason } }, deterministicEventId(`conflict:${event.eventId}`))); return; }
     if (claim.kind === "duplicate") { if (claim.completed && claim.result) await publish(request, createResultEvent(event, claim.result as ResultPayload, resultEventId(event))); if (!claim.completed) throw new Error(`transaction ${event.transactionKey} is already running`); return; }
     input.metrics.increment("workerStarted"); input.metrics.increment("inFlight");
     let leaseLost = false; const controller = new AbortController();
-    const heartbeat = setInterval(() => { void input.processingStore.renew(jobId, attemptId).then((renewed) => { if (!renewed) { leaseLost = true; controller.abort(); } }); }, Math.max(1000, input.schedulerIdleMs));
-    try { const outcome = await workerOutcome(input.pool, event, controller.signal); if (leaseLost) throw new Error(`attempt ${attemptId} lost its lease`); await completeExecution(input.database, event.transactionKey, outcome.result.payload, outcome.status); input.metrics.increment(outcome.status === "completed" ? "workerCompleted" : "workerFailed"); await publish(request, outcome.result); }
+    const heartbeat = setInterval(() => { void Promise.all([input.processingStore.renew(jobId, attemptId), renewExecution(input.database, event.transactionKey, attemptId, input.executionLeaseSeconds)]).then(([jobRenewed, executionRenewed]) => { if (!jobRenewed || !executionRenewed) { leaseLost = true; controller.abort(); } }); }, Math.max(1000, input.schedulerIdleMs));
+    try { const outcome = await workerOutcome(input.pool, event, controller.signal); if (leaseLost) throw new Error(`attempt ${attemptId} lost its lease`); if (!await completeExecution(input.database, event.transactionKey, attemptId, outcome.result.payload, outcome.status)) throw new Error(`execution attempt ${attemptId} lost its lease`); input.metrics.increment(outcome.status === "completed" ? "workerCompleted" : "workerFailed"); await publish(request, outcome.result); }
     finally { clearInterval(heartbeat); input.metrics.increment("inFlight", -1); }
   };
   const dispatchLane = async (): Promise<void> => { while (!stopped) {

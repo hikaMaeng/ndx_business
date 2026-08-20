@@ -5,7 +5,7 @@ import { PgmqClient } from "./pgmq/client.js";
 import { createWorkerPool } from "./worker/pool.js";
 import { startIngressConsumer, startScheduler } from "./consumer.js";
 import { EventStreamHub } from "./stream/hub.js";
-import { ensureExecutionSchema } from "./execution/store.js";
+import { ensureExecutionSchema, recoverExpiredExecutions } from "./execution/store.js";
 import { attachWebSocketTransport } from "./transport/websocket.js";
 import { EventStore } from "./event-store/store.js";
 import { MetricsRegistry } from "./metrics/registry.js";
@@ -28,6 +28,8 @@ async function initializeDatabase(): Promise<void> {
   for (let attempt = 1; attempt <= 12; attempt += 1) {
     try {
       await ensureExecutionSchema(database);
+      const recovered = await recoverExpiredExecutions(database);
+      if (recovered) console.log(JSON.stringify({ event: "execution.recovered", rows: recovered }));
       await eventStore.ensureSchema();
       await deliveryStore.ensureSchema();
       await processingStore.ensureSchema();
@@ -54,7 +56,7 @@ const pool = createWorkerPool({ minWorkerThreads: env.minWorkerThreads, maxWorke
 const hub = new EventStreamHub();
 const schedulerNotifier = createSchedulerNotifier();
 const ingress = startIngressConsumer({ queueTransport: ingressPgmq, eventStore, processingStore, metrics, notifyScheduler: () => schedulerNotifier.notify(), queue: env.queue, visibilityTimeoutSeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, batchSize: env.pollBatchSize, maxConcurrentHandoffs: env.ingressConsumers });
-const scheduler = startScheduler({ queueTransport: pgmq, database, pool, hub, eventStore, deliveryStore, processingStore, metrics, resultQueue: env.resultQueue, schedulerIdleMs: env.schedulerIdleMs, waitForWork: () => schedulerNotifier.wait(env.schedulerIdleMs), maxConcurrentDispatches: env.maxWorkerThreads });
+const scheduler = startScheduler({ queueTransport: pgmq, database, pool, hub, eventStore, deliveryStore, processingStore, metrics, resultQueue: env.resultQueue, schedulerIdleMs: env.schedulerIdleMs, executionLeaseSeconds: env.visibilityTimeoutSeconds, waitForWork: () => schedulerNotifier.wait(env.schedulerIdleMs), maxConcurrentDispatches: env.maxWorkerThreads });
 const server = createApp(env, pgmq, hub, metrics).listen(env.port, () => console.log(JSON.stringify({ event: "agent.listening", port: env.port, cpuCount: env.cpuCount, minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, metricsEndpoint: env.metricsToken ? "enabled" : "disabled" })));
 const websocket = attachWebSocketTransport(server, env, pgmq, hub);
 
