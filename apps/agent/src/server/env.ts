@@ -9,6 +9,9 @@ export interface AgentEnv {
   pollSeconds: number;
   pollBatchSize: number;
   schedulerIdleMs: number;
+  processingMaxAttempts: number;
+  processingRetryBaseMs: number;
+  operationalRetentionDays: number;
   ingressConsumers: number;
   cpuCount: number;
   minWorkerThreads: number;
@@ -44,6 +47,9 @@ export function readEnv(source = process.env): AgentEnv {
     pollSeconds: positive(source, "QUEUE_POLL_SECONDS", 5),
     pollBatchSize: positive(source, "QUEUE_POLL_BATCH_SIZE", 1),
     schedulerIdleMs: positive(source, "AGENT_SCHEDULER_IDLE_MS", 250),
+    processingMaxAttempts: positive(source, "AGENT_PROCESSING_MAX_ATTEMPTS", 5),
+    processingRetryBaseMs: positive(source, "AGENT_PROCESSING_RETRY_BASE_MS", 1_000),
+    operationalRetentionDays: positive(source, "AGENT_OPERATIONAL_RETENTION_DAYS", 30),
     ingressConsumers: positive(source, "AGENT_INGRESS_CONSUMERS", Math.min(8, maxWorkerThreads)),
     cpuCount,
     minWorkerThreads,

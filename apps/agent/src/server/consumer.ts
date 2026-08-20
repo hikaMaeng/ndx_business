@@ -33,7 +33,7 @@ export function startIngressConsumer(input: { queueTransport: EventQueueTranspor
       for (const message of messages) try {
         input.metrics.increment("ingressHandoffActive");
         const persisted = await input.eventStore.append(toEventDraft(message.event));
-        await input.processingStore.enqueue(message.event);
+        await input.processingStore.enqueue(persisted as unknown as AgentEvent);
         await input.queueTransport.delete(input.queue, message.id);
         input.notifyScheduler();
         input.metrics.increment("queueDeletes");
@@ -47,7 +47,7 @@ export function startIngressConsumer(input: { queueTransport: EventQueueTranspor
 }
 
 /** Scheduler is the sole worker dispatcher. A durable job claim, not PGMQ visibility, owns execution. */
-export function startScheduler(input: { queueTransport: EventQueueTransport; database: import("pg").Pool; pool: WorkerPool; hub: EventStreamHub; eventStore: EventStore; deliveryStore: DeliveryStore; processingStore: ProcessingStore; metrics: MetricsRegistry; resultQueue: string; schedulerIdleMs: number; executionLeaseSeconds: number; waitForWork: () => Promise<void>; maxConcurrentDispatches: number }): Loop {
+export function startScheduler(input: { queueTransport: EventQueueTransport; database: import("pg").Pool; pool: WorkerPool; hub: EventStreamHub; eventStore: EventStore; deliveryStore: DeliveryStore; processingStore: ProcessingStore; metrics: MetricsRegistry; resultQueue: string; schedulerIdleMs: number; executionLeaseSeconds: number; processingMaxAttempts: number; processingRetryBaseMs: number; waitForWork: () => Promise<void>; maxConcurrentDispatches: number }): Loop {
   let stopped = false;
   const publish = async (request: EventEnvelope, result: AgentEvent<ResultPayload>): Promise<void> => {
     const envelope = await input.eventStore.append(toResultDraft(request, result)); const delivery = await input.deliveryStore.claim(envelope.eventId);
@@ -56,7 +56,7 @@ export function startScheduler(input: { queueTransport: EventQueueTransport; dat
     await input.queueTransport.send(input.resultQueue, result); input.hub.publish(result); await input.deliveryStore.complete(envelope.eventId);
   };
   const process = async (event: AgentEvent, jobId: string, attemptId: string): Promise<void> => {
-    const request = await input.eventStore.append(toEventDraft(event)); const claim = await claimExecution(input.database, event, attemptId, input.executionLeaseSeconds);
+    const request = event as unknown as EventEnvelope; const claim = await claimExecution(input.database, event, attemptId, input.executionLeaseSeconds);
     if (claim.kind === "conflict") { await publish(request, createResultEvent(event, { ok: false, error: { code: "idempotency_conflict", message: claim.reason } }, deterministicEventId(`conflict:${event.eventId}`))); return; }
     if (claim.kind === "duplicate") { if (claim.completed && claim.result) await publish(request, createResultEvent(event, claim.result as ResultPayload, resultEventId(event))); if (!claim.completed) throw new Error(`transaction ${event.transactionKey} is already running`); return; }
     input.metrics.increment("workerStarted"); input.metrics.increment("inFlight");
@@ -70,7 +70,7 @@ export function startScheduler(input: { queueTransport: EventQueueTransport; dat
       const job = await input.processingStore.claimNext(); if (!job) { await input.waitForWork(); continue; }
       input.metrics.increment("schedulerDispatchActive");
       try { await process(job.event, job.eventId, job.attemptId); if (!await input.processingStore.complete(job.eventId, job.attemptId)) throw new Error(`attempt ${job.attemptId} lost its lease`); }
-      catch (error) { input.metrics.increment("processingFailures"); await input.processingStore.retryLater(job.eventId, job.attemptId); console.error(JSON.stringify({ event: "scheduler.retry", eventId: job.eventId, error: error instanceof Error ? error.message : String(error) })); }
+      catch (error) { input.metrics.increment("processingFailures"); const message = error instanceof Error ? error.message : String(error); const outcome = await input.processingStore.retryLater(job.eventId, job.attemptId, input.processingMaxAttempts, input.processingRetryBaseMs, message); console.error(JSON.stringify({ event: outcome === "dead" ? "scheduler.dlq" : "scheduler.retry", eventId: job.eventId, error: message })); }
       finally { input.metrics.increment("schedulerDispatchActive", -1); }
     } catch (error) { input.metrics.increment("processingFailures"); console.error(JSON.stringify({ event: "scheduler.poll.failed", error: error instanceof Error ? error.message : String(error) })); await delay(input.schedulerIdleMs); }
   } };

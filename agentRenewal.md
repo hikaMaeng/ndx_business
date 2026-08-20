@@ -774,10 +774,11 @@ server-issued field 발급 뒤 domain event로 변환한다.
 
 - 완료: durable append 선행, event_id 수렴, 파생 이벤트의 stream/causation 승계,
   bigint sequence 변환, identity backfill, 결정적 result 식별자, token 보호
-  `/metrics`, `agent_events` 동결 결정.
-- 미완료: Thread 1의 no-await 불변식과 ingress/worker backpressure 분리. 현재
-  consumer는 여전히 worker 완료를 await하므로 Phase 2를 완료로 선언하지 않는다.
-  이 항목은 Phase 3의 scheduler와 attempt claim이 들어올 때 함께 닫는다.
+  `/metrics`, `agent_events` 동결 결정, 그리고 scheduler wakeup을 포함한 Thread 1의
+  no-await/독립 backpressure 불변식. ingress는 canonical append·durable job insert·PGMQ
+  delete까지만 수행하고 worker 또는 result delivery를 await하지 않는다.
+- 완료: Phase 2. `agent_execution`은 transaction idempotency projection으로 보존하고,
+  `agent_events`는 read-only legacy 데이터로 동결한다.
 
 ### Phase 3 — Event store와 replay
 
@@ -789,6 +790,14 @@ server-issued field 발급 뒤 domain event로 변환한다.
 - retry scheduler 구현
 - active attempt partial unique claim, lease/heartbeat 만료 회수 구현
 - DLQ/permanent failure projection 구현
+
+진행 상태:
+
+- 완료: scheduler 단독 dispatch, ingress notification wakeup, attempt token fencing,
+  processing/execution lease heartbeat와 만료 회수, 지수 backoff·최대 시도·DLQ,
+  claim-path partial index, terminal/delivered operational-ledger retention.
+- 미완료: cursor replay/checkpoint 및 projection 재생성은 Phase 6 CQRS/replay 구현과
+  함께 남아 있다. 따라서 이 문서 전체의 Phase 3 완료를 선언하지 않는다.
 
 완료 조건:
 

@@ -33,6 +33,8 @@ async function initializeDatabase(): Promise<void> {
       await eventStore.ensureSchema();
       await deliveryStore.ensureSchema();
       await processingStore.ensureSchema();
+      const pruned = await processingStore.pruneOperationalLedgers(env.operationalRetentionDays);
+      if (pruned.processingJobs || pruned.deliveries) console.log(JSON.stringify({ event: "operational-ledger.pruned", retentionDays: env.operationalRetentionDays, ...pruned }));
       return;
     } catch (error) {
       if (attempt === 12) throw error;
@@ -46,17 +48,18 @@ async function initializeDatabase(): Promise<void> {
 await initializeDatabase();
 const refreshMetrics = async (): Promise<void> => {
   const processing = await processingStore.counts();
-  metrics.setGauge("processingReady", processing.ready); metrics.setGauge("processingRunning", processing.running);
+  metrics.setGauge("processingReady", processing.ready); metrics.setGauge("processingRunning", processing.running); metrics.setGauge("processingDlq", processing.failed);
   metrics.setGauge("processingReadyOldestMs", processing.readyOldestMs); metrics.setGauge("processingExpiredLeases", processing.expiredLeases);
   metrics.setGauge("deliveryPending", await deliveryStore.pendingCount());
 };
 void refreshMetrics();
 const metricsTimer = setInterval(() => { void refreshMetrics().catch((error) => console.error(JSON.stringify({ event: "metrics.refresh.failed", error: error instanceof Error ? error.message : String(error) }))); }, 1000);
+const retentionTimer = setInterval(() => { void processingStore.pruneOperationalLedgers(env.operationalRetentionDays).catch((error) => console.error(JSON.stringify({ event: "operational-ledger.prune.failed", error: error instanceof Error ? error.message : String(error) }))); }, 24 * 60 * 60 * 1000);
 const pool = createWorkerPool({ minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, maxQueue: env.maxQueue });
 const hub = new EventStreamHub();
 const schedulerNotifier = createSchedulerNotifier();
 const ingress = startIngressConsumer({ queueTransport: ingressPgmq, eventStore, processingStore, metrics, notifyScheduler: () => schedulerNotifier.notify(), queue: env.queue, visibilityTimeoutSeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, batchSize: env.pollBatchSize, maxConcurrentHandoffs: env.ingressConsumers });
-const scheduler = startScheduler({ queueTransport: pgmq, database, pool, hub, eventStore, deliveryStore, processingStore, metrics, resultQueue: env.resultQueue, schedulerIdleMs: env.schedulerIdleMs, executionLeaseSeconds: env.visibilityTimeoutSeconds, waitForWork: () => schedulerNotifier.wait(env.schedulerIdleMs), maxConcurrentDispatches: env.maxWorkerThreads });
+const scheduler = startScheduler({ queueTransport: pgmq, database, pool, hub, eventStore, deliveryStore, processingStore, metrics, resultQueue: env.resultQueue, schedulerIdleMs: env.schedulerIdleMs, executionLeaseSeconds: env.visibilityTimeoutSeconds, processingMaxAttempts: env.processingMaxAttempts, processingRetryBaseMs: env.processingRetryBaseMs, waitForWork: () => schedulerNotifier.wait(env.schedulerIdleMs), maxConcurrentDispatches: env.maxWorkerThreads });
 const server = createApp(env, pgmq, hub, metrics).listen(env.port, () => console.log(JSON.stringify({ event: "agent.listening", port: env.port, cpuCount: env.cpuCount, minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, metricsEndpoint: env.metricsToken ? "enabled" : "disabled" })));
 const websocket = attachWebSocketTransport(server, env, pgmq, hub);
 
@@ -64,6 +67,7 @@ async function shutdown(): Promise<void> {
   ingress.stop();
   scheduler.stop();
   clearInterval(metricsTimer);
+  clearInterval(retentionTimer);
   await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   websocket.close();
   await ingressQueueDatabase.end();

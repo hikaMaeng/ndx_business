@@ -16,6 +16,7 @@ export class DeliveryStore {
       event_id text PRIMARY KEY, delivered_at timestamptz, lease_until timestamptz, attempts integer NOT NULL DEFAULT 0,
       created_at timestamptz NOT NULL DEFAULT now())`);
     await this.pool.query("ALTER TABLE event_delivery ADD COLUMN IF NOT EXISTS lease_until timestamptz");
+    await this.pool.query("CREATE INDEX IF NOT EXISTS event_delivery_pending_idx ON event_delivery (created_at) WHERE delivered_at IS NULL");
   }
 
   async claim(eventId: string): Promise<DeliveryClaim> {

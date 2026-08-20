@@ -19,6 +19,7 @@ export interface MetricsSnapshot {
   ingressHandoffActive: number;
   processingReady: number;
   processingRunning: number;
+  processingDlq: number;
   processingReadyOldestMs: number;
   processingExpiredLeases: number;
   schedulerDispatchActive: number;
@@ -30,12 +31,12 @@ export class MetricsRegistry {
     queueReads: 0, queueMessages: 0, queueDeletes: 0,
     appendTotal: 0, appendDuplicates: 0, appendFailures: 0, appendLatencyMsTotal: 0,
     workerStarted: 0, workerCompleted: 0, workerFailed: 0, processingFailures: 0, inFlight: 0,
-    ingressAccepted: 0, ingressHandoffActive: 0, processingReady: 0, processingRunning: 0, processingReadyOldestMs: 0,
+    ingressAccepted: 0, ingressHandoffActive: 0, processingReady: 0, processingRunning: 0, processingDlq: 0, processingReadyOldestMs: 0,
     processingExpiredLeases: 0, schedulerDispatchActive: 0, deliveryPending: 0,
   };
 
   increment(name: keyof MetricsSnapshot, amount = 1): void { this.counters[name] += amount; }
-  setGauge(name: "processingReady" | "processingRunning" | "processingReadyOldestMs" | "processingExpiredLeases" | "schedulerDispatchActive" | "deliveryPending", value: number): void { this.counters[name] = value; }
+  setGauge(name: "processingReady" | "processingRunning" | "processingDlq" | "processingReadyOldestMs" | "processingExpiredLeases" | "schedulerDispatchActive" | "deliveryPending", value: number): void { this.counters[name] = value; }
 
   snapshot(): MetricsSnapshot & { appendLatencyMsAverage: number } {
     const appends = this.counters.appendTotal;
