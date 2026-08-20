@@ -3,7 +3,7 @@ import { Worker } from "node:worker_threads";
 import type { EventEnvelope } from "agent_domain/common";
 
 export interface WorkerResult { value: unknown; }
-export interface WorkerPool { run(event: EventEnvelope, signal?: AbortSignal): Promise<WorkerResult>; destroy(): Promise<void>; }
+export interface WorkerPool { run(event: EventEnvelope, signal?: AbortSignal): Promise<WorkerResult>; destroy(): Promise<void>; snapshot?(): { workers: number; busy: number; queued: number }; }
 
 export function runWorker(pool: WorkerPool, event: EventEnvelope, signal?: AbortSignal): Promise<WorkerResult> { return pool.run(event, signal); }
 
@@ -73,6 +73,7 @@ export function createWorkerPool(options: { minWorkerThreads: number; maxWorkerT
     dispatch();
   };
   console.log(JSON.stringify({ event: "worker.pool.started", minWorkerThreads: options.minWorkerThreads, maxWorkerThreads: options.maxWorkerThreads, maxQueue: options.maxQueue }));
+  dispatch();
 
   return {
     run(event: EventEnvelope, signal?: AbortSignal): Promise<WorkerResult> {
@@ -84,5 +85,6 @@ export function createWorkerPool(options: { minWorkerThreads: number; maxWorkerT
       for (const slot of slots) slot.retired = true;
       await Promise.all(slots.map((slot) => slot.worker.terminate()));
     },
+    snapshot(): { workers: number; busy: number; queued: number } { return { workers: slots.length, busy: slots.filter((slot) => slot.busy).length, queued: queue.length }; },
   };
 }

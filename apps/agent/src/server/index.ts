@@ -71,6 +71,10 @@ const refreshMetrics = async (): Promise<void> => {
     metrics.setGauge(`${name}Idle` as "databasePoolIdle" | "ingressQueuePoolIdle" | "queuePoolIdle", pool.idle);
     metrics.setGauge(`${name}Waiting` as "databasePoolWaiting" | "ingressQueuePoolWaiting" | "queuePoolWaiting", pool.waiting);
   }
+  const workers = pool.snapshot?.() ?? { workers: 0, busy: 0, queued: 0 };
+  metrics.setGauge("workerPoolWorkers", workers.workers);
+  metrics.setGauge("workerPoolBusy", workers.busy);
+  metrics.setGauge("workerPoolQueued", workers.queued);
 };
 void refreshMetrics();
 const metricsTimer = setInterval(() => { void refreshMetrics().catch((error) => console.error(JSON.stringify({ event: "metrics.refresh.failed", error: error instanceof Error ? error.message : String(error) }))); }, 1000);

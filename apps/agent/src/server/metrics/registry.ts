@@ -45,6 +45,9 @@ export interface MetricsSnapshot {
   queuePoolTotal: number;
   queuePoolIdle: number;
   queuePoolWaiting: number;
+  workerPoolWorkers: number;
+  workerPoolBusy: number;
+  workerPoolQueued: number;
 }
 
 export class MetricsRegistry {
@@ -58,10 +61,11 @@ export class MetricsRegistry {
     databasePoolTotal: 0, databasePoolIdle: 0, databasePoolWaiting: 0,
     ingressQueuePoolTotal: 0, ingressQueuePoolIdle: 0, ingressQueuePoolWaiting: 0,
     queuePoolTotal: 0, queuePoolIdle: 0, queuePoolWaiting: 0,
+    workerPoolWorkers: 0, workerPoolBusy: 0, workerPoolQueued: 0,
   };
 
   increment(name: keyof MetricsSnapshot, amount = 1): void { this.counters[name] += amount; }
-  setGauge(name: "processingReady" | "processingRunning" | "processingDlq" | "processingReadyOldestMs" | "processingExpiredLeases" | "schedulerDispatchActive" | "outboxPending" | "outboxFailed" | "websocketConnections" | "databasePoolTotal" | "databasePoolIdle" | "databasePoolWaiting" | "ingressQueuePoolTotal" | "ingressQueuePoolIdle" | "ingressQueuePoolWaiting" | "queuePoolTotal" | "queuePoolIdle" | "queuePoolWaiting", value: number): void { this.counters[name] = value; }
+  setGauge(name: "processingReady" | "processingRunning" | "processingDlq" | "processingReadyOldestMs" | "processingExpiredLeases" | "schedulerDispatchActive" | "outboxPending" | "outboxFailed" | "websocketConnections" | "databasePoolTotal" | "databasePoolIdle" | "databasePoolWaiting" | "ingressQueuePoolTotal" | "ingressQueuePoolIdle" | "ingressQueuePoolWaiting" | "queuePoolTotal" | "queuePoolIdle" | "queuePoolWaiting" | "workerPoolWorkers" | "workerPoolBusy" | "workerPoolQueued", value: number): void { this.counters[name] = value; }
 
   snapshot(): MetricsSnapshot & { appendLatencyMsAverage: number } {
     const appends = this.counters.appendTotal;
