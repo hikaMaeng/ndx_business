@@ -1,5 +1,3 @@
-import { createHash, randomUUID } from "node:crypto";
-
 export type EventKind = "command" | "fact" | "result" | "progress" | "failure" | "control";
 
 export interface IngressCommand {
@@ -45,20 +43,12 @@ export function streamIdOf(input: { sessionId?: string; channel: string }): stri
  * Produces a stable UUID-shaped identifier for a logical event that may be derived more than once.
  * Redelivery of the same logical outcome converges on one stored row and one client-visible event id.
  */
-export function deterministicEventId(name: string): string {
-  const digest = createHash("sha256").update(name).digest();
-  digest[6] = (digest[6] & 0x0f) | 0x80;
-  digest[8] = (digest[8] & 0x3f) | 0x80;
-  const hex = digest.subarray(0, 16).toString("hex");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
-}
-
 export function createEventDraft(input: IngressCommand, now = new Date().toISOString()): EventDraft {
-  return { ...input, eventId: randomUUID(), eventVersion: 1, kind: "command", streamId: streamIdOf(input), correlationId: input.correlationId ?? input.transactionKey, source: "client", createdAt: now };
+  return { ...input, eventId: globalThis.crypto.randomUUID(), eventVersion: 1, kind: "command", streamId: streamIdOf(input), correlationId: input.correlationId ?? input.transactionKey, source: "client", createdAt: now };
 }
 
 export function createIngressEvent(input: Omit<IngressCommand, "transactionKey"> & { transactionKey?: string }, now = new Date().toISOString()): IngressEvent {
-  return { ...input, eventId: randomUUID(), transactionKey: input.transactionKey ?? randomUUID(), createdAt: now };
+  return { ...input, eventId: globalThis.crypto.randomUUID(), transactionKey: input.transactionKey ?? globalThis.crypto.randomUUID(), createdAt: now };
 }
 
 /**

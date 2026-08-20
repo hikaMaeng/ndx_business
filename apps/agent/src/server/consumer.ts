@@ -1,8 +1,8 @@
 import type { EventEnvelope } from "agent_domain/common";
-import { deterministicEventId } from "agent_domain/common";
+import { deterministicEventId } from "agent_domain/server";
 import type { EventQueueTransport } from "./queue/transport.js";
-import { claimExecution, completeExecution, executionRecipients, renewExecution } from "./execution/store.js";
-import { runWorker } from "./worker/pool.js";
+import { abandonExecution, claimExecution, completeExecution, executionRecipients, renewExecution } from "./execution/store.js";
+import { runWorker, WorkerLostError } from "./worker/pool.js";
 import type { WorkerPool } from "./worker/pool.js";
 import type { EventStreamHub } from "./stream/hub.js";
 import type { EventStore } from "./event-store/store.js";
@@ -22,7 +22,11 @@ function isProcessingFailure(payload: ResultPayload): payload is ResultPayload &
 
 async function workerOutcome(pool: WorkerPool, event: EventEnvelope, signal?: AbortSignal): Promise<{ payload: ResultPayload; status: ExecutionStatus }> {
   try { return { payload: { ok: true, value: (await runWorker(pool, event, signal)).value }, status: "completed" }; }
-  catch (error) { const message = error instanceof Error ? error.message : "Worker failed"; return { payload: { ok: false, error: { code: "worker_failed", message } }, status: failureStatus(message) }; }
+  catch (error) {
+    if (error instanceof WorkerLostError) throw error;
+    const message = error instanceof Error ? error.message : "Worker failed";
+    return { payload: { ok: false, error: { code: "worker_failed", message } }, status: failureStatus(message) };
+  }
 }
 
 /** Thread 1: PGMQ handoff only. It never awaits a worker or result delivery. */
@@ -58,21 +62,25 @@ export function startScheduler(input: { database: import("pg").Pool; pool: Worke
     const recipients = await executionRecipients(input.database, request.transactionKey);
     return recipients.length ? recipients : [request];
   };
-  const publish = async (request: EventEnvelope, payload: ResultPayload): Promise<void> => {
-    for (const recipient of await recipientsOf(request)) {
-      await input.eventStore.append(toResultDraft(recipient, { eventId: resultEventId(recipient), action: `${recipient.action}.result`, channel: recipient.replyChannel ?? "agent.results", createdAt: new Date().toISOString(), payload }), (client, persisted) => input.outboxStore.enqueue(client, persisted)); input.notifyProjection?.();
-    }
+  const publish = async (request: EventEnvelope, payload: ResultPayload, complete?: (client: import("pg").PoolClient) => Promise<void>): Promise<void> => {
+    const drafts = (await recipientsOf(request)).map((recipient) => toResultDraft(recipient, { eventId: resultEventId(recipient), action: `${recipient.action}.result`, channel: recipient.replyChannel ?? "agent.results", createdAt: new Date().toISOString(), source: "worker", payload }));
+    await input.eventStore.appendMany(drafts, async (client, persisted) => {
+      for (const event of persisted) await input.outboxStore.enqueue(client, event);
+      await complete?.(client);
+    });
+    input.notifyProjection?.();
   };
   const publishProcessingFailure = async (request: EventEnvelope, jobId: string, message: string): Promise<void> => {
-    for (const recipient of await recipientsOf(request)) {
-      const eventId = deterministicEventId(`processing-failed:${jobId}:${recipient.replyChannel ?? "agent.results"}`);
-      await input.eventStore.append(toProcessingFailureDraft(recipient, eventId, message), (client, persisted) => input.outboxStore.enqueue(client, persisted)); input.notifyProjection?.();
-    }
+    const drafts = (await recipientsOf(request)).map((recipient) => toProcessingFailureDraft(recipient, deterministicEventId(`processing-failed:${jobId}:${recipient.replyChannel ?? "agent.results"}`), message));
+    await input.eventStore.appendMany(drafts, async (client, persisted) => {
+      for (const event of persisted) await input.outboxStore.enqueue(client, event);
+    });
+    input.notifyProjection?.();
   };
   const process = async (request: EventEnvelope, jobId: string, attemptId: string): Promise<void> => {
     const claim = await claimExecution(input.database, request, attemptId, input.executionLeaseSeconds);
     if (claim.kind === "conflict") {
-      await input.eventStore.append(toResultDraft(request, { eventId: deterministicEventId(`conflict:${request.eventId}`), action: `${request.action}.result`, channel: request.replyChannel ?? "agent.results", createdAt: new Date().toISOString(), payload: { ok: false, error: { code: "idempotency_conflict", message: claim.reason } } }), (client, persisted) => input.outboxStore.enqueue(client, persisted)); input.notifyProjection?.();
+      await input.eventStore.append(toResultDraft(request, { eventId: deterministicEventId(`conflict:${request.eventId}`), action: `${request.action}.result`, channel: request.replyChannel ?? "agent.results", createdAt: new Date().toISOString(), source: "scheduler", payload: { ok: false, error: { code: "idempotency_conflict", message: claim.reason } } }), (client, persisted) => input.outboxStore.enqueue(client, persisted)); input.notifyProjection?.();
       return;
     }
     if (claim.kind === "duplicate") {
@@ -88,7 +96,14 @@ export function startScheduler(input: { database: import("pg").Pool; pool: Worke
     let leaseLost = false; const controller = new AbortController();
     const heartbeatMs = Math.max(100, Math.floor(input.executionLeaseSeconds * 1000 / 3));
     const heartbeat = setInterval(() => { void Promise.all([input.processingStore.renew(jobId, attemptId), renewExecution(input.database, request.transactionKey, attemptId, input.executionLeaseSeconds)]).then(([jobRenewed, executionRenewed]) => { if (!jobRenewed || !executionRenewed) { leaseLost = true; controller.abort(); } }).catch((error) => { leaseLost = true; controller.abort(); input.metrics.increment("processingFailures"); console.error(JSON.stringify({ event: "scheduler.heartbeat.failed", eventId: jobId, attemptId, error: error instanceof Error ? error.message : String(error) })); }); }, heartbeatMs);
-    try { const outcome = await workerOutcome(input.pool, request, controller.signal); if (leaseLost) throw new Error(`attempt ${attemptId} lost its lease`); if (!await completeExecution(input.database, request.transactionKey, attemptId, outcome.payload, outcome.status)) throw new Error(`execution attempt ${attemptId} lost its lease`); input.metrics.increment(outcome.status === "completed" ? "workerCompleted" : "workerFailed"); await publish(request, outcome.payload); }
+    try {
+      const outcome = await workerOutcome(input.pool, request, controller.signal);
+      if (leaseLost) throw new WorkerLostError(`attempt ${attemptId} lost its lease`);
+      await publish(request, outcome.payload, async (client) => {
+        if (!await completeExecution(client, request.transactionKey, attemptId, outcome.payload, outcome.status)) throw new WorkerLostError(`execution attempt ${attemptId} lost its lease`);
+      });
+      input.metrics.increment(outcome.status === "completed" ? "workerCompleted" : "workerFailed");
+    }
     finally { clearInterval(heartbeat); input.metrics.increment("inFlight", -1); }
   };
   const dispatchLane = async (): Promise<void> => { while (!stopped) {
@@ -96,7 +111,17 @@ export function startScheduler(input: { database: import("pg").Pool; pool: Worke
       const job = await input.processingStore.claimNext(); if (!job) { await input.waitForWork(); continue; }
       input.metrics.increment("schedulerDispatchActive");
       try { await process(job.event, job.eventId, job.attemptId); if (!await input.processingStore.complete(job.eventId, job.attemptId)) throw new Error(`attempt ${job.attemptId} lost its lease`); }
-      catch (error) { const message = error instanceof Error ? error.message : String(error); if (error instanceof ExecutionInProgressError) { if (await input.processingStore.join(job.eventId, job.attemptId)) input.metrics.increment("processingJoined"); console.log(JSON.stringify({ event: "scheduler.joined", eventId: job.eventId, error: message })); continue; } input.metrics.increment("processingFailures"); const outcome = await input.processingStore.retryLater(job.eventId, job.attemptId, input.processingMaxAttempts, input.processingRetryBaseMs, message); if (outcome === "retry") input.metrics.increment("processingRetries"); if (outcome === "dead") { input.metrics.increment("processingDlqTotal"); try { const payload: ResultPayload = { ok: false, error: { code: "processing_permanent_failure", message } }; const completed = await completeExecution(input.database, job.event.transactionKey, job.attemptId, payload, "failed"); if (!completed) console.error(JSON.stringify({ event: "scheduler.dlq.execution-not-owned", eventId: job.eventId })); await publishProcessingFailure(job.event, job.eventId, message); } catch (deliveryError) { input.metrics.increment("processingFailures"); console.error(JSON.stringify({ event: "scheduler.dlq.delivery.failed", eventId: job.eventId, error: deliveryError instanceof Error ? deliveryError.message : String(deliveryError) })); } } console.error(JSON.stringify({ event: outcome === "dead" ? "scheduler.dlq" : "scheduler.retry", eventId: job.eventId, error: message })); }
+      catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (error instanceof ExecutionInProgressError) { if (await input.processingStore.join(job.eventId, job.attemptId)) input.metrics.increment("processingJoined"); console.log(JSON.stringify({ event: "scheduler.joined", eventId: job.eventId, error: message })); continue; }
+        input.metrics.increment("processingFailures");
+        const released = await abandonExecution(input.database, job.event.transactionKey, job.attemptId);
+        if (!released) console.error(JSON.stringify({ event: "scheduler.retry.execution-not-owned", eventId: job.eventId, attemptId: job.attemptId }));
+        const outcome = await input.processingStore.retryLater(job.eventId, job.attemptId, input.processingMaxAttempts, input.processingRetryBaseMs, message);
+        if (outcome === "retry") input.metrics.increment("processingRetries");
+        if (outcome === "dead") { input.metrics.increment("processingDlqTotal"); try { const payload: ResultPayload = { ok: false, error: { code: "processing_permanent_failure", message } }; const completed = await completeExecution(input.database, job.event.transactionKey, job.attemptId, payload, "failed"); if (!completed) console.error(JSON.stringify({ event: "scheduler.dlq.execution-not-owned", eventId: job.eventId })); await publishProcessingFailure(job.event, job.eventId, message); } catch (deliveryError) { input.metrics.increment("processingFailures"); console.error(JSON.stringify({ event: "scheduler.dlq.delivery.failed", eventId: job.eventId, error: deliveryError instanceof Error ? deliveryError.message : String(deliveryError) })); } }
+        console.error(JSON.stringify({ event: outcome === "dead" ? "scheduler.dlq" : "scheduler.retry", eventId: job.eventId, error: message }));
+      }
       finally { input.metrics.increment("schedulerDispatchActive", -1); }
     } catch (error) { input.metrics.increment("processingFailures"); console.error(JSON.stringify({ event: "scheduler.poll.failed", error: error instanceof Error ? error.message : String(error) })); await delay(input.schedulerIdleMs); }
   } };

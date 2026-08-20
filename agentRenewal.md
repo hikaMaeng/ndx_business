@@ -832,7 +832,10 @@ server-issued field 발급 뒤 domain event로 변환한다.
 
 - 완료: `agent_domain/server`가 ordered static handler registry를 export하고 worker bundle은
   registry만 호출한다. fixed resident pool은 시작 시 `AGENT_MAX_THREADS`를 모두 예약하며,
-  handler abort와 worker exit를 controller failure로 전환한다.
+  handler abort와 worker exit를 controller failure로 전환한다. worker exit/error는 terminal
+  result로 오인하지 않고 execution lease를 fenced-release한 뒤 durable job retry/reclaim으로
+  수렴하며, terminal event·outbox reservation·execution completion은 하나의 transaction으로
+  commit된다.
 
 ### Phase 5 — CQRS와 outbox
 

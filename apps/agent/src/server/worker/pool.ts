@@ -5,6 +5,11 @@ import type { EventEnvelope } from "agent_domain/common";
 export interface WorkerResult { value: unknown; }
 export interface WorkerPool { run(event: EventEnvelope, signal?: AbortSignal): Promise<WorkerResult>; destroy(): Promise<void>; snapshot?(): { workers: number; busy: number; queued: number }; }
 
+/** A process-level worker loss is retryable; action failures are returned by the worker itself. */
+export class WorkerLostError extends Error {
+  constructor(message: string) { super(message); this.name = "WorkerLostError"; }
+}
+
 export function runWorker(pool: WorkerPool, event: EventEnvelope, signal?: AbortSignal): Promise<WorkerResult> { return pool.run(event, signal); }
 
 interface PendingTask { id: string; event: EventEnvelope; signal?: AbortSignal; resolve: (result: WorkerResult) => void; reject: (error: Error) => void; abort?: () => void; }
@@ -49,7 +54,7 @@ export function createWorkerPool(options: { minWorkerThreads: number; maxWorkerT
     worker.on("error", (error) => {
       if (slot.retired) return;
       slot.retired = true;
-      if (slot.task) slot.task.reject(error instanceof Error ? error : new Error(String(error)));
+      if (slot.task) slot.task.reject(new WorkerLostError(error instanceof Error ? error.message : String(error)));
       slot.task = undefined;
       slot.busy = false;
       void replaceSlot(slot);
@@ -57,7 +62,7 @@ export function createWorkerPool(options: { minWorkerThreads: number; maxWorkerT
     worker.on("exit", (code) => {
       if (slot.retired) return;
       slot.retired = true;
-      if (slot.task) slot.task.reject(new Error(`worker exited with code ${code}`));
+      if (slot.task) slot.task.reject(new WorkerLostError(`worker exited with code ${code}`));
       slot.task = undefined;
       slot.busy = false;
       void replaceSlot(slot);

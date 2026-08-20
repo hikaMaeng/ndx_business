@@ -34,12 +34,13 @@ export function toEventDraft(event: IngressEvent): EventDraft {
  * Converts a legacy result event into a canonical draft that stays in the requesting event's stream.
  * The result payload carries no session context, so identity is inherited from the persisted request.
  */
-export function toResultDraft(request: EventEnvelope, input: { eventId: string; action: string; channel: string; createdAt: string; payload: Record<string, unknown> }): EventDraft {
+export function toResultDraft(request: EventEnvelope, input: { eventId: string; action: string; channel: string; createdAt: string; payload: Record<string, unknown>; source?: EventEnvelope["source"] }): EventDraft {
   return createDerivedDraft(request, {
     eventId: input.eventId,
     action: input.action,
     kind: "result",
     channel: input.channel,
+    source: input.source,
     createdAt: input.createdAt,
     payload: input.payload,
   });

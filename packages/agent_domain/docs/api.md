@@ -15,10 +15,11 @@ The public entrypoint exports ingress and canonical shapes from `protocol/event`
 `createIngressEvent` creates the durable handoff record. `createEventDraft`
 builds a command into a draft. `createDerivedDraft`
 builds a follow-up event that inherits stream, session, run, turn, and
-correlation identity from its cause. `deterministicEventId(name)` produces a
-stable UUID-shaped identity for an outcome that may be derived more than once.
-`streamIdOf` is the single stream-identity rule: `session:<sessionId>` when a
+correlation identity from its cause. `streamIdOf` is the single stream-identity rule: `session:<sessionId>` when a
 session exists, otherwise `channel:<channel>`.
+
+The server-only `./server` export supplies `deterministicEventId(name)`, the
+stable UUID-shaped identity used for outcomes that may be derived more than once.
 
 `protocol/channel` has the browser subscription frames. `subscribed` carries
 `replayComplete`; a false value means the server sent one bounded replay page.

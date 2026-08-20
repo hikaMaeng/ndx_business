@@ -84,7 +84,15 @@ export async function renewExecution(pool: Pool, transactionKey: string, attempt
   return Boolean(result.rowCount);
 }
 
-export async function completeExecution(pool: Pool, transactionKey: string, attemptId: string, result: unknown, status: "completed" | "failed" | "timed_out" | "cancelled" = "completed"): Promise<boolean> {
+type Queryable = Pick<Pool, "query">;
+
+/** Releases an owned attempt before durable-job retry so the next claim can fenced-reclaim it immediately. */
+export async function abandonExecution(pool: Queryable, transactionKey: string, attemptId: string): Promise<boolean> {
+  const updated = await pool.query("UPDATE agent_execution SET lease_until = now() - interval '1 millisecond', updated_at = now() WHERE transaction_key = $1 AND status = 'running' AND attempt_id = $2", [transactionKey, attemptId]);
+  return Boolean(updated.rowCount);
+}
+
+export async function completeExecution(pool: Queryable, transactionKey: string, attemptId: string, result: unknown, status: "completed" | "failed" | "timed_out" | "cancelled" = "completed"): Promise<boolean> {
   const updated = await pool.query("UPDATE agent_execution SET status = $3, result = $4::jsonb, lease_until = NULL, updated_at = now(), completed_at = now() WHERE transaction_key = $1 AND status = 'running' AND attempt_id = $2", [transactionKey, attemptId, status, JSON.stringify(result)]);
   return Boolean(updated.rowCount);
 }

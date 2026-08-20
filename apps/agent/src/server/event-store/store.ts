@@ -75,33 +75,40 @@ export class EventStore {
 
   /** See docs/internals.md#decisions: callback work commits with the immutable event or not at all. */
   async append(event: EventDraft, afterAppend?: (client: PoolClient, persisted: EventEnvelope) => Promise<void>): Promise<EventEnvelope> {
+    const persisted = await this.appendMany([event], afterAppend ? async (client, events) => afterAppend(client, events[0]!) : undefined);
+    return persisted[0]!;
+  }
+
+  /** Appends related terminal events and their durable side effects in one database transaction. */
+  async appendMany(events: readonly EventDraft[], afterAppend?: (client: PoolClient, persisted: readonly EventEnvelope[]) => Promise<void>): Promise<EventEnvelope[]> {
+    if (events.length === 0) return [];
     const startedAt = Date.now();
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [event.eventId]);
-      const existing = await client.query<StoredEventRow>(`SELECT ${COLUMNS} FROM event_store WHERE event_id = $1`, [event.eventId]);
-      if (existing.rowCount) {
-        const persisted = fromRow(existing.rows[0]);
-        if (afterAppend) await afterAppend(client, persisted);
-        await client.query("COMMIT");
-        this.metrics?.increment("appendDuplicates");
-        this.record(startedAt);
-        return persisted;
+      const persisted: EventEnvelope[] = [];
+      for (const event of [...events].sort((left, right) => left.eventId.localeCompare(right.eventId))) {
+        await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [event.eventId]);
+        const existing = await client.query<StoredEventRow>(`SELECT ${COLUMNS} FROM event_store WHERE event_id = $1`, [event.eventId]);
+        if (existing.rowCount) {
+          persisted.push(fromRow(existing.rows[0]));
+          this.metrics?.increment("appendDuplicates");
+          continue;
+        }
+        const next = await client.query<{ sequence: string | number }>(`INSERT INTO event_stream_sequence (stream_id,last_sequence) VALUES ($1,1)
+          ON CONFLICT (stream_id) DO UPDATE SET last_sequence = event_stream_sequence.last_sequence + 1 RETURNING last_sequence AS sequence`, [event.streamId]);
+        const sequence = String(next.rows[0].sequence);
+        const inserted = await client.query<StoredEventRow>(`INSERT INTO event_store (${COLUMNS})
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17)
+          ON CONFLICT (event_id) DO NOTHING
+          RETURNING ${COLUMNS}`, [event.eventId, event.streamId, sequence, event.action, event.transactionKey, event.eventVersion, event.kind, event.channel, event.replyChannel ?? null, event.sessionId ?? null, event.runId ?? null, event.turnId ?? null, event.causationEventId ?? null, event.correlationId, event.source, JSON.stringify(event.payload), event.createdAt]);
+        if (!inserted.rowCount) throw new Error(`event store insert returned no row for ${event.eventId}`);
+        persisted.push(fromRow(inserted.rows[0]));
       }
-      const next = await client.query<{ sequence: string | number }>(`INSERT INTO event_stream_sequence (stream_id,last_sequence) VALUES ($1,1)
-        ON CONFLICT (stream_id) DO UPDATE SET last_sequence = event_stream_sequence.last_sequence + 1 RETURNING last_sequence AS sequence`, [event.streamId]);
-      const sequence = String(next.rows[0].sequence);
-      const inserted = await client.query<StoredEventRow>(`INSERT INTO event_store (${COLUMNS})
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17)
-        ON CONFLICT (event_id) DO NOTHING
-        RETURNING ${COLUMNS}`, [event.eventId, event.streamId, sequence, event.action, event.transactionKey, event.eventVersion, event.kind, event.channel, event.replyChannel ?? null, event.sessionId ?? null, event.runId ?? null, event.turnId ?? null, event.causationEventId ?? null, event.correlationId, event.source, JSON.stringify(event.payload), event.createdAt]);
-      if (!inserted.rowCount) throw new Error(`event store insert returned no row for ${event.eventId}`);
-      const result = fromRow(inserted.rows[0]);
-      if (afterAppend) await afterAppend(client, result);
+      if (afterAppend) await afterAppend(client, persisted);
       await client.query("COMMIT");
-      this.record(startedAt);
-      return result;
+      for (const _event of events) this.record(startedAt);
+      return persisted;
     } catch (error) { await client.query("ROLLBACK"); this.metrics?.increment("appendFailures"); throw error; }
     finally { client.release(); }
   }

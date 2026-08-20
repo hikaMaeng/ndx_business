@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { startIngressConsumer, startScheduler } from "./consumer.js";
+import { createWorkerPool, WorkerLostError } from "./worker/pool.js";
 
 const event = { eventId: "event-1", transactionKey: "transaction-1", kind: "request" as const, channel: "agent.requests", action: "hash.sha256", source: "test", createdAt: new Date().toISOString(), payload: { input: "value" } };
 const metrics = { increment: () => undefined } as never;
@@ -22,13 +23,45 @@ test("scheduler alone dispatches a durable job and completes it", async () => {
   const scheduler = startScheduler({
     database: { query: async (sql: string) => sql.startsWith("INSERT") ? { rowCount: 1, rows: [] } : { rowCount: 1, rows: [] } } as never,
     pool: { run: async () => ({ value: "ok" }), destroy: async () => undefined },
-    eventStore: { append: async (draft: Record<string, unknown>) => ({ ...draft, sequence: "1" }) } as never,
+    eventStore: { appendMany: async (drafts: Array<Record<string, unknown>>, afterAppend?: (client: never, persisted: Array<Record<string, unknown>>) => Promise<void>) => { const persisted = drafts.map((draft) => ({ ...draft, sequence: "1" })); await afterAppend?.({ query: async () => ({ rowCount: 1, rows: [] }) } as never, persisted); return persisted; } } as never,
     outboxStore: { enqueue: async () => undefined } as never,
     processingStore: { claimNext: async () => ++claims === 1 ? { eventId: event.eventId, attemptId: "attempt-1", event } : undefined, complete: async (id: string) => { completed.push(id); return true; }, renew: async () => true, retryLater: async () => true } as never,
     metrics, schedulerIdleMs: 1, executionLeaseSeconds: 60, processingMaxAttempts: 3, processingRetryBaseMs: 1, waitForWork: async () => await new Promise<never>(() => undefined), maxConcurrentDispatches: 1,
   });
   await new Promise((resolve) => setTimeout(resolve, 30)); scheduler.stop();
   assert.deepEqual(completed, ["event-1"]);
+});
+
+test("a lost worker releases its execution lease before the durable job retries", async () => {
+  let claims = 0; let retries = 0; const statements: string[] = [];
+  const scheduler = startScheduler({
+    database: { query: async (sql: string) => { statements.push(sql); return { rowCount: 1, rows: [] }; } } as never,
+    pool: { run: async () => { throw new WorkerLostError("worker exited with code 1"); }, destroy: async () => undefined },
+    eventStore: { appendMany: async () => [] } as never,
+    outboxStore: { enqueue: async () => undefined } as never,
+    processingStore: { claimNext: async () => ++claims === 1 ? { eventId: event.eventId, attemptId: "attempt-1", event } : undefined, complete: async () => true, renew: async () => true, retryLater: async () => { retries += 1; return "retry"; } } as never,
+    metrics, schedulerIdleMs: 1, executionLeaseSeconds: 60, processingMaxAttempts: 3, processingRetryBaseMs: 1, waitForWork: async () => await new Promise<never>(() => undefined), maxConcurrentDispatches: 1,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30)); scheduler.stop();
+  assert.equal(retries, 1);
+  assert.ok(statements.some((sql) => sql.includes("lease_until = now() - interval '1 millisecond'")));
+});
+
+test("a real worker exit returns its durable job to retry instead of joining its old execution", async () => {
+  let claims = 0; let retries = 0; const statements: string[] = [];
+  const pool = createWorkerPool({ minWorkerThreads: 0, maxWorkerThreads: 1, maxQueue: 1, workerUrl: new URL("./worker/worker-exit-zero.fixture.mjs", import.meta.url) });
+  const scheduler = startScheduler({
+    database: { query: async (sql: string) => { statements.push(sql); return { rowCount: 1, rows: [] }; } } as never,
+    pool,
+    eventStore: { appendMany: async () => [] } as never,
+    outboxStore: { enqueue: async () => undefined } as never,
+    processingStore: { claimNext: async () => ++claims === 1 ? { eventId: event.eventId, attemptId: "attempt-1", event } : undefined, complete: async () => true, renew: async () => true, retryLater: async () => { retries += 1; return "retry"; } } as never,
+    metrics, schedulerIdleMs: 1, executionLeaseSeconds: 60, processingMaxAttempts: 3, processingRetryBaseMs: 1, waitForWork: async () => await new Promise<never>(() => undefined), maxConcurrentDispatches: 1,
+  });
+  for (let attempt = 0; attempt < 50 && retries === 0; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+  scheduler.stop(); await pool.destroy();
+  assert.equal(retries, 1);
+  assert.ok(statements.some((sql) => sql.includes("lease_until = now() - interval '1 millisecond'")));
 });
 
 test("a terminal result fans out once to every durable reply-channel recipient", async () => {
@@ -38,7 +71,7 @@ test("a terminal result fans out once to every durable reply-channel recipient",
   const scheduler = startScheduler({
     database: { query: async (sql: string) => sql.startsWith("SELECT request_event") ? { rowCount: 2, rows: [{ request_event: first }, { request_event: second }] } : { rowCount: 1, rows: [] } } as never,
     pool: { run: async () => ({ value: "ok" }), destroy: async () => undefined },
-    eventStore: { append: async (draft: Record<string, unknown>, afterAppend?: (client: never, persisted: never) => Promise<void>) => { const persisted = { ...draft, sequence: "3" }; await afterAppend?.({} as never, persisted as never); return persisted; } } as never,
+    eventStore: { appendMany: async (drafts: Array<Record<string, unknown>>, afterAppend?: (client: never, persisted: Array<Record<string, unknown>>) => Promise<void>) => { const persisted = drafts.map((draft, index) => ({ ...draft, sequence: String(index + 3) })); await afterAppend?.({ query: async () => ({ rowCount: 1, rows: [] }) } as never, persisted); return persisted; } } as never,
     outboxStore: { enqueue: async (_client: never, persisted: { channel: string; eventId: string }) => { outboxed.push(persisted); } } as never,
     processingStore: { claimNext: async () => ++claims === 1 ? { eventId: first.eventId, attemptId: "attempt-1", event: first } : undefined, complete: async () => true, renew: async () => true, retryLater: async () => "retry" } as never,
     metrics, schedulerIdleMs: 1, executionLeaseSeconds: 60, processingMaxAttempts: 3, processingRetryBaseMs: 1, waitForWork: async () => await new Promise<never>(() => undefined), maxConcurrentDispatches: 1,
@@ -55,7 +88,7 @@ test("scheduler claims up to its dispatch concurrency without waiting for an ear
   const scheduler = startScheduler({
     database: { query: async () => ({ rowCount: 1, rows: [] }) } as never,
     pool: { run: async () => { started += 1; await workerGate; return { value: "ok" }; }, destroy: async () => undefined },
-    eventStore: { append: async (draft: Record<string, unknown>) => ({ ...draft, sequence: "1" }) } as never,
+    eventStore: { appendMany: async (drafts: Array<Record<string, unknown>>) => drafts.map((draft) => ({ ...draft, sequence: "1" })) } as never,
     outboxStore: { enqueue: async () => undefined } as never,
     processingStore: { claimNext: async () => jobs[claimIndex] ? { eventId: jobs[claimIndex]!.eventId, attemptId: `attempt-${claimIndex}`, event: jobs[claimIndex++]! } : undefined, complete: async (id: string) => { completed.push(id); return true; }, renew: async () => true, retryLater: async () => true } as never,
     metrics, schedulerIdleMs: 1, executionLeaseSeconds: 60, processingMaxAttempts: 3, processingRetryBaseMs: 1, waitForWork: async () => await new Promise<never>(() => undefined), maxConcurrentDispatches: 2,
@@ -72,7 +105,7 @@ test("scheduler completes after the terminal event is durably reserved for outbo
   const scheduler = startScheduler({
     database: { query: async () => ({ rowCount: 1, rows: [] }) } as never,
     pool: { run: async () => ({ value: "ok" }), destroy: async () => undefined },
-    eventStore: { append: async (draft: Record<string, unknown>) => ({ ...draft, sequence: "1" }) } as never,
+    eventStore: { appendMany: async (drafts: Array<Record<string, unknown>>) => drafts.map((draft) => ({ ...draft, sequence: "1" })) } as never,
     outboxStore: { enqueue: async () => undefined } as never,
     processingStore: {
       claimNext: async () => ++claims === 1 ? { eventId: event.eventId, attemptId: "attempt-1", event } : undefined, complete: async () => true, renew: async () => true,
@@ -89,7 +122,7 @@ test("terminal result persistence does not depend on immediate external delivery
   const scheduler = startScheduler({
     database: { query: async () => ({ rowCount: 1, rows: [] }) } as never,
     pool: { run: async () => ({ value: "ok" }), destroy: async () => undefined },
-    eventStore: { append: async (draft: Record<string, unknown>) => { appends += 1; return { ...draft, sequence: "1" }; } } as never,
+    eventStore: { appendMany: async (drafts: Array<Record<string, unknown>>) => { appends += drafts.length; return drafts.map((draft) => ({ ...draft, sequence: "1" })); } } as never,
     outboxStore: { enqueue: async () => undefined } as never,
     processingStore: { claimNext: async () => ++claims === 1 ? { eventId: event.eventId, attemptId: "attempt-1", event } : undefined, complete: async () => true, renew: async () => true, retryLater: async () => "dead" } as never,
     metrics, schedulerIdleMs: 1, executionLeaseSeconds: 60, processingMaxAttempts: 1, processingRetryBaseMs: 1, waitForWork: async () => await new Promise<never>(() => undefined), maxConcurrentDispatches: 1,
@@ -103,7 +136,7 @@ test("an already-running transaction joins its duplicate job without consuming t
   const scheduler = startScheduler({
     database: { query: async (sql: string) => sql.startsWith("INSERT") || sql.startsWith("UPDATE agent_execution SET attempt_id") ? { rowCount: 0, rows: [] } : { rowCount: 1, rows: [{ status: "running", result: null, payload_hash: null }] } } as never,
     pool: { run: async () => ({ value: "unused" }), destroy: async () => undefined },
-    eventStore: { append: async (draft: Record<string, unknown>) => ({ ...draft, sequence: "1" }) } as never,
+    eventStore: { appendMany: async (drafts: Array<Record<string, unknown>>) => drafts.map((draft) => ({ ...draft, sequence: "1" })) } as never,
     outboxStore: { enqueue: async () => undefined } as never,
     processingStore: { claimNext: async () => ++claims === 1 ? { eventId: event.eventId, attemptId: "attempt-1", event } : undefined, complete: async () => true, renew: async () => true, retryLater: async () => { retried = true; return "retry"; }, join: async (eventId: string, attemptId: string) => { joined = { eventId, attemptId }; return true; } } as never,
     metrics, schedulerIdleMs: 1, executionLeaseSeconds: 60, processingMaxAttempts: 1, processingRetryBaseMs: 250, waitForWork: async () => await new Promise<never>(() => undefined), maxConcurrentDispatches: 1,

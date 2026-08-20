@@ -78,6 +78,30 @@ test("append invokes its durable side effect on the same transaction client", as
   assert.ok(queries.indexOf("INSERT INTO event_outbox") < queries.findIndex((sql) => sql === "COMMIT"));
 });
 
+test("related terminal events and execution completion commit in one transaction", async () => {
+  const queries: string[] = []; let sequence = 0;
+  const client = {
+    query: async (sql: string, values?: unknown[]) => {
+      queries.push(sql);
+      if (sql.includes("FROM event_store WHERE")) return { rowCount: 0, rows: [] };
+      if (sql.includes("RETURNING last_sequence")) return { rowCount: 1, rows: [{ sequence: String(++sequence) }] };
+      if (sql.includes("INSERT INTO event_store")) return { rowCount: 1, rows: [row({ event_id: values?.[0], sequence, action: values?.[3], channel: values?.[7], reply_channel: values?.[8] })] };
+      return { rowCount: 1, rows: [] };
+    }, release: () => undefined,
+  };
+  const store = new EventStore({ connect: async () => client } as never);
+  const events = await store.appendMany([draft, { ...draft, eventId: "event-2", channel: "orders" }], async (received, persisted) => {
+    assert.equal(received, client);
+    assert.equal(persisted.length, 2);
+    await received.query("INSERT INTO event_outbox");
+    await received.query("UPDATE agent_execution SET status = 'completed'");
+  });
+  assert.deepEqual(events.map((event) => event.eventId).sort(), ["event-1", "event-2"]);
+  const commit = queries.findIndex((sql) => sql === "COMMIT");
+  assert.ok(queries.findIndex((sql) => sql.includes("INSERT INTO event_outbox")) < commit);
+  assert.ok(queries.findIndex((sql) => sql.includes("UPDATE agent_execution")) < commit);
+});
+
 test("channel replay compares stream positions in PostgreSQL and cursor pruning has a retention bound", async () => {
   const queries: Array<{ sql: string; values: unknown[] | undefined }> = [];
   const store = new EventStore({ query: async (sql: string, values?: unknown[]) => { queries.push({ sql, values }); return { rowCount: 1, rows: [] }; } } as never);

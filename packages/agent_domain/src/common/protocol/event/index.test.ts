@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createDerivedDraft, createEventDraft, createIngressEvent, deterministicEventId } from "./index.js";
+import { createDerivedDraft, createEventDraft, createIngressEvent } from "./index.js";
 
 test("a session command derives one server-owned stream and correlation", () => {
   const event = createEventDraft({ action: "turn.start", transactionKey: "tx-1", channel: "agent.requests", sessionId: "session-1", payload: {} }, "2026-08-19T00:00:00.000Z");
@@ -18,12 +18,6 @@ test("a derived draft inherits stream identity and records its cause", () => {
   assert.equal(derived.causationEventId, cause.eventId);
   assert.equal(derived.correlationId, "tx-1");
   assert.equal(derived.channel, "agent.results");
-});
-
-test("a deterministic event id is stable per logical outcome and unique across outcomes", () => {
-  assert.equal(deterministicEventId("result:tx-1"), deterministicEventId("result:tx-1"));
-  assert.notEqual(deterministicEventId("result:tx-1"), deterministicEventId("result:tx-2"));
-  assert.match(deterministicEventId("result:tx-1"), /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
 });
 
 test("an ingress event has a server-issued id but no canonical stream position", () => {

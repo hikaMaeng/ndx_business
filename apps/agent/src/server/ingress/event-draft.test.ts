@@ -17,7 +17,7 @@ test("a request draft takes its stream and identity from the session payload key
 
 test("a result draft stays in the request stream and records causation", () => {
   const persisted = { ...toEventDraft(request), sequence: "1" };
-  const draft = toResultDraft(persisted, { eventId: "result-1", action: "turn.start.result", channel: "agent.results", createdAt: request.createdAt, payload: { ok: true } });
+  const draft = toResultDraft(persisted, { eventId: "result-1", action: "turn.start.result", channel: "agent.results", createdAt: request.createdAt, source: "worker", payload: { ok: true } });
   assert.equal(draft.streamId, "session:s-1");
   assert.equal(draft.sessionId, "s-1");
   assert.equal(draft.runId, "r-1");
@@ -26,4 +26,5 @@ test("a result draft stays in the request stream and records causation", () => {
   assert.equal(draft.correlationId, "tx-1");
   assert.equal(draft.kind, "result");
   assert.equal(draft.channel, "agent.results");
+  assert.equal(draft.source, "worker");
 });
