@@ -25,7 +25,7 @@ test("scheduler alone dispatches a durable job and completes it", async () => {
     pool: { run: async () => ({ value: "ok" }), destroy: async () => undefined }, hub: { publish: () => undefined } as never,
     eventStore: { append: async (draft: Record<string, unknown>) => ({ ...draft, sequence: "1" }) } as never,
     deliveryStore: { claim: async () => "claimed", complete: async () => undefined } as never,
-    processingStore: { claimNext: async () => ++claims === 1 ? { eventId: event.eventId, event } : undefined, complete: async (id: string) => { completed.push(id); }, renew: async () => true, retryLater: async () => undefined } as never,
+    processingStore: { claimNext: async () => ++claims === 1 ? { eventId: event.eventId, attemptId: "attempt-1", event } : undefined, complete: async (id: string) => { completed.push(id); return true; }, renew: async () => true, retryLater: async () => true } as never,
     metrics, resultQueue: "agent_results", schedulerIdleMs: 1, waitForWork: async () => await new Promise<never>(() => undefined), maxConcurrentDispatches: 1,
   });
   await new Promise((resolve) => setTimeout(resolve, 30)); scheduler.stop();
@@ -42,7 +42,7 @@ test("scheduler claims up to its dispatch concurrency without waiting for an ear
     pool: { run: async () => { started += 1; await workerGate; return { value: "ok" }; }, destroy: async () => undefined }, hub: { publish: () => undefined } as never,
     eventStore: { append: async (draft: Record<string, unknown>) => ({ ...draft, sequence: "1" }) } as never,
     deliveryStore: { claim: async () => "claimed", complete: async () => undefined } as never,
-    processingStore: { claimNext: async () => jobs[claimIndex] ? { eventId: jobs[claimIndex]!.eventId, event: jobs[claimIndex++]! } : undefined, complete: async (id: string) => { completed.push(id); }, renew: async () => true, retryLater: async () => undefined } as never,
+    processingStore: { claimNext: async () => jobs[claimIndex] ? { eventId: jobs[claimIndex]!.eventId, attemptId: `attempt-${claimIndex}`, event: jobs[claimIndex++]! } : undefined, complete: async (id: string) => { completed.push(id); return true; }, renew: async () => true, retryLater: async () => true } as never,
     metrics, resultQueue: "agent_results", schedulerIdleMs: 1, waitForWork: async () => await new Promise<never>(() => undefined), maxConcurrentDispatches: 2,
   });
   await new Promise((resolve) => setTimeout(resolve, 30));
