@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import { randomUUID } from "node:crypto";
 import type { EventDraft, EventEnvelope } from "agent_domain/common";
 import type { MetricsRegistry } from "../metrics/registry.js";
 
@@ -50,6 +51,8 @@ export class EventStore {
     await this.pool.query(`INSERT INTO event_stream_sequence (stream_id, last_sequence)
       SELECT stream_id, max(sequence) FROM event_store GROUP BY stream_id
       ON CONFLICT (stream_id) DO UPDATE SET last_sequence = GREATEST(event_stream_sequence.last_sequence, EXCLUDED.last_sequence)`);
+    await this.pool.query(`CREATE TABLE IF NOT EXISTS event_subscription_cursor (
+      token uuid PRIMARY KEY, channels jsonb NOT NULL, positions jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())`);
   }
 
   /**
@@ -107,6 +110,24 @@ export class EventStore {
       const sequence = BigInt(row.sequence);
       return sequence > BigInt(positions[row.stream_id] ?? "0") && sequence <= BigInt(highWater[row.stream_id] ?? "0");
     }).map(fromRow);
+  }
+
+  async openChannelCursor(channels: string[], token?: string): Promise<{ token: string; positions: Record<string, string> }> {
+    const fingerprint = [...new Set(channels)].sort();
+    if (token) {
+      const result = await this.pool.query<{ channels: string[]; positions: Record<string, string> }>("SELECT channels, positions FROM event_subscription_cursor WHERE token = $1", [token]);
+      const row = result.rows[0];
+      if (!row || JSON.stringify(row.channels) !== JSON.stringify(fingerprint)) throw new Error("channel cursor does not match this subscription");
+      return { token, positions: row.positions };
+    }
+    const highWater = await this.channelHighWater(fingerprint);
+    const created = randomUUID();
+    await this.pool.query("INSERT INTO event_subscription_cursor (token, channels, positions) VALUES ($1, $2::jsonb, $3::jsonb)", [created, JSON.stringify(fingerprint), JSON.stringify(highWater)]);
+    return { token: created, positions: highWater };
+  }
+
+  async advanceChannelCursor(token: string, positions: Record<string, string>): Promise<void> {
+    await this.pool.query("UPDATE event_subscription_cursor SET positions = $2::jsonb, updated_at = now() WHERE token = $1", [token, JSON.stringify(positions)]);
   }
 
   private record(startedAt: number): void {

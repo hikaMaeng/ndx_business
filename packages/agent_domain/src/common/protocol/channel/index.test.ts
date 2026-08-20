@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { encodeChannelCursor, parseChannelCursor, parseChannelClientFrame } from "./index.js";
+import { parseChannelCursor, parseChannelClientFrame } from "./index.js";
 
-test("channel cursor is bound to its normalized subscription", () => {
-  const cursor = encodeChannelCursor(["orders", "agent.results"], { "session:one": "9007199254740993" });
-  assert.deepEqual(parseChannelCursor(cursor, ["agent.results", "orders"]), { "session:one": "9007199254740993" });
-  assert.equal(parseChannelCursor(cursor, ["orders"]), undefined);
+test("channel cursor only accepts an opaque UUID reference", () => {
+  assert.equal(parseChannelCursor("716c013a-bb36-4b1e-a99f-d59af19e27f3"), "716c013a-bb36-4b1e-a99f-d59af19e27f3");
+  assert.equal(parseChannelCursor("not-a-cursor"), undefined);
 });
 
 test("channel ingress frames reject server-issued envelope fields", () => {

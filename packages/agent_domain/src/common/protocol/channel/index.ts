@@ -1,8 +1,5 @@
 import type { EventEnvelope, IngressCommand } from "../event/index.js";
 
-const CURSOR_VERSION = 1;
-const MAX_CURSOR_BYTES = 8192;
-export const MAX_CURSOR_STREAMS = 128;
 
 export type ChannelClientFrame =
   | { type: "subscribe"; channels: string[]; cursor?: string }
@@ -13,25 +10,9 @@ export type ChannelServerFrame =
   | { type: "subscribed"; channels: string[]; cursor?: string }
   | { type: "event"; event: EventEnvelope; cursor: string };
 
-export interface ChannelCursor { version: typeof CURSOR_VERSION; channels: string[]; positions: Record<string, string>; }
-
-export function encodeChannelCursor(channels: string[], positions: Record<string, string>): string {
-  if (Object.keys(positions).length > MAX_CURSOR_STREAMS) throw new Error("channel subscription exceeds the stream limit");
-  const value: ChannelCursor = { version: CURSOR_VERSION, channels: [...new Set(channels)].sort(), positions };
-  const token = Buffer.from(JSON.stringify(value)).toString("base64url");
-  if (Buffer.byteLength(token) > MAX_CURSOR_BYTES) throw new Error("channel cursor exceeds the size limit");
-  return token;
-}
-
-export function parseChannelCursor(token: string | undefined, channels: string[]): Record<string, string> | undefined {
-  if (!token) return {};
-  if (Buffer.byteLength(token) > MAX_CURSOR_BYTES) return undefined;
-  try {
-    const value = JSON.parse(Buffer.from(token, "base64url").toString("utf8")) as ChannelCursor;
-    const expected = [...new Set(channels)].sort();
-    if (value.version !== CURSOR_VERSION || JSON.stringify(value.channels) !== JSON.stringify(expected) || !value.positions || Object.values(value.positions).some((position) => !/^\d+$/.test(position))) return undefined;
-    return value.positions;
-  } catch { return undefined; }
+export function parseChannelCursor(token: string | undefined): string | undefined {
+  if (!token) return undefined;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(token) ? token : undefined;
 }
 
 export function parseChannelClientFrame(value: unknown): ChannelClientFrame | undefined {
