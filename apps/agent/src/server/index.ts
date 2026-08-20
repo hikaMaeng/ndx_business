@@ -38,6 +38,13 @@ async function initializeDatabase(): Promise<void> {
 }
 
 await initializeDatabase();
+const refreshMetrics = async (): Promise<void> => {
+  const processing = await processingStore.counts();
+  metrics.setGauge("processingReady", processing.ready); metrics.setGauge("processingRunning", processing.running);
+  metrics.setGauge("deliveryPending", await deliveryStore.pendingCount());
+};
+void refreshMetrics();
+const metricsTimer = setInterval(() => { void refreshMetrics().catch((error) => console.error(JSON.stringify({ event: "metrics.refresh.failed", error: error instanceof Error ? error.message : String(error) }))); }, 1000);
 const pool = createWorkerPool({ minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, maxQueue: env.maxQueue });
 const hub = new EventStreamHub();
 const ingress = startIngressConsumer({ queueTransport: pgmq, eventStore, processingStore, metrics, queue: env.queue, visibilityTimeoutSeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, batchSize: env.pollBatchSize });
@@ -48,6 +55,7 @@ const websocket = attachWebSocketTransport(server, env, pgmq, hub);
 async function shutdown(): Promise<void> {
   ingress.stop();
   scheduler.stop();
+  clearInterval(metricsTimer);
   await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   websocket.close();
   await database.end();

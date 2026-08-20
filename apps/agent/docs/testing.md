@@ -5,3 +5,5 @@ Run `npm run lint --workspace agent`, `npm run test --workspace agent`, and `npm
 `tests/plans/` and `tests/reports/` hold the event-store acceptance records. Event-store behaviour that depends on PostgreSQL type mapping — `bigint` sequences arriving as text, the identity backfill, and duplicate convergence — is not provable against a stubbed pool; verify it against the deployed database and record the queries in the report.
 
 Browser verification drives the `/ws` console at `/`. Prefer role and accessible-name locators; the shell exposes `main` as its landmark.
+
+Run `node apps/agent/tests/load/multichannel.mjs` against a deployed token-enabled Agent for concurrency verification. It distributes requests over four channels and 40 streams, then requires zero scheduler and delivery backlog before passing. Set `AGENT_LOAD_TOTAL` and `AGENT_LOAD_CONCURRENCY` for the intended load envelope.

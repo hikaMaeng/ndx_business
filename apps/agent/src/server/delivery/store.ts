@@ -32,4 +32,9 @@ export class DeliveryStore {
   async complete(eventId: string): Promise<void> {
     await this.pool.query("UPDATE event_delivery SET delivered_at = now(), lease_until = NULL WHERE event_id = $1", [eventId]);
   }
+
+  async pendingCount(): Promise<number> {
+    const result = await this.pool.query<{ count: string }>("SELECT count(*)::text FROM event_delivery WHERE delivered_at IS NULL");
+    return Number(result.rows[0]?.count ?? 0);
+  }
 }

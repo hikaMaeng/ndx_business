@@ -15,6 +15,10 @@ export interface MetricsSnapshot {
   workerFailed: number;
   processingFailures: number;
   inFlight: number;
+  ingressAccepted: number;
+  processingReady: number;
+  processingRunning: number;
+  deliveryPending: number;
 }
 
 export class MetricsRegistry {
@@ -22,9 +26,11 @@ export class MetricsRegistry {
     queueReads: 0, queueMessages: 0, queueDeletes: 0,
     appendTotal: 0, appendDuplicates: 0, appendFailures: 0, appendLatencyMsTotal: 0,
     workerStarted: 0, workerCompleted: 0, workerFailed: 0, processingFailures: 0, inFlight: 0,
+    ingressAccepted: 0, processingReady: 0, processingRunning: 0, deliveryPending: 0,
   };
 
   increment(name: keyof MetricsSnapshot, amount = 1): void { this.counters[name] += amount; }
+  setGauge(name: "processingReady" | "processingRunning" | "deliveryPending", value: number): void { this.counters[name] = value; }
 
   snapshot(): MetricsSnapshot & { appendLatencyMsAverage: number } {
     const appends = this.counters.appendTotal;

@@ -2,6 +2,7 @@ import type { Pool } from "pg";
 import type { AgentEvent } from "agent_domain/common";
 
 export interface ProcessingJob { eventId: string; event: AgentEvent; }
+export interface ProcessingCounts { ready: number; running: number; }
 
 /** Durable scheduler input. PGMQ is acknowledged only after this row exists. */
 export class ProcessingStore {
@@ -45,5 +46,10 @@ export class ProcessingStore {
 
   async retryLater(eventId: string): Promise<void> {
     await this.pool.query("UPDATE event_processing_job SET status = 'ready', lease_until = NULL, retry_at = now() + interval '1 second', updated_at = now() WHERE event_id = $1", [eventId]);
+  }
+
+  async counts(): Promise<ProcessingCounts> {
+    const result = await this.pool.query<{ status: "ready" | "running"; count: string }>("SELECT status, count(*)::text FROM event_processing_job WHERE status IN ('ready','running') GROUP BY status");
+    return result.rows.reduce<ProcessingCounts>((counts, row) => ({ ...counts, [row.status]: Number(row.count) }), { ready: 0, running: 0 });
   }
 }
