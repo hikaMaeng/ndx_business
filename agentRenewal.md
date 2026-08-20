@@ -891,9 +891,9 @@ server-issued field 발급 뒤 domain event로 변환한다.
 
 진행 상태:
 
-- 진행 중: `event_delivery`/`DeliveryStore`와 delivery lease 환경 계약을 제거하고 outbox
-  metrics 기준으로 부하 하네스를 전환한다. 과거 테스트 리포트는 당시의 `event_delivery`
-  증적으로 보존한다.
+- 완료: `event_delivery`/`DeliveryStore`와 delivery lease 환경 계약을 제거했고, 부하
+  하네스는 outbox metrics를 사용한다. 배포 후 과거 delivered ledger 7,936행을 제거했으며,
+  과거 테스트 리포트는 당시의 `event_delivery` 증적으로 보존한다.
 
 완료 조건:
 
