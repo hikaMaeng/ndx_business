@@ -25,5 +25,5 @@ while (Date.now() < deadline) {
   await new Promise((resolve) => setTimeout(resolve, 1000));
 }
 assert.equal(accepted, total); assert.ok(snapshot, "metrics endpoint must be enabled");
-assert.equal(snapshot.processingReady, 0); assert.equal(snapshot.processingRunning, 0); assert.equal(snapshot.deliveryPending, 0);
+assert.equal(snapshot.processingReady, 0); assert.equal(snapshot.processingRunning, 0); assert.equal(snapshot.outboxPending, 0);
 console.log(JSON.stringify({ test: "multichannel-load", total, concurrency, channels: channels.length, submitMs, settleMs: Math.round(performance.now() - started), accepted, metrics: snapshot }));

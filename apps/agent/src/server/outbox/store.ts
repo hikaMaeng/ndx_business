@@ -4,6 +4,7 @@ import type { EventEnvelope } from "agent_domain/common";
 
 export type OutboxMessage = { eventId: string; attemptId: string; event: EventEnvelope };
 export type OutboxRetry = "retry" | "dead" | "lost";
+export interface OutboxCounts { pending: number; failed: number; }
 
 /** Durable egress reservation. It is inserted through EventStore.append's transaction callback. */
 export class OutboxStore {
@@ -57,8 +58,11 @@ export class OutboxStore {
     return retried.rows[0]?.status === "failed" ? "dead" : retried.rows[0] ? "retry" : "lost";
   }
 
-  async pendingCount(): Promise<number> {
-    const count = await this.pool.query<{ count: string }>("SELECT count(*)::text FROM event_outbox WHERE status IN ('ready','running')");
-    return Number(count.rows[0]?.count ?? 0);
+  async counts(): Promise<OutboxCounts> {
+    const result = await this.pool.query<{ pending: string; failed: string }>(`SELECT
+      count(*) FILTER (WHERE status IN ('ready','running'))::text AS pending,
+      count(*) FILTER (WHERE status = 'failed')::text AS failed
+      FROM event_outbox WHERE status IN ('ready','running','failed')`);
+    return { pending: Number(result.rows[0]?.pending ?? 0), failed: Number(result.rows[0]?.failed ?? 0) };
   }
 }

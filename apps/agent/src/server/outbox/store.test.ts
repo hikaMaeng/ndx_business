@@ -26,3 +26,14 @@ test("outbox retry records a bounded permanent failure in its durable DLQ", asyn
   assert.match(queries[0], /event_outbox_dlq/);
   assert.match(queries[0], /power\(2, owned.attempts - 1\)/);
 });
+
+test("outbox metrics retain the durable failed backlog across process restarts", async () => {
+  const queries: string[] = [];
+  const store = new OutboxStore({ query: async (sql: string) => {
+    queries.push(sql);
+    return { rowCount: 1, rows: [{ pending: "3", failed: "2" }] };
+  } } as never, 30);
+  assert.deepEqual(await store.counts(), { pending: 3, failed: 2 });
+  assert.match(queries[0], /status IN \('ready','running','failed'\)/);
+  assert.match(queries[0], /status = 'failed'/);
+});

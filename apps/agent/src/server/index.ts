@@ -58,7 +58,9 @@ const refreshMetrics = async (): Promise<void> => {
   const processing = await processingStore.counts();
   metrics.setGauge("processingReady", processing.ready); metrics.setGauge("processingRunning", processing.running); metrics.setGauge("processingDlq", processing.failed);
   metrics.setGauge("processingReadyOldestMs", processing.readyOldestMs); metrics.setGauge("processingExpiredLeases", processing.expiredLeases);
-  metrics.setGauge("outboxPending", await outboxStore.pendingCount());
+  const outbox = await outboxStore.counts();
+  metrics.setGauge("outboxPending", outbox.pending);
+  metrics.setGauge("outboxFailed", outbox.failed);
 };
 void refreshMetrics();
 const metricsTimer = setInterval(() => { void refreshMetrics().catch((error) => console.error(JSON.stringify({ event: "metrics.refresh.failed", error: error instanceof Error ? error.message : String(error) }))); }, 1000);

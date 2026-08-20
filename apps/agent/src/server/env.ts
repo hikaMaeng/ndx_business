@@ -20,7 +20,6 @@ export interface AgentEnv {
   maxQueue: number;
   databasePoolMax: number;
   metricsToken: string;
-  deliveryLeaseSeconds: number;
   outboxLeaseSeconds: number;
   outboxDispatchers: number;
   outboxMaxAttempts: number;
@@ -41,10 +40,6 @@ export function readEnv(source = process.env): AgentEnv {
   const maxWorkerThreads = positive(source, "AGENT_MAX_THREADS", cpuCount * 2, false);
   if (minWorkerThreads > maxWorkerThreads) throw new Error("AGENT_MIN_THREADS must not exceed AGENT_MAX_THREADS");
   const visibilityTimeoutSeconds = positive(source, "QUEUE_VISIBILITY_TIMEOUT_SECONDS", 60);
-  const deliveryLeaseSeconds = positive(source, "AGENT_DELIVERY_LEASE_SECONDS", 30);
-  // A lease that outlives the queue visibility timeout turns a redelivery into a blocked delivery:
-  // the redelivered message finds the lease still held and cannot make progress.
-  if (deliveryLeaseSeconds >= visibilityTimeoutSeconds) throw new Error("AGENT_DELIVERY_LEASE_SECONDS must be shorter than QUEUE_VISIBILITY_TIMEOUT_SECONDS");
   return {
     port: positive(source, "PORT", 18081),
     databaseUrl: source.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/ndx_business",
@@ -65,7 +60,6 @@ export function readEnv(source = process.env): AgentEnv {
     maxQueue: positive(source, "AGENT_MAX_QUEUE", 64),
     databasePoolMax: positive(source, "AGENT_DATABASE_POOL_MAX", Math.min(48, Math.max(16, Math.ceil(maxWorkerThreads / 2)))),
     metricsToken: source.AGENT_METRICS_TOKEN ?? "",
-    deliveryLeaseSeconds,
     outboxLeaseSeconds: positive(source, "AGENT_OUTBOX_LEASE_SECONDS", 30),
     outboxDispatchers: positive(source, "AGENT_OUTBOX_DISPATCHERS", Math.min(16, maxWorkerThreads)),
     outboxMaxAttempts: positive(source, "AGENT_OUTBOX_MAX_ATTEMPTS", 5),

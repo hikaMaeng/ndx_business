@@ -26,7 +26,7 @@ await Promise.all(Array.from({ length: total }, (_, index) => fetch(`${baseUrl}/
 let after = before; const deadline = Date.now() + timeoutMs;
 while (Date.now() < deadline) {
   after = await snapshot();
-  if (after.workerCompleted - before.workerCompleted >= total && after.processingReady === 0 && after.processingRunning === 0 && after.inFlight === 0 && after.deliveryPending === 0) break;
+  if (after.workerCompleted - before.workerCompleted >= total && after.processingReady === 0 && after.processingRunning === 0 && after.inFlight === 0 && after.outboxPending === 0) break;
   await new Promise((resolve) => setTimeout(resolve, 250));
 }
 const settleMs = Math.round(performance.now() - started);
@@ -34,6 +34,6 @@ const expectedWorkerMs = Math.ceil(total / workers) * delayMs;
 const maximumMs = expectedWorkerMs + overheadMs;
 assert.equal(after.workerCompleted - before.workerCompleted, total);
 assert.equal(after.workerFailed - before.workerFailed, 0); assert.equal(after.processingFailures - before.processingFailures, 0);
-assert.equal(after.processingReady, 0); assert.equal(after.processingRunning, 0); assert.equal(after.inFlight, 0); assert.equal(after.deliveryPending, 0);
+assert.equal(after.processingReady, 0); assert.equal(after.processingRunning, 0); assert.equal(after.inFlight, 0); assert.equal(after.outboxPending, 0);
 assert.equal(after.processingExpiredLeases, 0); assert.ok(settleMs <= maximumMs, `settled in ${settleMs}ms; expected <= ${maximumMs}ms (${expectedWorkerMs}ms worker critical path + ${overheadMs}ms budget)`);
 console.log(JSON.stringify({ test: "worker-concurrency", prefix, total, workers, streams, delayMs, expectedWorkerMs, overheadMs, settleMs, workerCompleted: after.workerCompleted - before.workerCompleted, metrics: after }));

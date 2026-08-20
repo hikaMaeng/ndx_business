@@ -840,7 +840,8 @@ server-issued field 발급 뒤 domain event로 변환한다.
 - 구현 중: terminal result의 `event_store` append와 `event_outbox` 예약은 같은 transaction으로
   commit되고, fenced dispatcher만 그 이후 PGMQ/WebSocket 발행을 시도한다. session/run/turn/tool
   projection은 독립 stream-position checkpoint를 가진다. outbox는 capped exponential backoff와
-  최대 시도 DLQ를 가지며, 실 DB recovery/rebuild 수용 검증은 남아 있다.
+  최대 시도 DLQ를 가진다. 실 DB에서 terminal event의 outbox publish 및 특정 projection의
+  checkpoint 삭제 뒤 replay/rebuild까지 검증했다.
 
 완료 조건:
 
@@ -887,6 +888,12 @@ server-issued field 발급 뒤 domain event로 변환한다.
 - 문서와 compose/env 갱신
 - Docker build/deploy 검증
 - old branch와 새 branch의 차이 기록
+
+진행 상태:
+
+- 진행 중: `event_delivery`/`DeliveryStore`와 delivery lease 환경 계약을 제거하고 outbox
+  metrics 기준으로 부하 하네스를 전환한다. 과거 테스트 리포트는 당시의 `event_delivery`
+  증적으로 보존한다.
 
 완료 조건:
 
