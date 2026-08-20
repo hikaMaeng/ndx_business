@@ -2,7 +2,7 @@ import type { Pool } from "pg";
 import type { AgentEvent } from "agent_domain/common";
 
 export interface ProcessingJob { eventId: string; event: AgentEvent; }
-export interface ProcessingCounts { ready: number; running: number; }
+export interface ProcessingCounts { ready: number; running: number; readyOldestMs: number; expiredLeases: number; }
 
 /** Durable scheduler input. PGMQ is acknowledged only after this row exists. */
 export class ProcessingStore {
@@ -49,7 +49,13 @@ export class ProcessingStore {
   }
 
   async counts(): Promise<ProcessingCounts> {
-    const result = await this.pool.query<{ status: "ready" | "running"; count: string }>("SELECT status, count(*)::text FROM event_processing_job WHERE status IN ('ready','running') GROUP BY status");
-    return result.rows.reduce<ProcessingCounts>((counts, row) => ({ ...counts, [row.status]: Number(row.count) }), { ready: 0, running: 0 });
+    const result = await this.pool.query<{ ready: string; running: string; ready_oldest_ms: string; expired_leases: string }>(`SELECT
+      count(*) FILTER (WHERE status = 'ready')::text AS ready,
+      count(*) FILTER (WHERE status = 'running')::text AS running,
+      coalesce(floor(extract(epoch FROM (now() - min(created_at) FILTER (WHERE status = 'ready'))) * 1000), 0)::text AS ready_oldest_ms,
+      count(*) FILTER (WHERE status = 'running' AND lease_until < now())::text AS expired_leases
+      FROM event_processing_job WHERE status IN ('ready','running')`);
+    const row = result.rows[0];
+    return { ready: Number(row?.ready ?? 0), running: Number(row?.running ?? 0), readyOldestMs: Number(row?.ready_oldest_ms ?? 0), expiredLeases: Number(row?.expired_leases ?? 0) };
   }
 }

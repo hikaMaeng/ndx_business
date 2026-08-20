@@ -43,7 +43,7 @@ export function startIngressConsumer(input: { queueTransport: EventQueueTranspor
 }
 
 /** Scheduler is the sole worker dispatcher. A durable job claim, not PGMQ visibility, owns execution. */
-export function startScheduler(input: { queueTransport: EventQueueTransport; database: import("pg").Pool; pool: WorkerPool; hub: EventStreamHub; eventStore: EventStore; deliveryStore: DeliveryStore; processingStore: ProcessingStore; metrics: MetricsRegistry; resultQueue: string; pollSeconds: number }): Loop {
+export function startScheduler(input: { queueTransport: EventQueueTransport; database: import("pg").Pool; pool: WorkerPool; hub: EventStreamHub; eventStore: EventStore; deliveryStore: DeliveryStore; processingStore: ProcessingStore; metrics: MetricsRegistry; resultQueue: string; pollSeconds: number; maxConcurrentDispatches: number }): Loop {
   let stopped = false;
   const publish = async (request: EventEnvelope, result: AgentEvent<ResultPayload>): Promise<void> => {
     const envelope = await input.eventStore.append(toResultDraft(request, result)); const delivery = await input.deliveryStore.claim(envelope.eventId);
@@ -60,12 +60,15 @@ export function startScheduler(input: { queueTransport: EventQueueTransport; dat
     try { const outcome = await workerOutcome(input.pool, event); await completeExecution(input.database, event.transactionKey, outcome.result.payload, outcome.status); input.metrics.increment(outcome.status === "completed" ? "workerCompleted" : "workerFailed"); await publish(request, outcome.result); }
     finally { clearInterval(heartbeat); input.metrics.increment("inFlight", -1); }
   };
-  void (async () => { while (!stopped) {
+  const dispatchLane = async (): Promise<void> => { while (!stopped) {
     try {
       const job = await input.processingStore.claimNext(); if (!job) { await delay(input.pollSeconds * 1000); continue; }
+      input.metrics.increment("schedulerDispatchActive");
       try { await process(job.event, job.eventId); await input.processingStore.complete(job.eventId); }
       catch (error) { input.metrics.increment("processingFailures"); await input.processingStore.retryLater(job.eventId); console.error(JSON.stringify({ event: "scheduler.retry", eventId: job.eventId, error: error instanceof Error ? error.message : String(error) })); }
+      finally { input.metrics.increment("schedulerDispatchActive", -1); }
     } catch (error) { input.metrics.increment("processingFailures"); console.error(JSON.stringify({ event: "scheduler.poll.failed", error: error instanceof Error ? error.message : String(error) })); await delay(input.pollSeconds * 1000); }
-  } })();
+  } };
+  for (let lane = 0; lane < input.maxConcurrentDispatches; lane += 1) void dispatchLane();
   return { stop: () => { stopped = true; } };
 }

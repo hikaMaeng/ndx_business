@@ -41,6 +41,7 @@ await initializeDatabase();
 const refreshMetrics = async (): Promise<void> => {
   const processing = await processingStore.counts();
   metrics.setGauge("processingReady", processing.ready); metrics.setGauge("processingRunning", processing.running);
+  metrics.setGauge("processingReadyOldestMs", processing.readyOldestMs); metrics.setGauge("processingExpiredLeases", processing.expiredLeases);
   metrics.setGauge("deliveryPending", await deliveryStore.pendingCount());
 };
 void refreshMetrics();
@@ -48,7 +49,7 @@ const metricsTimer = setInterval(() => { void refreshMetrics().catch((error) => 
 const pool = createWorkerPool({ minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, maxQueue: env.maxQueue });
 const hub = new EventStreamHub();
 const ingress = startIngressConsumer({ queueTransport: pgmq, eventStore, processingStore, metrics, queue: env.queue, visibilityTimeoutSeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, batchSize: env.pollBatchSize });
-const scheduler = startScheduler({ queueTransport: pgmq, database, pool, hub, eventStore, deliveryStore, processingStore, metrics, resultQueue: env.resultQueue, pollSeconds: env.pollSeconds });
+const scheduler = startScheduler({ queueTransport: pgmq, database, pool, hub, eventStore, deliveryStore, processingStore, metrics, resultQueue: env.resultQueue, pollSeconds: env.pollSeconds, maxConcurrentDispatches: env.maxWorkerThreads });
 const server = createApp(env, pgmq, hub, metrics).listen(env.port, () => console.log(JSON.stringify({ event: "agent.listening", port: env.port, cpuCount: env.cpuCount, minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, metricsEndpoint: env.metricsToken ? "enabled" : "disabled" })));
 const websocket = attachWebSocketTransport(server, env, pgmq, hub);
 
