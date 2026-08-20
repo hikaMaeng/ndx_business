@@ -49,19 +49,21 @@ test("a lost worker releases its execution lease before the durable job retries"
 });
 
 test("a real worker exit returns its durable job to retry instead of joining its old execution", async () => {
-  let claims = 0; let retries = 0; const statements: string[] = [];
+  let claims = 0; let retries = 0; const statements: string[] = []; const started: Array<[string, string, string]> = [];
   const pool = createWorkerPool({ minWorkerThreads: 0, maxWorkerThreads: 1, maxQueue: 1, workerUrl: new URL("./worker/worker-exit-zero.fixture.mjs", import.meta.url) });
   const scheduler = startScheduler({
     database: { query: async (sql: string) => { statements.push(sql); return { rowCount: 1, rows: [] }; } } as never,
     pool,
     eventStore: { appendMany: async () => [] } as never,
     outboxStore: { enqueue: async () => undefined } as never,
-    processingStore: { claimNext: async () => ++claims === 1 ? { eventId: event.eventId, attemptId: "attempt-1", event } : undefined, complete: async () => true, renew: async () => true, startAttempt: async () => true, retryLater: async () => { retries += 1; return "retry"; } } as never,
+    processingStore: { claimNext: async () => ++claims === 1 ? { eventId: event.eventId, attemptId: "attempt-1", event } : undefined, complete: async () => true, renew: async () => true, startAttempt: async (eventId: string, attemptId: string, workerId: string) => { started.push([eventId, attemptId, workerId]); return true; }, retryLater: async () => { retries += 1; return "retry"; } } as never,
     metrics, schedulerIdleMs: 1, executionLeaseSeconds: 60, processingMaxAttempts: 3, processingRetryBaseMs: 1, waitForWork: async () => await new Promise<never>(() => undefined), maxConcurrentDispatches: 1,
   });
   for (let attempt = 0; attempt < 50 && retries === 0; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 20));
   scheduler.stop(); await pool.destroy();
   assert.equal(retries, 1);
+  assert.deepEqual(started.map(([eventId, attemptId]) => [eventId, attemptId]), [["event-1", "attempt-1"]]);
+  assert.match(started[0]?.[2] ?? "", /^[0-9a-f-]{36}$/);
   assert.ok(statements.some((sql) => sql.includes("lease_until = now() - interval '1 millisecond'")));
 });
 
