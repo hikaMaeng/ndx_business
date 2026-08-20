@@ -21,6 +21,7 @@ export interface AgentEnv {
   metricsToken: string;
   deliveryLeaseSeconds: number;
   websocketMailboxMax: number;
+  websocketBufferedBytes: number;
 }
 
 function positive(source: NodeJS.ProcessEnv, name: string, fallback: number, allowZero = false): number {
@@ -60,5 +61,6 @@ export function readEnv(source = process.env): AgentEnv {
     metricsToken: source.AGENT_METRICS_TOKEN ?? "",
     deliveryLeaseSeconds,
     websocketMailboxMax: positive(source, "AGENT_WEBSOCKET_MAILBOX_MAX", 256),
+    websocketBufferedBytes: positive(source, "AGENT_WEBSOCKET_BUFFERED_BYTES", 1_048_576),
   };
 }

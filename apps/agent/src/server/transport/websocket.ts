@@ -15,6 +15,7 @@ export function attachWebSocketTransport(server: Server, env: AgentEnv, queue: E
     let cursorToken: string | undefined;
     const mailbox = new ConnectionMailbox(env.websocketMailboxMax, (event, done) => {
       if (socket.readyState !== socket.OPEN) { done(); return; }
+      if (socket.bufferedAmount >= env.websocketBufferedBytes) { socket.close(1013, "slow consumer"); done(); return; }
       positions[event.streamId] = event.sequence;
       if (!cursorToken) { done(); return; }
       void eventStore.advanceChannelCursor(cursorToken, positions).catch(() => socket.close(1011, "cursor persistence failed"));
