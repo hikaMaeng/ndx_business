@@ -3,6 +3,7 @@ import type { Pool, PoolClient } from "pg";
 import type { EventEnvelope } from "agent_domain/common";
 
 export type OutboxMessage = { eventId: string; attemptId: string; event: EventEnvelope };
+export type OutboxRetry = "retry" | "dead" | "lost";
 
 /** Durable egress reservation. It is inserted through EventStore.append's transaction callback. */
 export class OutboxStore {
@@ -13,7 +14,10 @@ export class OutboxStore {
       event_id text PRIMARY KEY, event jsonb NOT NULL, status text NOT NULL DEFAULT 'ready',
       attempt_id text, lease_until timestamptz, attempts integer NOT NULL DEFAULT 0,
       available_at timestamptz NOT NULL DEFAULT now(), created_at timestamptz NOT NULL DEFAULT now(), published_at timestamptz,
-      CHECK (status IN ('ready','running','published')))`);
+      CHECK (status IN ('ready','running','published','failed')))`);
+    await this.pool.query("ALTER TABLE event_outbox DROP CONSTRAINT IF EXISTS event_outbox_status_check");
+    await this.pool.query("ALTER TABLE event_outbox ADD CONSTRAINT event_outbox_status_check CHECK (status IN ('ready','running','published','failed'))");
+    await this.pool.query("CREATE TABLE IF NOT EXISTS event_outbox_dlq (event_id text PRIMARY KEY, event jsonb NOT NULL, attempts integer NOT NULL, error text NOT NULL, failed_at timestamptz NOT NULL DEFAULT now())");
     await this.pool.query("CREATE INDEX IF NOT EXISTS event_outbox_claim_idx ON event_outbox (available_at, created_at) WHERE status = 'ready'");
     await this.pool.query("CREATE INDEX IF NOT EXISTS event_outbox_running_lease_idx ON event_outbox (lease_until) WHERE status = 'running'");
   }
@@ -38,13 +42,23 @@ export class OutboxStore {
     return Boolean(completed.rowCount);
   }
 
-  async retry(eventId: string, attemptId: string, retryMs: number): Promise<boolean> {
-    const retried = await this.pool.query("UPDATE event_outbox SET status = 'ready', attempt_id = NULL, lease_until = NULL, available_at = now() + make_interval(secs => ($3::numeric / 1000)::double precision) WHERE event_id = $1 AND status = 'running' AND attempt_id = $2", [eventId, attemptId, retryMs]);
-    return Boolean(retried.rowCount);
+  async retry(eventId: string, attemptId: string, maxAttempts: number, baseRetryMs: number, error: string): Promise<OutboxRetry> {
+    const retried = await this.pool.query<{ status: "ready" | "failed" }>(`WITH owned AS (
+      SELECT event_id, event, attempts FROM event_outbox WHERE event_id = $1 AND status = 'running' AND attempt_id = $2 FOR UPDATE
+    ), transitioned AS (
+      UPDATE event_outbox outbox SET status = CASE WHEN owned.attempts >= $3 THEN 'failed' ELSE 'ready' END,
+        attempt_id = NULL, lease_until = NULL,
+        available_at = CASE WHEN owned.attempts >= $3 THEN available_at ELSE now() + make_interval(secs => LEAST(($4::numeric / 1000) * power(2, owned.attempts - 1), 300)::double precision) END
+      FROM owned WHERE outbox.event_id = owned.event_id RETURNING outbox.status, owned.event, owned.attempts
+    ), archived AS (
+      INSERT INTO event_outbox_dlq (event_id, event, attempts, error) SELECT $1, event, attempts, $5 FROM transitioned WHERE status = 'failed'
+      ON CONFLICT (event_id) DO NOTHING
+    ) SELECT status FROM transitioned`, [eventId, attemptId, maxAttempts, baseRetryMs, error]);
+    return retried.rows[0]?.status === "failed" ? "dead" : retried.rows[0] ? "retry" : "lost";
   }
 
   async pendingCount(): Promise<number> {
-    const count = await this.pool.query<{ count: string }>("SELECT count(*)::text FROM event_outbox WHERE status <> 'published'");
+    const count = await this.pool.query<{ count: string }>("SELECT count(*)::text FROM event_outbox WHERE status IN ('ready','running')");
     return Number(count.rows[0]?.count ?? 0);
   }
 }

@@ -6,7 +6,7 @@ import type { OutboxStore } from "./store.js";
 export type OutboxLoop = { stop: () => void };
 
 /** Publishes only rows that committed with their canonical event. */
-export function startOutboxDispatcher(input: { outbox: OutboxStore; queue: EventQueueTransport; resultQueue: string; hub: EventStreamHub; metrics: MetricsRegistry; idleMs: number; retryMs: number; lanes: number }): OutboxLoop {
+export function startOutboxDispatcher(input: { outbox: OutboxStore; queue: EventQueueTransport; resultQueue: string; hub: EventStreamHub; metrics: MetricsRegistry; idleMs: number; retryMs: number; maxAttempts: number; lanes: number }): OutboxLoop {
   let stopped = false;
   const lane = async (): Promise<void> => { while (!stopped) {
     try {
@@ -19,8 +19,10 @@ export function startOutboxDispatcher(input: { outbox: OutboxStore; queue: Event
         catch (error) { console.error(JSON.stringify({ event: "outbox.live-projection.failed", eventId: message.eventId, error: error instanceof Error ? error.message : String(error) })); }
       } catch (error) {
         input.metrics.increment("processingFailures");
-        await input.outbox.retry(message.eventId, message.attemptId, input.retryMs);
-        console.error(JSON.stringify({ event: "outbox.retry", eventId: message.eventId, error: error instanceof Error ? error.message : String(error) }));
+        const outcome = await input.outbox.retry(message.eventId, message.attemptId, input.maxAttempts, input.retryMs, error instanceof Error ? error.message : String(error));
+        if (outcome === "retry") input.metrics.increment("outboxRetries");
+        if (outcome === "dead") input.metrics.increment("outboxDlqTotal");
+        console.error(JSON.stringify({ event: outcome === "dead" ? "outbox.dlq" : "outbox.retry", eventId: message.eventId, error: error instanceof Error ? error.message : String(error) }));
       }
     } catch (error) { input.metrics.increment("processingFailures"); await new Promise((resolve) => setTimeout(resolve, input.idleMs)); }
   } };

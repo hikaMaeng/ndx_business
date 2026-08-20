@@ -18,3 +18,11 @@ test("outbox enqueue uses its caller transaction and claim completion is fenced"
   assert.match(queries[1].sql, /FOR UPDATE SKIP LOCKED/);
   assert.match(queries[2].sql, /attempt_id = \$2/);
 });
+
+test("outbox retry records a bounded permanent failure in its durable DLQ", async () => {
+  const queries: string[] = [];
+  const store = new OutboxStore({ query: async (sql: string) => { queries.push(sql); return { rowCount: 1, rows: [{ status: "failed" }] }; } } as never, 30);
+  assert.equal(await store.retry(event.eventId, "attempt-1", 2, 1000, "queue unavailable"), "dead");
+  assert.match(queries[0], /event_outbox_dlq/);
+  assert.match(queries[0], /power\(2, owned.attempts - 1\)/);
+});

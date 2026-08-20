@@ -8,6 +8,8 @@ The contract targets visibility-aware queue systems such as PGMQ, SQS, Redis Str
 
 `session_view`, `run_view`, `turn_view`, and `tool_view` are disposable CQRS projections. Each owns an independent `{streamId: sequence}` checkpoint in `event_projection_checkpoint`; a failed projection cannot move another projection's checkpoint, and any one view can be truncated then reconstructed from `event_store`.
 
+Outbox publication is at-least-once. `AGENT_OUTBOX_RETRY_BASE_MS` uses capped exponential backoff and `AGENT_OUTBOX_MAX_ATTEMPTS` moves a terminally undeliverable row into `event_outbox_dlq`; the canonical event remains replayable and is never deleted by this transition.
+
 `GET /metrics` is disabled unless `AGENT_METRICS_TOKEN` is set and must stay aggregate-only, because the Agent host port is published in the default Compose profile.
 
 `processingRetries`, `processingJoined`, and `processingDlqTotal` are monotonic operator counters; `processingDlq` is the current failed-job gauge. An active transaction collision joins the durable owner and increments only `processingJoined`; it must not consume the retry/DLQ budget or execute again. Alert on a sustained retry/DLQ increase together with nonzero ready age, rather than on individual payloads. `agent_execution_recipient` stores only routing and causation metadata, never the original command payload, and shares the lifetime of the corresponding durable idempotency claim; the current product contract retains idempotency claims indefinitely, so there is intentionally no independent recipient prune. A future finite idempotency window must prune both atomically.

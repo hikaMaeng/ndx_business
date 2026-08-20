@@ -839,7 +839,8 @@ server-issued field 발급 뒤 domain event로 변환한다.
 
 - 구현 중: terminal result의 `event_store` append와 `event_outbox` 예약은 같은 transaction으로
   commit되고, fenced dispatcher만 그 이후 PGMQ/WebSocket 발행을 시도한다. session/run/turn/tool
-  projection은 독립 stream-position checkpoint를 가진다. 실 DB recovery/rebuild 수용 검증은 남아 있다.
+  projection은 독립 stream-position checkpoint를 가진다. outbox는 capped exponential backoff와
+  최대 시도 DLQ를 가지며, 실 DB recovery/rebuild 수용 검증은 남아 있다.
 
 완료 조건:
 
