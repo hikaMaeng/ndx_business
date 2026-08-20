@@ -15,6 +15,7 @@ import { OutboxStore } from "./outbox/store.js";
 import { startOutboxDispatcher } from "./outbox/dispatcher.js";
 import { ProjectionStore } from "./projection/store.js";
 import { startProjectionRunners } from "./projection/runner.js";
+import { ProjectionNotifier } from "./projection/notifier.js";
 
 const env = readEnv();
 const database = createDatabasePool(env.databaseUrl, env.databasePoolMax);
@@ -66,10 +67,11 @@ const recoveryTimer = setInterval(() => { void recoverExpiredExecutions(database
 const pool = createWorkerPool({ minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, maxQueue: env.maxQueue });
 const hub = new EventStreamHub();
 const schedulerNotifier = createSchedulerNotifier();
-const ingress = startIngressConsumer({ queueTransport: ingressPgmq, eventStore, processingStore, metrics, notifyScheduler: () => schedulerNotifier.notify(), publishLive: (event) => hub.publish(event), queue: env.queue, visibilityTimeoutSeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, batchSize: env.pollBatchSize, maxConcurrentHandoffs: env.ingressConsumers });
-const scheduler = startScheduler({ database, pool, eventStore, outboxStore, processingStore, metrics, schedulerIdleMs: env.schedulerIdleMs, executionLeaseSeconds: env.visibilityTimeoutSeconds, processingMaxAttempts: env.processingMaxAttempts, processingRetryBaseMs: env.processingRetryBaseMs, waitForWork: () => schedulerNotifier.wait(env.schedulerIdleMs), maxConcurrentDispatches: env.maxWorkerThreads });
+const projectionNotifier = new ProjectionNotifier();
+const ingress = startIngressConsumer({ queueTransport: ingressPgmq, eventStore, processingStore, metrics, notifyScheduler: () => schedulerNotifier.notify(), notifyProjection: () => projectionNotifier.notify(), publishLive: (event) => hub.publish(event), queue: env.queue, visibilityTimeoutSeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, batchSize: env.pollBatchSize, maxConcurrentHandoffs: env.ingressConsumers });
+const scheduler = startScheduler({ database, pool, eventStore, outboxStore, processingStore, metrics, notifyProjection: () => projectionNotifier.notify(), schedulerIdleMs: env.schedulerIdleMs, executionLeaseSeconds: env.visibilityTimeoutSeconds, processingMaxAttempts: env.processingMaxAttempts, processingRetryBaseMs: env.processingRetryBaseMs, waitForWork: () => schedulerNotifier.wait(env.schedulerIdleMs), maxConcurrentDispatches: env.maxWorkerThreads });
 const outbox = startOutboxDispatcher({ outbox: outboxStore, queue: pgmq, resultQueue: env.resultQueue, hub, metrics, idleMs: env.schedulerIdleMs, retryMs: env.outboxRetryBaseMs, maxAttempts: env.outboxMaxAttempts, lanes: env.outboxDispatchers });
-const projections = startProjectionRunners({ store: projectionStore, metrics, idleMs: env.schedulerIdleMs });
+const projections = startProjectionRunners({ store: projectionStore, metrics, waitForWork: (projection) => projectionNotifier.wait(projection, 30_000) });
 const server = createApp(env, pgmq, hub, metrics).listen(env.port, () => console.log(JSON.stringify({ event: "agent.listening", port: env.port, cpuCount: env.cpuCount, minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, metricsEndpoint: env.metricsToken ? "enabled" : "disabled" })));
 const websocket = attachWebSocketTransport(server, env, pgmq, hub, eventStore);
 

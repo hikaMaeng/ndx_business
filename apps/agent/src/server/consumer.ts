@@ -26,7 +26,7 @@ async function workerOutcome(pool: WorkerPool, event: EventEnvelope, signal?: Ab
 }
 
 /** Thread 1: PGMQ handoff only. It never awaits a worker or result delivery. */
-export function startIngressConsumer(input: { queueTransport: EventQueueTransport; eventStore: EventStore; processingStore: ProcessingStore; metrics: MetricsRegistry; notifyScheduler: () => void; publishLive: (event: EventEnvelope) => void; queue: string; visibilityTimeoutSeconds: number; pollSeconds: number; batchSize: number; maxConcurrentHandoffs: number }): Loop {
+export function startIngressConsumer(input: { queueTransport: EventQueueTransport; eventStore: EventStore; processingStore: ProcessingStore; metrics: MetricsRegistry; notifyScheduler: () => void; notifyProjection?: () => void; publishLive: (event: EventEnvelope) => void; queue: string; visibilityTimeoutSeconds: number; pollSeconds: number; batchSize: number; maxConcurrentHandoffs: number }): Loop {
   let stopped = false;
   const handoffLane = async (): Promise<void> => { while (!stopped) {
     try {
@@ -37,6 +37,7 @@ export function startIngressConsumer(input: { queueTransport: EventQueueTranspor
         const persisted = await input.eventStore.append(toEventDraft(message.event));
         await input.processingStore.enqueue(persisted);
         input.publishLive(persisted);
+        input.notifyProjection?.();
         await input.queueTransport.delete(input.queue, message.id);
         input.notifyScheduler();
         input.metrics.increment("queueDeletes");
@@ -51,7 +52,7 @@ export function startIngressConsumer(input: { queueTransport: EventQueueTranspor
 }
 
 /** Scheduler is the sole worker dispatcher. A durable job claim, not PGMQ visibility, owns execution. */
-export function startScheduler(input: { database: import("pg").Pool; pool: WorkerPool; eventStore: EventStore; outboxStore: OutboxStore; processingStore: ProcessingStore; metrics: MetricsRegistry; schedulerIdleMs: number; executionLeaseSeconds: number; processingMaxAttempts: number; processingRetryBaseMs: number; waitForWork: () => Promise<void>; maxConcurrentDispatches: number }): Loop {
+export function startScheduler(input: { database: import("pg").Pool; pool: WorkerPool; eventStore: EventStore; outboxStore: OutboxStore; processingStore: ProcessingStore; metrics: MetricsRegistry; notifyProjection?: () => void; schedulerIdleMs: number; executionLeaseSeconds: number; processingMaxAttempts: number; processingRetryBaseMs: number; waitForWork: () => Promise<void>; maxConcurrentDispatches: number }): Loop {
   let stopped = false;
   const recipientsOf = async (request: EventEnvelope): Promise<EventEnvelope[]> => {
     const recipients = await executionRecipients(input.database, request.transactionKey);
@@ -60,20 +61,20 @@ export function startScheduler(input: { database: import("pg").Pool; pool: Worke
   const publish = async (request: EventEnvelope, payload: ResultPayload): Promise<void> => {
     for (const recipient of await recipientsOf(request)) {
       const result = createResultEvent(recipient, payload, resultEventId(recipient));
-      await input.eventStore.append(toResultDraft(recipient, result), (client, persisted) => input.outboxStore.enqueue(client, persisted));
+      await input.eventStore.append(toResultDraft(recipient, result), (client, persisted) => input.outboxStore.enqueue(client, persisted)); input.notifyProjection?.();
     }
   };
   const publishProcessingFailure = async (request: EventEnvelope, jobId: string, message: string): Promise<void> => {
     for (const recipient of await recipientsOf(request)) {
       const eventId = deterministicEventId(`processing-failed:${jobId}:${recipient.replyChannel ?? "agent.results"}`);
-      await input.eventStore.append(toProcessingFailureDraft(recipient, eventId, message), (client, persisted) => input.outboxStore.enqueue(client, persisted));
+      await input.eventStore.append(toProcessingFailureDraft(recipient, eventId, message), (client, persisted) => input.outboxStore.enqueue(client, persisted)); input.notifyProjection?.();
     }
   };
   const process = async (request: EventEnvelope, jobId: string, attemptId: string): Promise<void> => {
     const claim = await claimExecution(input.database, request, attemptId, input.executionLeaseSeconds);
     if (claim.kind === "conflict") {
       const conflict = createResultEvent(request, { ok: false, error: { code: "idempotency_conflict", message: claim.reason } }, deterministicEventId(`conflict:${request.eventId}`));
-      await input.eventStore.append(toResultDraft(request, conflict), (client, persisted) => input.outboxStore.enqueue(client, persisted));
+      await input.eventStore.append(toResultDraft(request, conflict), (client, persisted) => input.outboxStore.enqueue(client, persisted)); input.notifyProjection?.();
       return;
     }
     if (claim.kind === "duplicate") {
