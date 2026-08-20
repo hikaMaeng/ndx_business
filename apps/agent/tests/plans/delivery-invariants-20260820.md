@@ -1,59 +1,37 @@
-# Test Plan: delivery-invariants
+# Test Plan: durable terminal-delivery invariants
 
-## Created
-2026-08-20
+## Status
+
+The former `event_delivery` lease plan is superseded. `event_delivery` was removed in Phase 7; its historical report remains evidence for that retired path. Current delivery is `event_store` → transactional `event_outbox` → fenced outbox dispatcher.
 
 ## Goal
-Prove that a failure between worker completion and result delivery cannot strand, drop, or
-mislabel an event:
-1. a durable-state failure releases the visibility timer, so the message is redelivered rather than
-   held invisible forever;
-2. a result whose lease is held by an unfinished attempt is neither sent nor acknowledged;
-3. an already delivered result acknowledges its source without sending again;
-4. a durable-state or egress error never reaches the client as `worker_failed`;
-5. `AGENT_DELIVERY_LEASE_SECONDS` shorter than `QUEUE_VISIBILITY_TIMEOUT_SECONDS` is enforced at
-   startup;
-6. source redelivery still converges on one command row, one result row, and one result-queue send.
 
-## Environment
-- Compose stack refreshed with `npm run deploy agent`.
-- `agent` on host port 18081; PostgreSQL/PGMQ owned by the `admin` service, database `ndx_business`.
-- `apps/agent/docker/.env` carries `AGENT_METRICS_TOKEN` and `AGENT_DELIVERY_LEASE_SECONDS=30`
-  against the default `QUEUE_VISIBILITY_TIMEOUT_SECONDS=60`.
+Prove that every terminal outcome is immutable, durably reserved before external publication, and delivered at least once without a client-visible false `worker_failed` caused by egress.
 
-## Preconditions
-- `event_store`, `event_stream_sequence`, `event_delivery`, and `agent_execution` exist.
-- `GET /health` returns 200.
+## Current preconditions
+
+- Deploy with `npm run deploy agent`; `GET /health` must return 200.
+- `event_store`, `event_stream_sequence`, `event_processing_job`, `event_processing_attempt`, `event_outbox`, `event_outbox_dlq`, and `agent_execution` exist.
+- Metrics authentication is configured.
 
 ## Steps
-1. Run `npm run test --workspace agent`; goals 1–4 are covered by stubbed transports and a stubbed
-   pool, because neither a durable-state outage nor a live lease can be induced against the
-   deployed database without corrupting it.
-2. Call `readEnv` with `QUEUE_VISIBILITY_TIMEOUT_SECONDS=20` and `AGENT_DELIVERY_LEASE_SECONDS=30`,
-   then with 60/30.
-3. `pgmq.send` the same source event ID to `agent_requests` twice, six seconds apart.
-4. Count `pgmq.q_agent_results` before and after.
-5. Query `event_store` for the session stream, `event_delivery` for the result, and every stream
-   counter against its stored maximum.
-6. `GET /metrics` with the bearer token.
-7. Run the browser scenario against `/`.
 
-## Expected Results
-1. 16 unit tests pass, including the four delivery-invariant tests.
-2. 20/30 is refused by name; 60/30 is accepted.
-3. Result-queue delta is 1.
-4. One `command` row and one `result` row in the session stream; `event_delivery.attempts=1` with
-   `delivered_at` set and `lease_until` cleared.
-5. Counter mismatch count is 0.
-6. `processingFailures` is 0 and `appendDuplicates` equals the number of redelivered appends.
-7. Browser scenario passes with zero console and page errors.
+1. Run `npm test --workspace agent` for atomic event/outbox commit, fenced outbox completion, retry/DLQ, worker exit, and terminal fan-out unit coverage.
+2. Submit one unique `hash.sha256` command and query its command/result envelopes, execution, processing attempt, and outbox row.
+3. Require a `completed` execution, a completed attempt with worker ID, exactly one terminal result, and one `published` outbox row before reading its PGMQ result message.
+4. Submit the same source event twice and require one stored command/result identity and one result-queue message.
+5. Run the current multi-channel fairness and worker-concurrency plans, then remove only their transaction prefixes.
+6. Inspect authenticated metrics and browser smoke evidence.
 
-## Logs To Capture
-- `docker logs agent`: `event.persisted`, `event.deleted`, `event.processing.failed`.
-- `psql` output for every query in steps 4–5.
-- `readEnv` rejection message, `/metrics` body, browser `report.json`.
+## Expected results
 
-## Locator Contract
-Browser steps use `getByRole("main")`, `getByLabel("Event type")`, `getByLabel("Payload JSON")`,
-and `getByRole("button", { name: "Send to agent" })`. The result marker has no sanctioned test id
-and is matched by text; record that as a known exception.
+- Terminal event, outbox reservation, and execution completion share one PostgreSQL transaction.
+- Only a fenced outbox claim calls PGMQ/WebSocket; a failed claim returns to bounded retry/DLQ without mutating the immutable terminal event.
+- Duplicate input converges by event ID; channel fan-out remains exactly once per recipient channel.
+- `processingReady`, `processingRunning`, `outboxPending`, `outboxFailed`, and mailbox lag return to zero after each scoped run.
+
+## Evidence
+
+- [Outbox/projection load plan](outbox-projection-load-20260821.md)
+- [Current 2,048-worker proof](../reports/operations/20260821_053500-prefetch-2048.md)
+- [Current multi-channel proof](../reports/operations/20260821_054000-current-multichannel-fairness.md)
