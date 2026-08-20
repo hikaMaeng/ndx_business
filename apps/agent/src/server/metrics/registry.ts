@@ -16,6 +16,7 @@ export interface MetricsSnapshot {
   processingFailures: number;
   inFlight: number;
   ingressAccepted: number;
+  ingressHandoffActive: number;
   processingReady: number;
   processingRunning: number;
   processingReadyOldestMs: number;
@@ -29,7 +30,7 @@ export class MetricsRegistry {
     queueReads: 0, queueMessages: 0, queueDeletes: 0,
     appendTotal: 0, appendDuplicates: 0, appendFailures: 0, appendLatencyMsTotal: 0,
     workerStarted: 0, workerCompleted: 0, workerFailed: 0, processingFailures: 0, inFlight: 0,
-    ingressAccepted: 0, processingReady: 0, processingRunning: 0, processingReadyOldestMs: 0,
+    ingressAccepted: 0, ingressHandoffActive: 0, processingReady: 0, processingRunning: 0, processingReadyOldestMs: 0,
     processingExpiredLeases: 0, schedulerDispatchActive: 0, deliveryPending: 0,
   };
 

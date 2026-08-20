@@ -24,21 +24,24 @@ async function workerOutcome(pool: WorkerPool, event: AgentEvent): Promise<{ res
 }
 
 /** Thread 1: PGMQ handoff only. It never awaits a worker or result delivery. */
-export function startIngressConsumer(input: { queueTransport: EventQueueTransport; eventStore: EventStore; processingStore: ProcessingStore; metrics: MetricsRegistry; queue: string; visibilityTimeoutSeconds: number; pollSeconds: number; batchSize: number }): Loop {
+export function startIngressConsumer(input: { queueTransport: EventQueueTransport; eventStore: EventStore; processingStore: ProcessingStore; metrics: MetricsRegistry; queue: string; visibilityTimeoutSeconds: number; pollSeconds: number; batchSize: number; maxConcurrentHandoffs: number }): Loop {
   let stopped = false;
-  void (async () => { while (!stopped) {
+  const handoffLane = async (): Promise<void> => { while (!stopped) {
     try {
       const messages = await input.queueTransport.read(input.queue, { visibilityTimeoutSeconds: input.visibilityTimeoutSeconds, quantity: input.batchSize, pollSeconds: input.pollSeconds });
       input.metrics.increment("queueReads"); input.metrics.increment("queueMessages", messages.length);
       for (const message of messages) try {
+        input.metrics.increment("ingressHandoffActive");
         const persisted = await input.eventStore.append(toEventDraft(message.event));
         await input.processingStore.enqueue(message.event);
         await input.queueTransport.delete(input.queue, message.id);
         input.metrics.increment("queueDeletes");
         console.log(JSON.stringify({ event: "ingress.handed-off", eventId: persisted.eventId, streamId: persisted.streamId, sequence: persisted.sequence, messageId: message.id }));
       } catch (error) { input.metrics.increment("processingFailures"); console.error(JSON.stringify({ event: "ingress.handoff.failed", messageId: message.id, error: error instanceof Error ? error.message : String(error) })); }
+      finally { input.metrics.increment("ingressHandoffActive", -1); }
     } catch (error) { console.error(JSON.stringify({ event: "ingress.retry", error: error instanceof Error ? error.message : String(error) })); await delay(input.pollSeconds * 1000); }
-  } })();
+  } };
+  for (let lane = 0; lane < input.maxConcurrentHandoffs; lane += 1) void handoffLane();
   return { stop: () => { stopped = true; } };
 }
 

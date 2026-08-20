@@ -8,6 +8,7 @@ export interface AgentEnv {
   visibilityTimeoutSeconds: number;
   pollSeconds: number;
   pollBatchSize: number;
+  ingressConsumers: number;
   cpuCount: number;
   minWorkerThreads: number;
   maxWorkerThreads: number;
@@ -40,6 +41,7 @@ export function readEnv(source = process.env): AgentEnv {
     visibilityTimeoutSeconds,
     pollSeconds: positive(source, "QUEUE_POLL_SECONDS", 5),
     pollBatchSize: positive(source, "QUEUE_POLL_BATCH_SIZE", 1),
+    ingressConsumers: positive(source, "AGENT_INGRESS_CONSUMERS", Math.min(8, maxWorkerThreads)),
     cpuCount,
     minWorkerThreads,
     maxWorkerThreads,
