@@ -1,4 +1,4 @@
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { randomUUID } from "node:crypto";
 import type { EventDraft, EventEnvelope } from "agent_domain/common";
 import type { MetricsRegistry } from "../metrics/registry.js";
@@ -73,7 +73,8 @@ export class EventStore {
     if (filled.rowCount) console.log(JSON.stringify({ event: "event.store.backfilled", rows: filled.rowCount }));
   }
 
-  async append(event: EventDraft): Promise<EventEnvelope> {
+  /** See docs/internals.md#decisions: callback work commits with the immutable event or not at all. */
+  async append(event: EventDraft, afterAppend?: (client: PoolClient, persisted: EventEnvelope) => Promise<void>): Promise<EventEnvelope> {
     const startedAt = Date.now();
     const client = await this.pool.connect();
     try {
@@ -81,10 +82,12 @@ export class EventStore {
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [event.eventId]);
       const existing = await client.query<StoredEventRow>(`SELECT ${COLUMNS} FROM event_store WHERE event_id = $1`, [event.eventId]);
       if (existing.rowCount) {
+        const persisted = fromRow(existing.rows[0]);
+        if (afterAppend) await afterAppend(client, persisted);
         await client.query("COMMIT");
         this.metrics?.increment("appendDuplicates");
         this.record(startedAt);
-        return fromRow(existing.rows[0]);
+        return persisted;
       }
       const next = await client.query<{ sequence: string | number }>(`INSERT INTO event_stream_sequence (stream_id,last_sequence) VALUES ($1,1)
         ON CONFLICT (stream_id) DO UPDATE SET last_sequence = event_stream_sequence.last_sequence + 1 RETURNING last_sequence AS sequence`, [event.streamId]);
@@ -95,6 +98,7 @@ export class EventStore {
         RETURNING ${COLUMNS}`, [event.eventId, event.streamId, sequence, event.action, event.transactionKey, event.eventVersion, event.kind, event.channel, event.replyChannel ?? null, event.sessionId ?? null, event.runId ?? null, event.turnId ?? null, event.causationEventId ?? null, event.correlationId, event.source, JSON.stringify(event.payload), event.createdAt]);
       if (!inserted.rowCount) throw new Error(`event store insert returned no row for ${event.eventId}`);
       const result = fromRow(inserted.rows[0]);
+      if (afterAppend) await afterAppend(client, result);
       await client.query("COMMIT");
       this.record(startedAt);
       return result;

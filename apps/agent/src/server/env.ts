@@ -21,6 +21,8 @@ export interface AgentEnv {
   databasePoolMax: number;
   metricsToken: string;
   deliveryLeaseSeconds: number;
+  outboxLeaseSeconds: number;
+  outboxDispatchers: number;
   websocketMailboxMax: number;
   websocketBufferedBytes: number;
 }
@@ -62,6 +64,8 @@ export function readEnv(source = process.env): AgentEnv {
     databasePoolMax: positive(source, "AGENT_DATABASE_POOL_MAX", Math.min(48, Math.max(16, Math.ceil(maxWorkerThreads / 2)))),
     metricsToken: source.AGENT_METRICS_TOKEN ?? "",
     deliveryLeaseSeconds,
+    outboxLeaseSeconds: positive(source, "AGENT_OUTBOX_LEASE_SECONDS", 30),
+    outboxDispatchers: positive(source, "AGENT_OUTBOX_DISPATCHERS", Math.min(16, maxWorkerThreads)),
     websocketMailboxMax: positive(source, "AGENT_WEBSOCKET_MAILBOX_MAX", 256),
     websocketBufferedBytes: positive(source, "AGENT_WEBSOCKET_BUFFERED_BYTES", 1_048_576),
   };

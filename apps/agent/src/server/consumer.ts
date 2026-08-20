@@ -6,9 +6,9 @@ import { runWorker } from "./worker/pool.js";
 import type { WorkerPool } from "./worker/pool.js";
 import type { EventStreamHub } from "./stream/hub.js";
 import type { EventStore } from "./event-store/store.js";
-import type { DeliveryStore } from "./delivery/store.js";
 import type { ProcessingStore } from "./processing/store.js";
 import type { MetricsRegistry } from "./metrics/registry.js";
+import type { OutboxStore } from "./outbox/store.js";
 import { toEventDraft, toProcessingFailureDraft, toResultDraft } from "./ingress/event-draft.js";
 
 type ResultPayload = { ok: boolean; value?: unknown; error?: { code: string; message: string } };
@@ -51,15 +51,8 @@ export function startIngressConsumer(input: { queueTransport: EventQueueTranspor
 }
 
 /** Scheduler is the sole worker dispatcher. A durable job claim, not PGMQ visibility, owns execution. */
-export function startScheduler(input: { queueTransport: EventQueueTransport; database: import("pg").Pool; pool: WorkerPool; hub: EventStreamHub; eventStore: EventStore; deliveryStore: DeliveryStore; processingStore: ProcessingStore; metrics: MetricsRegistry; resultQueue: string; schedulerIdleMs: number; executionLeaseSeconds: number; processingMaxAttempts: number; processingRetryBaseMs: number; waitForWork: () => Promise<void>; maxConcurrentDispatches: number }): Loop {
+export function startScheduler(input: { database: import("pg").Pool; pool: WorkerPool; eventStore: EventStore; outboxStore: OutboxStore; processingStore: ProcessingStore; metrics: MetricsRegistry; schedulerIdleMs: number; executionLeaseSeconds: number; processingMaxAttempts: number; processingRetryBaseMs: number; waitForWork: () => Promise<void>; maxConcurrentDispatches: number }): Loop {
   let stopped = false;
-  const deliver = async (envelope: EventEnvelope): Promise<void> => {
-    const delivery = await input.deliveryStore.claim(envelope.eventId);
-    if (delivery.kind === "delivered") return;
-    if (delivery.kind === "leased") throw new Error(`result ${envelope.eventId} is leased`);
-    await input.queueTransport.send(input.resultQueue, envelope); input.hub.publish(envelope);
-    if (!await input.deliveryStore.complete(envelope.eventId, delivery.attemptId)) throw new Error(`delivery attempt ${delivery.attemptId} lost its lease`);
-  };
   const recipientsOf = async (request: EventEnvelope): Promise<EventEnvelope[]> => {
     const recipients = await executionRecipients(input.database, request.transactionKey);
     return recipients.length ? recipients : [request];
@@ -67,20 +60,20 @@ export function startScheduler(input: { queueTransport: EventQueueTransport; dat
   const publish = async (request: EventEnvelope, payload: ResultPayload): Promise<void> => {
     for (const recipient of await recipientsOf(request)) {
       const result = createResultEvent(recipient, payload, resultEventId(recipient));
-      await deliver(await input.eventStore.append(toResultDraft(recipient, result)));
+      await input.eventStore.append(toResultDraft(recipient, result), (client, persisted) => input.outboxStore.enqueue(client, persisted));
     }
   };
   const publishProcessingFailure = async (request: EventEnvelope, jobId: string, message: string): Promise<void> => {
     for (const recipient of await recipientsOf(request)) {
       const eventId = deterministicEventId(`processing-failed:${jobId}:${recipient.replyChannel ?? "agent.results"}`);
-      await deliver(await input.eventStore.append(toProcessingFailureDraft(recipient, eventId, message)));
+      await input.eventStore.append(toProcessingFailureDraft(recipient, eventId, message), (client, persisted) => input.outboxStore.enqueue(client, persisted));
     }
   };
   const process = async (request: EventEnvelope, jobId: string, attemptId: string): Promise<void> => {
     const claim = await claimExecution(input.database, request, attemptId, input.executionLeaseSeconds);
     if (claim.kind === "conflict") {
       const conflict = createResultEvent(request, { ok: false, error: { code: "idempotency_conflict", message: claim.reason } }, deterministicEventId(`conflict:${request.eventId}`));
-      await deliver(await input.eventStore.append(toResultDraft(request, conflict)));
+      await input.eventStore.append(toResultDraft(request, conflict), (client, persisted) => input.outboxStore.enqueue(client, persisted));
       return;
     }
     if (claim.kind === "duplicate") {

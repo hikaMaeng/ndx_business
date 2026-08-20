@@ -4,7 +4,7 @@ import type { EventEnvelope } from "agent_domain/common";
 
 export interface ProcessingJob { eventId: string; attemptId: string; event: EventEnvelope; }
 export interface ProcessingCounts { ready: number; running: number; failed: number; readyOldestMs: number; expiredLeases: number; }
-export interface PrunedOperationalRows { processingJobs: number; deliveries: number; }
+export interface PrunedOperationalRows { processingJobs: number; outbox: number; }
 
 /** Durable scheduler input. PGMQ is acknowledged only after this row exists. */
 export class ProcessingStore {
@@ -85,8 +85,8 @@ export class ProcessingStore {
   /** Removes only derived operational ledgers; immutable event_store and idempotency claims remain intact. */
   async pruneOperationalLedgers(retentionDays: number): Promise<PrunedOperationalRows> {
     const jobs = await this.pool.query("DELETE FROM event_processing_job WHERE status IN ('completed', 'failed') AND updated_at < now() - make_interval(days => $1)", [retentionDays]);
-    const deliveries = await this.pool.query("DELETE FROM event_delivery WHERE delivered_at IS NOT NULL AND delivered_at < now() - make_interval(days => $1)", [retentionDays]);
-    return { processingJobs: jobs.rowCount ?? 0, deliveries: deliveries.rowCount ?? 0 };
+    const outbox = await this.pool.query("DELETE FROM event_outbox WHERE status = 'published' AND published_at < now() - make_interval(days => $1)", [retentionDays]);
+    return { processingJobs: jobs.rowCount ?? 0, outbox: outbox.rowCount ?? 0 };
   }
 
   async counts(): Promise<ProcessingCounts> {

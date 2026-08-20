@@ -70,6 +70,14 @@ test("append records duplicate and latency metrics", async () => {
   assert.equal(counts.appendTotal, 1);
 });
 
+test("append invokes its durable side effect on the same transaction client", async () => {
+  const queries: string[] = []; const client = stubClient(undefined, queries); let callbackClient: unknown;
+  const store = new EventStore({ connect: async () => client } as never);
+  await store.append(draft, async (received) => { callbackClient = received; await received.query("INSERT INTO event_outbox"); });
+  assert.equal(callbackClient, client);
+  assert.ok(queries.indexOf("INSERT INTO event_outbox") < queries.findIndex((sql) => sql === "COMMIT"));
+});
+
 test("channel replay compares stream positions in PostgreSQL and cursor pruning has a retention bound", async () => {
   const queries: Array<{ sql: string; values: unknown[] | undefined }> = [];
   const store = new EventStore({ query: async (sql: string, values?: unknown[]) => { queries.push({ sql, values }); return { rowCount: 1, rows: [] }; } } as never);

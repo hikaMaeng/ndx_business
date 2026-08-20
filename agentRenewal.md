@@ -835,6 +835,12 @@ server-issued field 발급 뒤 domain event로 변환한다.
 - outbox append와 dispatcher 구현
 - projection별 독립 replay 구현
 
+진행 상태:
+
+- 구현 중: terminal result의 `event_store` append와 `event_outbox` 예약은 같은 transaction으로
+  commit되고, fenced dispatcher만 그 이후 PGMQ/WebSocket 발행을 시도한다. session/run/turn/tool
+  projection은 독립 stream-position checkpoint를 가진다. 실 DB recovery/rebuild 수용 검증은 남아 있다.
+
 완료 조건:
 
 - projection 하나가 실패해도 원본 이벤트가 유실되지 않는다.

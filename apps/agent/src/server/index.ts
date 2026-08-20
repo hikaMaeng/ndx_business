@@ -9,9 +9,12 @@ import { ensureExecutionSchema, recoverExpiredExecutions } from "./execution/sto
 import { attachWebSocketTransport } from "./transport/websocket.js";
 import { EventStore } from "./event-store/store.js";
 import { MetricsRegistry } from "./metrics/registry.js";
-import { DeliveryStore } from "./delivery/store.js";
 import { ProcessingStore } from "./processing/store.js";
 import { createSchedulerNotifier } from "./scheduler/notifier.js";
+import { OutboxStore } from "./outbox/store.js";
+import { startOutboxDispatcher } from "./outbox/dispatcher.js";
+import { ProjectionStore } from "./projection/store.js";
+import { startProjectionRunners } from "./projection/runner.js";
 
 const env = readEnv();
 const database = createDatabasePool(env.databaseUrl, env.databasePoolMax);
@@ -21,7 +24,8 @@ const ingressPgmq = new PgmqClient(ingressQueueDatabase);
 const pgmq = new PgmqClient(queueDatabase);
 const metrics = new MetricsRegistry();
 const eventStore = new EventStore(database, metrics);
-const deliveryStore = new DeliveryStore(database, env.deliveryLeaseSeconds);
+const outboxStore = new OutboxStore(database, env.outboxLeaseSeconds);
+const projectionStore = new ProjectionStore(database);
 const processingStore = new ProcessingStore(database, Math.max(2, env.visibilityTimeoutSeconds));
 async function initializeDatabase(): Promise<void> {
   let delayMs = 250;
@@ -31,10 +35,11 @@ async function initializeDatabase(): Promise<void> {
       const recovered = await recoverExpiredExecutions(database);
       if (recovered) console.log(JSON.stringify({ event: "execution.recovered", rows: recovered }));
       await eventStore.ensureSchema();
-      await deliveryStore.ensureSchema();
+      await outboxStore.ensureSchema();
+      await projectionStore.ensureSchema();
       await processingStore.ensureSchema();
       const pruned = await processingStore.pruneOperationalLedgers(env.operationalRetentionDays);
-      if (pruned.processingJobs || pruned.deliveries) console.log(JSON.stringify({ event: "operational-ledger.pruned", retentionDays: env.operationalRetentionDays, ...pruned }));
+      if (pruned.processingJobs || pruned.outbox) console.log(JSON.stringify({ event: "operational-ledger.pruned", retentionDays: env.operationalRetentionDays, ...pruned }));
       const cursors = await eventStore.pruneChannelCursors(env.cursorRetentionDays);
       if (cursors) console.log(JSON.stringify({ event: "channel-cursor.pruned", retentionDays: env.cursorRetentionDays, cursors }));
       return;
@@ -52,7 +57,7 @@ const refreshMetrics = async (): Promise<void> => {
   const processing = await processingStore.counts();
   metrics.setGauge("processingReady", processing.ready); metrics.setGauge("processingRunning", processing.running); metrics.setGauge("processingDlq", processing.failed);
   metrics.setGauge("processingReadyOldestMs", processing.readyOldestMs); metrics.setGauge("processingExpiredLeases", processing.expiredLeases);
-  metrics.setGauge("deliveryPending", await deliveryStore.pendingCount());
+  metrics.setGauge("outboxPending", await outboxStore.pendingCount());
 };
 void refreshMetrics();
 const metricsTimer = setInterval(() => { void refreshMetrics().catch((error) => console.error(JSON.stringify({ event: "metrics.refresh.failed", error: error instanceof Error ? error.message : String(error) }))); }, 1000);
@@ -62,13 +67,17 @@ const pool = createWorkerPool({ minWorkerThreads: env.minWorkerThreads, maxWorke
 const hub = new EventStreamHub();
 const schedulerNotifier = createSchedulerNotifier();
 const ingress = startIngressConsumer({ queueTransport: ingressPgmq, eventStore, processingStore, metrics, notifyScheduler: () => schedulerNotifier.notify(), publishLive: (event) => hub.publish(event), queue: env.queue, visibilityTimeoutSeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, batchSize: env.pollBatchSize, maxConcurrentHandoffs: env.ingressConsumers });
-const scheduler = startScheduler({ queueTransport: pgmq, database, pool, hub, eventStore, deliveryStore, processingStore, metrics, resultQueue: env.resultQueue, schedulerIdleMs: env.schedulerIdleMs, executionLeaseSeconds: env.visibilityTimeoutSeconds, processingMaxAttempts: env.processingMaxAttempts, processingRetryBaseMs: env.processingRetryBaseMs, waitForWork: () => schedulerNotifier.wait(env.schedulerIdleMs), maxConcurrentDispatches: env.maxWorkerThreads });
+const scheduler = startScheduler({ database, pool, eventStore, outboxStore, processingStore, metrics, schedulerIdleMs: env.schedulerIdleMs, executionLeaseSeconds: env.visibilityTimeoutSeconds, processingMaxAttempts: env.processingMaxAttempts, processingRetryBaseMs: env.processingRetryBaseMs, waitForWork: () => schedulerNotifier.wait(env.schedulerIdleMs), maxConcurrentDispatches: env.maxWorkerThreads });
+const outbox = startOutboxDispatcher({ outbox: outboxStore, queue: pgmq, resultQueue: env.resultQueue, hub, metrics, idleMs: env.schedulerIdleMs, retryMs: env.processingRetryBaseMs, lanes: env.outboxDispatchers });
+const projections = startProjectionRunners({ store: projectionStore, metrics, idleMs: env.schedulerIdleMs });
 const server = createApp(env, pgmq, hub, metrics).listen(env.port, () => console.log(JSON.stringify({ event: "agent.listening", port: env.port, cpuCount: env.cpuCount, minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, metricsEndpoint: env.metricsToken ? "enabled" : "disabled" })));
 const websocket = attachWebSocketTransport(server, env, pgmq, hub, eventStore);
 
 async function shutdown(): Promise<void> {
   ingress.stop();
   scheduler.stop();
+  outbox.stop();
+  projections.stop();
   clearInterval(metricsTimer);
   clearInterval(retentionTimer);
   clearInterval(recoveryTimer);
