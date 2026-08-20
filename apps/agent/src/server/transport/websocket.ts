@@ -1,6 +1,6 @@
 import type { Server } from "node:http";
 import { WebSocket, WebSocketServer } from "ws";
-import { createRequestEvent, parseChannelClientFrame, parseChannelCursor, type ChannelServerFrame } from "agent_domain/common";
+import { createIngressEvent, parseChannelClientFrame, parseChannelCursor, type ChannelServerFrame } from "agent_domain/common";
 import type { AgentEnv } from "../env.js";
 import type { EventQueueTransport } from "../queue/transport.js";
 import { EventStreamHub } from "../stream/hub.js";
@@ -99,7 +99,7 @@ export function attachWebSocketTransport(server: Server, env: AgentEnv, queue: E
         return;
         }
         if (frame.type !== "event") return;
-        const event = createRequestEvent({ action: frame.action, payload: frame.payload, transactionKey: frame.transactionKey, channel: frame.channel, source: "websocket", replyChannel: frame.replyChannel });
+        const event = createIngressEvent({ action: frame.action, payload: frame.payload, transactionKey: frame.transactionKey, channel: frame.channel, replyChannel: frame.replyChannel });
         void queue.send(env.queue, event).then(async (messageId) => {
           console.log(JSON.stringify({ event: "event.enqueued", transport: "websocket", action: event.action, eventId: event.eventId, transactionKey: event.transactionKey, messageId }));
         }).catch((error) => console.error(JSON.stringify({ event: "websocket.enqueue.failed", action: event.action, transactionKey: event.transactionKey, error: error instanceof Error ? error.message : String(error) })));

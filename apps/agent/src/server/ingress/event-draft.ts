@@ -1,18 +1,12 @@
-import type { AgentEvent, EventDraft, EventEnvelope, EventKind } from "agent_domain/common";
+import type { EventDraft, EventEnvelope, IngressEvent } from "agent_domain/common";
 import { createDerivedDraft, streamIdOf } from "agent_domain/common";
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-function kindOf(event: AgentEvent): EventKind {
-  if (event.kind === "result") return "result";
-  if (event.kind === "heartbeat") return "control";
-  return "command";
-}
-
 /** Converts the deployed queue contract into the canonical, server-issued event draft. */
-export function toEventDraft(event: AgentEvent): EventDraft {
+export function toEventDraft(event: IngressEvent): EventDraft {
   const payload = event.payload as Record<string, unknown>;
   const sessionId = optionalString(payload.sessionKey);
   const runId = optionalString(payload.runKey);
@@ -20,7 +14,7 @@ export function toEventDraft(event: AgentEvent): EventDraft {
   return {
     eventId: event.eventId,
     eventVersion: 1,
-    kind: kindOf(event),
+    kind: "command",
     streamId: streamIdOf({ sessionId, channel: event.channel }),
     action: event.action,
     transactionKey: event.transactionKey,
@@ -30,7 +24,7 @@ export function toEventDraft(event: AgentEvent): EventDraft {
     ...(runId ? { runId } : {}),
     ...(turnId ? { turnId } : {}),
     correlationId: event.transactionKey,
-    source: event.kind === "request" ? "client" : "server",
+    source: "client",
     createdAt: event.createdAt,
     payload,
   };
@@ -40,14 +34,14 @@ export function toEventDraft(event: AgentEvent): EventDraft {
  * Converts a legacy result event into a canonical draft that stays in the requesting event's stream.
  * The result payload carries no session context, so identity is inherited from the persisted request.
  */
-export function toResultDraft(request: EventEnvelope, result: AgentEvent): EventDraft {
+export function toResultDraft(request: EventEnvelope, input: { eventId: string; action: string; channel: string; createdAt: string; payload: Record<string, unknown> }): EventDraft {
   return createDerivedDraft(request, {
-    eventId: result.eventId,
-    action: result.action,
+    eventId: input.eventId,
+    action: input.action,
     kind: "result",
-    channel: result.channel,
-    createdAt: result.createdAt,
-    payload: result.payload as Record<string, unknown>,
+    channel: input.channel,
+    createdAt: input.createdAt,
+    payload: input.payload,
   });
 }
 

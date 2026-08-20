@@ -13,5 +13,6 @@
   `eventId` de-duplication cannot suppress the repeat.
 - `request`, `progress`, `response`, and terminal state events are persisted as
   facts; WebSocket is only a projection.
-- The legacy `protocol/agent` remains the deployed wire type for the existing
-  simple event client until Phase 1 of the Renewal plan replaces it.
+- `IngressEvent` is intentionally distinct from `EventEnvelope`: it carries a
+  server-issued redelivery identity before append, while only append assigns
+  canonical stream and sequence fields.

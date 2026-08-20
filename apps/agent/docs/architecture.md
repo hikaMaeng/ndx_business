@@ -14,7 +14,7 @@ The preserved baseline branch had a duplicate/conflict early-return defect that 
 | `src/server/pgmq` | PostgreSQL/PGMQ adapter |
 | `src/server/consumer.ts` | ingress handoff plus the sole durable-job scheduler/worker dispatcher |
 | `src/server/processing` | durable processing jobs, lease claim, heartbeat renewal, retry handoff |
-| `src/server/ingress` | legacy queue event to canonical draft conversion and result derivation |
+| `src/server/ingress` | server-issued ingress record to canonical draft conversion and result derivation |
 | `src/server/event-store` | immutable canonical event persistence, per-stream positions, identity backfill |
 | `src/server/outbox` | transactionally reserved terminal egress and fenced dispatcher |
 | `src/server/projection` | independent session/run/turn/tool CQRS views and checkpoints |

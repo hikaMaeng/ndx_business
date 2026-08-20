@@ -1,7 +1,7 @@
 import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createRequestEvent } from "agent_domain/common";
+import { createIngressEvent } from "agent_domain/common";
 import type { AgentEnv } from "./env.js";
 import type { EventQueueTransport } from "./queue/transport.js";
 import { EventStreamHub } from "./stream/hub.js";
@@ -22,7 +22,7 @@ export function createApp(env: AgentEnv, queue: EventQueueTransport, hub: EventS
     try {
       const body = request.body as { action?: unknown; payload?: unknown; transactionKey?: unknown; channel?: unknown; source?: unknown; replyChannel?: unknown };
       if (typeof body.action !== "string" || !body.action) return response.status(400).json({ error: "action is required" });
-      const event = createRequestEvent({ action: body.action, payload: (body.payload && typeof body.payload === "object" ? body.payload : {}) as Record<string, unknown>, transactionKey: typeof body.transactionKey === "string" ? body.transactionKey : undefined, channel: typeof body.channel === "string" ? body.channel : "agent.requests", source: typeof body.source === "string" ? body.source : "http" , replyChannel: typeof body.replyChannel === "string" ? body.replyChannel : "agent.results" });
+      const event = createIngressEvent({ action: body.action, payload: (body.payload && typeof body.payload === "object" ? body.payload : {}) as Record<string, unknown>, transactionKey: typeof body.transactionKey === "string" ? body.transactionKey : undefined, channel: typeof body.channel === "string" ? body.channel : "agent.requests", replyChannel: typeof body.replyChannel === "string" ? body.replyChannel : "agent.results" });
       const messageId = await queue.send(env.queue, event);
       metrics.increment("ingressAccepted");
       console.log(JSON.stringify({ event: "event.enqueued", action: event.action, eventId: event.eventId, transactionKey: event.transactionKey, channel: event.channel, replyChannel: event.replyChannel, messageId }));

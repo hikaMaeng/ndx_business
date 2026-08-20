@@ -14,6 +14,12 @@ export interface IngressCommand {
   payload: Record<string, unknown>;
 }
 
+/** Server-issued queue record. It is deliberately not a canonical envelope: append assigns its stream position. */
+export interface IngressEvent extends IngressCommand {
+  eventId: string;
+  createdAt: string;
+}
+
 export interface EventEnvelope<TPayload extends Record<string, unknown> = Record<string, unknown>> extends IngressCommand {
   eventId: string;
   eventVersion: 1;
@@ -49,6 +55,10 @@ export function deterministicEventId(name: string): string {
 
 export function createEventDraft(input: IngressCommand, now = new Date().toISOString()): EventDraft {
   return { ...input, eventId: randomUUID(), eventVersion: 1, kind: "command", streamId: streamIdOf(input), correlationId: input.correlationId ?? input.transactionKey, source: "client", createdAt: now };
+}
+
+export function createIngressEvent(input: Omit<IngressCommand, "transactionKey"> & { transactionKey?: string }, now = new Date().toISOString()): IngressEvent {
+  return { ...input, eventId: randomUUID(), transactionKey: input.transactionKey ?? randomUUID(), createdAt: now };
 }
 
 /**

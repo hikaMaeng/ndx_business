@@ -1,5 +1,5 @@
-import type { AgentEvent, EventEnvelope } from "agent_domain/common";
-import { createResultEvent, deterministicEventId } from "agent_domain/common";
+import type { EventEnvelope } from "agent_domain/common";
+import { deterministicEventId } from "agent_domain/common";
 import type { EventQueueTransport } from "./queue/transport.js";
 import { claimExecution, completeExecution, executionRecipients, renewExecution } from "./execution/store.js";
 import { runWorker } from "./worker/pool.js";
@@ -60,8 +60,7 @@ export function startScheduler(input: { database: import("pg").Pool; pool: Worke
   };
   const publish = async (request: EventEnvelope, payload: ResultPayload): Promise<void> => {
     for (const recipient of await recipientsOf(request)) {
-      const result = createResultEvent(recipient, payload, resultEventId(recipient));
-      await input.eventStore.append(toResultDraft(recipient, result), (client, persisted) => input.outboxStore.enqueue(client, persisted)); input.notifyProjection?.();
+      await input.eventStore.append(toResultDraft(recipient, { eventId: resultEventId(recipient), action: `${recipient.action}.result`, channel: recipient.replyChannel ?? "agent.results", createdAt: new Date().toISOString(), payload }), (client, persisted) => input.outboxStore.enqueue(client, persisted)); input.notifyProjection?.();
     }
   };
   const publishProcessingFailure = async (request: EventEnvelope, jobId: string, message: string): Promise<void> => {
@@ -73,8 +72,7 @@ export function startScheduler(input: { database: import("pg").Pool; pool: Worke
   const process = async (request: EventEnvelope, jobId: string, attemptId: string): Promise<void> => {
     const claim = await claimExecution(input.database, request, attemptId, input.executionLeaseSeconds);
     if (claim.kind === "conflict") {
-      const conflict = createResultEvent(request, { ok: false, error: { code: "idempotency_conflict", message: claim.reason } }, deterministicEventId(`conflict:${request.eventId}`));
-      await input.eventStore.append(toResultDraft(request, conflict), (client, persisted) => input.outboxStore.enqueue(client, persisted)); input.notifyProjection?.();
+      await input.eventStore.append(toResultDraft(request, { eventId: deterministicEventId(`conflict:${request.eventId}`), action: `${request.action}.result`, channel: request.replyChannel ?? "agent.results", createdAt: new Date().toISOString(), payload: { ok: false, error: { code: "idempotency_conflict", message: claim.reason } } }), (client, persisted) => input.outboxStore.enqueue(client, persisted)); input.notifyProjection?.();
       return;
     }
     if (claim.kind === "duplicate") {

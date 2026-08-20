@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { AgentEvent } from "agent_domain/common";
+import type { IngressEvent } from "agent_domain/common";
 import { toEventDraft, toResultDraft } from "./event-draft.js";
 
-const request: AgentEvent = {
-  eventId: "request-1", transactionKey: "tx-1", kind: "request", channel: "agent.requests",
-  action: "turn.start", source: "http", replyChannel: "agent.results",
+const request: IngressEvent = {
+  eventId: "request-1", transactionKey: "tx-1", channel: "agent.requests",
+  action: "turn.start", replyChannel: "agent.results",
   createdAt: "2026-08-19T00:00:00.000Z", payload: { sessionKey: "s-1", runKey: "r-1", turnKey: "t-1" },
 };
 
@@ -17,8 +17,7 @@ test("a request draft takes its stream and identity from the session payload key
 
 test("a result draft stays in the request stream and records causation", () => {
   const persisted = { ...toEventDraft(request), sequence: "1" };
-  const result: AgentEvent = { ...request, eventId: "result-1", kind: "result", action: "turn.start.result", channel: "agent.results", payload: { ok: true } };
-  const draft = toResultDraft(persisted, result);
+  const draft = toResultDraft(persisted, { eventId: "result-1", action: "turn.start.result", channel: "agent.results", createdAt: request.createdAt, payload: { ok: true } });
   assert.equal(draft.streamId, "session:s-1");
   assert.equal(draft.sessionId, "s-1");
   assert.equal(draft.runId, "r-1");

@@ -1,17 +1,19 @@
 # API
 
-The public entrypoint exports three shapes from `protocol/event` and the legacy
-`AgentEvent` from `protocol/agent`.
+The public entrypoint exports ingress and canonical shapes from `protocol/event`.
 
 - `IngressCommand` is what a client may send: action, transaction key, channel,
   optional session/run/turn context, and payload. It carries no event ID,
   stream, or sequence, because the server issues those.
 - `EventDraft` adds server-issued identity minus `sequence`.
+- `IngressEvent` is the server-issued PGMQ handoff record. It has an event ID
+  for redelivery convergence but no stream or sequence until append.
 - `EventEnvelope` is the stored and delivered shape: draft plus the per-stream
   decimal-string `sequence` assigned at append time, with `causationEventId` linking a derived
   event to its cause.
 
-`createEventDraft` builds a client command into a draft. `createDerivedDraft`
+`createIngressEvent` creates the durable handoff record. `createEventDraft`
+builds a command into a draft. `createDerivedDraft`
 builds a follow-up event that inherits stream, session, run, turn, and
 correlation identity from its cause. `deterministicEventId(name)` produces a
 stable UUID-shaped identity for an outcome that may be derived more than once.
