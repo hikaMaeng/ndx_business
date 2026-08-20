@@ -15,7 +15,7 @@ export interface MetricsSnapshot {
   workerFailed: number;
   processingFailures: number;
   processingRetries: number;
-  processingDeferrals: number;
+  processingJoined: number;
   processingDlqTotal: number;
   inFlight: number;
   ingressAccepted: number;
@@ -33,7 +33,7 @@ export class MetricsRegistry {
   private readonly counters: MetricsSnapshot = {
     queueReads: 0, queueMessages: 0, queueDeletes: 0,
     appendTotal: 0, appendDuplicates: 0, appendFailures: 0, appendLatencyMsTotal: 0,
-    workerStarted: 0, workerCompleted: 0, workerFailed: 0, processingFailures: 0, processingRetries: 0, processingDeferrals: 0, processingDlqTotal: 0, inFlight: 0,
+    workerStarted: 0, workerCompleted: 0, workerFailed: 0, processingFailures: 0, processingRetries: 0, processingJoined: 0, processingDlqTotal: 0, inFlight: 0,
     ingressAccepted: 0, ingressHandoffActive: 0, processingReady: 0, processingRunning: 0, processingDlq: 0, processingReadyOldestMs: 0,
     processingExpiredLeases: 0, schedulerDispatchActive: 0, deliveryPending: 0,
   };

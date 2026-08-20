@@ -8,6 +8,6 @@ The contract targets visibility-aware queue systems such as PGMQ, SQS, Redis Str
 
 `GET /metrics` is disabled unless `AGENT_METRICS_TOKEN` is set and must stay aggregate-only, because the Agent host port is published in the default Compose profile.
 
-`processingRetries`, `processingDeferrals`, and `processingDlqTotal` are monotonic operator counters; `processingDlq` is the current failed-job gauge. An active transaction collision increments only `processingDeferrals` and must not consume the retry/DLQ budget. Alert on a sustained retry/DLQ increase together with nonzero ready age, rather than on individual payloads.
+`processingRetries`, `processingJoined`, and `processingDlqTotal` are monotonic operator counters; `processingDlq` is the current failed-job gauge. An active transaction collision joins the durable owner and increments only `processingJoined`; it must not consume the retry/DLQ budget or execute again. Alert on a sustained retry/DLQ increase together with nonzero ready age, rather than on individual payloads.
 
 Completed/failed processing jobs and delivered egress rows are operational ledgers, not immutable event history. `ProcessingStore.pruneOperationalLedgers()` removes them after `AGENT_OPERATIONAL_RETENTION_DAYS` (30 by default), at startup and every 24 hours; it never deletes `event_store`, live leases, or `agent_execution` idempotency claims.

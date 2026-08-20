@@ -76,11 +76,9 @@ export class ProcessingStore {
     return result.rows[0]?.status === "failed" ? "dead" : result.rows[0] ? "retry" : "lost";
   }
 
-  /** An already-running transaction belongs to another attempt, not this job's failure budget. */
-  async defer(eventId: string, attemptId: string, retryMs: number): Promise<boolean> {
-    const result = await this.pool.query(`UPDATE event_processing_job SET status = 'ready', attempts = GREATEST(attempts - 1, 0),
-      lease_until = NULL, attempt_id = NULL, retry_at = now() + make_interval(secs => ($3::numeric / 1000)::double precision), updated_at = now()
-      WHERE event_id = $1 AND status = 'running' AND attempt_id = $2`, [eventId, attemptId, retryMs]);
+  /** A duplicate request joins the durable owner; it must not independently retry or produce another result. */
+  async join(eventId: string, attemptId: string): Promise<boolean> {
+    const result = await this.pool.query("UPDATE event_processing_job SET status = 'completed', lease_until = NULL, updated_at = now() WHERE event_id = $1 AND status = 'running' AND attempt_id = $2", [eventId, attemptId]);
     return Boolean(result.rowCount);
   }
 
