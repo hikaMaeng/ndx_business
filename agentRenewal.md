@@ -855,6 +855,13 @@ server-issued field 발급 뒤 domain event로 변환한다.
 - replaying registry, high-water mark, live buffer flush 구현
 - WebSocket disconnect/reconnect 테스트 구현
 
+진행 상태:
+
+- 완료: canonical channel frame parser, channel-fingerprint-bound opaque cursor,
+  event-store high-water/replay, canonical-envelope-only live routing, replay-live handoff,
+  connection별 bounded mailbox와 slow-consumer 격리.
+- 미완료: browser reconnect/cursor 수용 테스트와 다채널 공정성·p95/p99 부하 증적.
+
 완료 조건:
 
 - client ID 직접 라우팅 없이 channel 기준으로 전달된다.

@@ -20,6 +20,7 @@ export interface AgentEnv {
   databasePoolMax: number;
   metricsToken: string;
   deliveryLeaseSeconds: number;
+  websocketMailboxMax: number;
 }
 
 function positive(source: NodeJS.ProcessEnv, name: string, fallback: number, allowZero = false): number {
@@ -58,5 +59,6 @@ export function readEnv(source = process.env): AgentEnv {
     databasePoolMax: positive(source, "AGENT_DATABASE_POOL_MAX", Math.min(48, Math.max(16, Math.ceil(maxWorkerThreads / 2)))),
     metricsToken: source.AGENT_METRICS_TOKEN ?? "",
     deliveryLeaseSeconds,
+    websocketMailboxMax: positive(source, "AGENT_WEBSOCKET_MAILBOX_MAX", 256),
   };
 }

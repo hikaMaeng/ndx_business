@@ -5,12 +5,17 @@ import type { AgentEnv } from "../env.js";
 import type { EventQueueTransport } from "../queue/transport.js";
 import { EventStreamHub } from "../stream/hub.js";
 import type { EventStore } from "../event-store/store.js";
+import { ConnectionMailbox } from "../stream/mailbox/index.js";
 
 export function attachWebSocketTransport(server: Server, env: AgentEnv, queue: EventQueueTransport, hub: EventStreamHub, eventStore: EventStore): WebSocketServer {
   const websocket = new WebSocketServer({ server, path: "/ws" });
   websocket.on("connection", (socket) => {
+    const mailbox = new ConnectionMailbox(env.websocketMailboxMax, (event, done) => {
+      if (socket.readyState !== socket.OPEN) { done(); return; }
+      socket.send(JSON.stringify({ type: "event", event } satisfies ChannelServerFrame), (error) => { if (error) socket.close(1011, "websocket send failed"); done(); });
+    }, () => socket.close(1013, "slow consumer"));
     let unsubscribe = hub.subscribe(["agent.requests", "agent.results"], (event) => {
-      if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: "event", event } satisfies ChannelServerFrame));
+      mailbox.enqueue(event);
     });
     socket.send(JSON.stringify({ type: "ready", channels: ["agent.requests", "agent.results"] } satisfies ChannelServerFrame));
     console.log(JSON.stringify({ event: "websocket.connected" }));
@@ -26,7 +31,7 @@ export function attachWebSocketTransport(server: Server, env: AgentEnv, queue: E
         const live: import("agent_domain/common").EventEnvelope[] = [];
         let replaying = true;
         const highWater = await eventStore.channelHighWater(channels);
-        const send = (event: import("agent_domain/common").EventEnvelope) => { if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: "event", event } satisfies ChannelServerFrame)); };
+        const send = (event: import("agent_domain/common").EventEnvelope) => mailbox.enqueue(event);
         unsubscribe = hub.subscribe(channels, (event) => { if (replaying) live.push(event); else send(event); });
         const replay = await eventStore.replayChannels(channels, positions, highWater);
         replay.forEach(send);
