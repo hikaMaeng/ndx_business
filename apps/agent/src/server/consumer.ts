@@ -24,7 +24,7 @@ async function workerOutcome(pool: WorkerPool, event: AgentEvent): Promise<{ res
 }
 
 /** Thread 1: PGMQ handoff only. It never awaits a worker or result delivery. */
-export function startIngressConsumer(input: { queueTransport: EventQueueTransport; eventStore: EventStore; processingStore: ProcessingStore; metrics: MetricsRegistry; queue: string; visibilityTimeoutSeconds: number; pollSeconds: number; batchSize: number; maxConcurrentHandoffs: number }): Loop {
+export function startIngressConsumer(input: { queueTransport: EventQueueTransport; eventStore: EventStore; processingStore: ProcessingStore; metrics: MetricsRegistry; notifyScheduler: () => void; queue: string; visibilityTimeoutSeconds: number; pollSeconds: number; batchSize: number; maxConcurrentHandoffs: number }): Loop {
   let stopped = false;
   const handoffLane = async (): Promise<void> => { while (!stopped) {
     try {
@@ -35,6 +35,7 @@ export function startIngressConsumer(input: { queueTransport: EventQueueTranspor
         const persisted = await input.eventStore.append(toEventDraft(message.event));
         await input.processingStore.enqueue(message.event);
         await input.queueTransport.delete(input.queue, message.id);
+        input.notifyScheduler();
         input.metrics.increment("queueDeletes");
         console.log(JSON.stringify({ event: "ingress.handed-off", eventId: persisted.eventId, streamId: persisted.streamId, sequence: persisted.sequence, messageId: message.id }));
       } catch (error) { input.metrics.increment("processingFailures"); console.error(JSON.stringify({ event: "ingress.handoff.failed", messageId: message.id, error: error instanceof Error ? error.message : String(error) })); }
@@ -46,7 +47,7 @@ export function startIngressConsumer(input: { queueTransport: EventQueueTranspor
 }
 
 /** Scheduler is the sole worker dispatcher. A durable job claim, not PGMQ visibility, owns execution. */
-export function startScheduler(input: { queueTransport: EventQueueTransport; database: import("pg").Pool; pool: WorkerPool; hub: EventStreamHub; eventStore: EventStore; deliveryStore: DeliveryStore; processingStore: ProcessingStore; metrics: MetricsRegistry; resultQueue: string; pollSeconds: number; maxConcurrentDispatches: number }): Loop {
+export function startScheduler(input: { queueTransport: EventQueueTransport; database: import("pg").Pool; pool: WorkerPool; hub: EventStreamHub; eventStore: EventStore; deliveryStore: DeliveryStore; processingStore: ProcessingStore; metrics: MetricsRegistry; resultQueue: string; schedulerIdleMs: number; waitForWork: () => Promise<void>; maxConcurrentDispatches: number }): Loop {
   let stopped = false;
   const publish = async (request: EventEnvelope, result: AgentEvent<ResultPayload>): Promise<void> => {
     const envelope = await input.eventStore.append(toResultDraft(request, result)); const delivery = await input.deliveryStore.claim(envelope.eventId);
@@ -59,18 +60,18 @@ export function startScheduler(input: { queueTransport: EventQueueTransport; dat
     if (claim.kind === "conflict") { await publish(request, createResultEvent(event, { ok: false, error: { code: "idempotency_conflict", message: claim.reason } }, deterministicEventId(`conflict:${event.eventId}`))); return; }
     if (claim.kind === "duplicate") { if (claim.completed && claim.result) await publish(request, createResultEvent(event, claim.result as ResultPayload, resultEventId(event))); if (!claim.completed) throw new Error(`transaction ${event.transactionKey} is already running`); return; }
     input.metrics.increment("workerStarted"); input.metrics.increment("inFlight");
-    const heartbeat = setInterval(() => { void input.processingStore.renew(jobId); }, Math.max(1000, input.pollSeconds * 500));
+    const heartbeat = setInterval(() => { void input.processingStore.renew(jobId); }, Math.max(1000, input.schedulerIdleMs));
     try { const outcome = await workerOutcome(input.pool, event); await completeExecution(input.database, event.transactionKey, outcome.result.payload, outcome.status); input.metrics.increment(outcome.status === "completed" ? "workerCompleted" : "workerFailed"); await publish(request, outcome.result); }
     finally { clearInterval(heartbeat); input.metrics.increment("inFlight", -1); }
   };
   const dispatchLane = async (): Promise<void> => { while (!stopped) {
     try {
-      const job = await input.processingStore.claimNext(); if (!job) { await delay(input.pollSeconds * 1000); continue; }
+      const job = await input.processingStore.claimNext(); if (!job) { await input.waitForWork(); continue; }
       input.metrics.increment("schedulerDispatchActive");
       try { await process(job.event, job.eventId); await input.processingStore.complete(job.eventId); }
       catch (error) { input.metrics.increment("processingFailures"); await input.processingStore.retryLater(job.eventId); console.error(JSON.stringify({ event: "scheduler.retry", eventId: job.eventId, error: error instanceof Error ? error.message : String(error) })); }
       finally { input.metrics.increment("schedulerDispatchActive", -1); }
-    } catch (error) { input.metrics.increment("processingFailures"); console.error(JSON.stringify({ event: "scheduler.poll.failed", error: error instanceof Error ? error.message : String(error) })); await delay(input.pollSeconds * 1000); }
+    } catch (error) { input.metrics.increment("processingFailures"); console.error(JSON.stringify({ event: "scheduler.poll.failed", error: error instanceof Error ? error.message : String(error) })); await delay(input.schedulerIdleMs); }
   } };
   for (let lane = 0; lane < input.maxConcurrentDispatches; lane += 1) void dispatchLane();
   return { stop: () => { stopped = true; } };
