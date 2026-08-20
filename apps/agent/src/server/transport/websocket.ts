@@ -10,9 +10,15 @@ import { ConnectionMailbox } from "../stream/mailbox/index.js";
 export function attachWebSocketTransport(server: Server, env: AgentEnv, queue: EventQueueTransport, hub: EventStreamHub, eventStore: EventStore): WebSocketServer {
   const websocket = new WebSocketServer({ server, path: "/ws" });
   websocket.on("connection", (socket) => {
+    let subscribedChannels = ["agent.requests", "agent.results"];
+    let positions: Record<string, string> = {};
     const mailbox = new ConnectionMailbox(env.websocketMailboxMax, (event, done) => {
       if (socket.readyState !== socket.OPEN) { done(); return; }
-      socket.send(JSON.stringify({ type: "event", event } satisfies ChannelServerFrame), (error) => { if (error) socket.close(1011, "websocket send failed"); done(); });
+      positions[event.streamId] = event.sequence;
+      let cursor: string;
+      try { cursor = encodeChannelCursor(subscribedChannels, positions); }
+      catch { socket.close(1008, "subscription exceeds cursor limits"); done(); return; }
+      socket.send(JSON.stringify({ type: "event", event, cursor } satisfies ChannelServerFrame), (error) => { if (error) socket.close(1011, "websocket send failed"); done(); });
     }, () => socket.close(1013, "slow consumer"));
     let unsubscribe = hub.subscribe(["agent.requests", "agent.results"], (event) => {
       mailbox.enqueue(event);
@@ -27,8 +33,10 @@ export function attachWebSocketTransport(server: Server, env: AgentEnv, queue: E
       if (frame.type === "subscribe") {
         unsubscribe();
         const channels = frame.channels.filter((channel) => channel.length > 0).slice(0, 32);
-        const positions = parseChannelCursor(frame.cursor, channels);
-        if (!positions) { socket.close(1008, "invalid channel cursor"); return; }
+        const resumePositions = parseChannelCursor(frame.cursor, channels);
+        if (!resumePositions) { socket.close(1008, "invalid channel cursor"); return; }
+        subscribedChannels = channels;
+        positions = resumePositions;
         const live: import("agent_domain/common").EventEnvelope[] = [];
         let replaying = true;
         const highWater = frame.cursor ? await eventStore.channelHighWater(channels) : {};
@@ -37,7 +45,7 @@ export function attachWebSocketTransport(server: Server, env: AgentEnv, queue: E
         const replay = await eventStore.replayChannels(channels, positions, highWater);
         replay.forEach(send);
         live.filter((event) => BigInt(event.sequence) > BigInt(highWater[event.streamId] ?? "0")).sort((left, right) => left.streamId.localeCompare(right.streamId) || Number(BigInt(left.sequence) - BigInt(right.sequence))).forEach(send);
-        const cursor = encodeChannelCursor(channels, { ...positions, ...highWater });
+        const cursor = encodeChannelCursor(channels, positions);
         replaying = false;
         socket.send(JSON.stringify({ type: "subscribed", channels, cursor } satisfies ChannelServerFrame));
         return;
