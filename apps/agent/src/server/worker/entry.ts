@@ -1,6 +1,6 @@
 import { parentPort } from "node:worker_threads";
 import type { EventEnvelope } from "agent_domain/common";
-import { executeHandler } from "./handlers/index.js";
+import { executeHandler } from "agent_domain/server";
 
 const controllers = new Map<string, AbortController>();
 

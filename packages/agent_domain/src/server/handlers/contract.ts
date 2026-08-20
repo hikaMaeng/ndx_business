@@ -1,4 +1,4 @@
-import type { EventEnvelope } from "agent_domain/common";
+import type { EventEnvelope } from "../../common/protocol/event/index.js";
 
 export interface WorkerActionHandler {
   readonly name: string;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createEventDraft } from "agent_domain/common";
+import { createEventDraft } from "../../common/protocol/event/index.js";
 import { executeHandler } from "./index.js";
 
 const event = (action: string, payload: Record<string, unknown> = {}) => ({ ...createEventDraft({ action, transactionKey: "worker-test", channel: "agent.requests", payload }), sequence: "1" });

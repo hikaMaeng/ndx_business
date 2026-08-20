@@ -9,6 +9,7 @@
   "exports": {
     ".": { "types": "./dist/common/index.d.ts", "import": "./dist/common/index.js" },
     "./common": { "types": "./dist/common/index.d.ts", "import": "./dist/common/index.js" },
+    "./server": { "types": "./dist/server/index.d.ts", "import": "./dist/server/index.js" },
     "./front": { "types": "./dist/front/index.d.ts", "import": "./dist/front/index.js" },
     "./package.json": "./package.json"
   },

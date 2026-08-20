@@ -7,7 +7,7 @@
     "build": "npm run build:front && npm run build:server && npm run build:worker",
     "build:front": "vite build",
     "build:server": "esbuild src/server/index.ts --bundle --platform=node --format=esm --target=node26 --alias:agent_domain=../../packages/agent_domain/dist --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\" --outfile=dist/server/index.js",
-    "build:worker": "esbuild src/server/worker/entry.ts --bundle --platform=node --format=esm --target=node26 --outfile=dist/server/worker.js",
+    "build:worker": "esbuild src/server/worker/entry.ts --bundle --platform=node --format=esm --target=node26 --alias:agent_domain/server=../../packages/agent_domain/dist/server/index.js --outfile=dist/server/worker.js",
     "test": "node --import tsx --test src/server/**/*.test.ts",
     "lint": "tsc --noEmit -p tsconfig.server.json && tsc --noEmit -p tsconfig.json"
   },
