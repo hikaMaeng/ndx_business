@@ -13,7 +13,7 @@ import { toEventDraft, toProcessingFailureDraft, toResultDraft } from "./ingress
 
 type ResultPayload = { ok: boolean; value?: unknown; error?: { code: string; message: string } };
 type ExecutionStatus = "completed" | "failed" | "timed_out" | "cancelled";
-type Loop = { stop: () => void };
+export type Loop = { stop: () => void; done: Promise<void> };
 class ExecutionInProgressError extends Error {}
 const delay = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const resultEventId = (event: Pick<EventEnvelope, "transactionKey" | "replyChannel">): string => deterministicEventId(`result:${event.transactionKey}:${event.replyChannel ?? "agent.results"}`);
@@ -47,8 +47,8 @@ export function startIngressConsumer(input: { queueTransport: EventQueueTranspor
       }));
     } catch (error) { console.error(JSON.stringify({ event: "ingress.retry", error: error instanceof Error ? error.message : String(error) })); await delay(input.pollSeconds * 1000); }
   } };
-  for (let lane = 0; lane < input.maxConcurrentHandoffs; lane += 1) void handoffLane();
-  return { stop: () => { stopped = true; } };
+  const lanes = Array.from({ length: input.maxConcurrentHandoffs }, handoffLane);
+  return { stop: () => { stopped = true; }, done: Promise.all(lanes).then(() => undefined) };
 }
 
 /** Scheduler is the sole worker dispatcher. A durable job claim, not PGMQ visibility, owns execution. */
@@ -102,6 +102,6 @@ export function startScheduler(input: { database: import("pg").Pool; pool: Worke
       finally { input.metrics.increment("schedulerDispatchActive", -1); }
     } catch (error) { input.metrics.increment("processingFailures"); console.error(JSON.stringify({ event: "scheduler.poll.failed", error: error instanceof Error ? error.message : String(error) })); await delay(input.schedulerIdleMs); }
   } };
-  for (let lane = 0; lane < input.maxConcurrentDispatches; lane += 1) void dispatchLane();
-  return { stop: () => { stopped = true; } };
+  const lanes = Array.from({ length: input.maxConcurrentDispatches }, dispatchLane);
+  return { stop: () => { stopped = true; }, done: Promise.all(lanes).then(() => undefined) };
 }

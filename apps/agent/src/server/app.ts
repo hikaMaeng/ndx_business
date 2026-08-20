@@ -7,12 +7,12 @@ import type { EventQueueTransport } from "./queue/transport.js";
 import { EventStreamHub } from "./stream/hub.js";
 import type { MetricsRegistry } from "./metrics/registry.js";
 
-export function createApp(env: AgentEnv, queue: EventQueueTransport, hub: EventStreamHub, metrics: MetricsRegistry): express.Express {
+export function createApp(env: AgentEnv, queue: EventQueueTransport, hub: EventStreamHub, metrics: MetricsRegistry, checkDatabase: () => Promise<void>): express.Express {
   const app = express();
   const frontDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../front");
   app.use(express.json({ limit: "256kb" }));
   app.get("/health", (_request, response) => response.json({ status: "ok", service: "agent" }));
-  app.get("/ready", async (_request, response) => { try { await queue.check(); response.json({ status: "ready" }); } catch { response.status(503).json({ status: "unavailable" }); } });
+  app.get("/ready", async (_request, response) => { try { await Promise.all([queue.check(), checkDatabase()]); response.json({ status: "ready" }); } catch { response.status(503).json({ status: "unavailable" }); } });
   app.get("/metrics", (request, response) => {
     if (!env.metricsToken) return response.status(404).json({ error: "metrics endpoint is disabled" });
     if (request.get("authorization") !== `Bearer ${env.metricsToken}`) return response.status(401).json({ error: "metrics token required" });

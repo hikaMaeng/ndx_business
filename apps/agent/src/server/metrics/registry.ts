@@ -36,6 +36,15 @@ export interface MetricsSnapshot {
   websocketSlowConsumerClosed: number;
   websocketReplayOverflow: number;
   websocketSendFailures: number;
+  databasePoolTotal: number;
+  databasePoolIdle: number;
+  databasePoolWaiting: number;
+  ingressQueuePoolTotal: number;
+  ingressQueuePoolIdle: number;
+  ingressQueuePoolWaiting: number;
+  queuePoolTotal: number;
+  queuePoolIdle: number;
+  queuePoolWaiting: number;
 }
 
 export class MetricsRegistry {
@@ -46,10 +55,13 @@ export class MetricsRegistry {
     ingressAccepted: 0, ingressHandoffActive: 0, processingReady: 0, processingRunning: 0, processingDlq: 0, processingReadyOldestMs: 0,
     processingExpiredLeases: 0, schedulerDispatchActive: 0, outboxPending: 0, outboxFailed: 0, outboxRetries: 0, outboxDlqTotal: 0,
     websocketConnections: 0, websocketDelivered: 0, websocketProgressDropped: 0, websocketSlowConsumerClosed: 0, websocketReplayOverflow: 0, websocketSendFailures: 0,
+    databasePoolTotal: 0, databasePoolIdle: 0, databasePoolWaiting: 0,
+    ingressQueuePoolTotal: 0, ingressQueuePoolIdle: 0, ingressQueuePoolWaiting: 0,
+    queuePoolTotal: 0, queuePoolIdle: 0, queuePoolWaiting: 0,
   };
 
   increment(name: keyof MetricsSnapshot, amount = 1): void { this.counters[name] += amount; }
-  setGauge(name: "processingReady" | "processingRunning" | "processingDlq" | "processingReadyOldestMs" | "processingExpiredLeases" | "schedulerDispatchActive" | "outboxPending" | "outboxFailed" | "websocketConnections", value: number): void { this.counters[name] = value; }
+  setGauge(name: "processingReady" | "processingRunning" | "processingDlq" | "processingReadyOldestMs" | "processingExpiredLeases" | "schedulerDispatchActive" | "outboxPending" | "outboxFailed" | "websocketConnections" | "databasePoolTotal" | "databasePoolIdle" | "databasePoolWaiting" | "ingressQueuePoolTotal" | "ingressQueuePoolIdle" | "ingressQueuePoolWaiting" | "queuePoolTotal" | "queuePoolIdle" | "queuePoolWaiting", value: number): void { this.counters[name] = value; }
 
   snapshot(): MetricsSnapshot & { appendLatencyMsAverage: number } {
     const appends = this.counters.appendTotal;

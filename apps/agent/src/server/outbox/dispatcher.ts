@@ -3,7 +3,7 @@ import type { EventStreamHub } from "../stream/hub.js";
 import type { MetricsRegistry } from "../metrics/registry.js";
 import type { OutboxStore } from "./store.js";
 
-export type OutboxLoop = { stop: () => void };
+export type OutboxLoop = { stop: () => void; done: Promise<void> };
 
 /** Publishes only rows that committed with their canonical event. */
 export function startOutboxDispatcher(input: { outbox: OutboxStore; queue: EventQueueTransport; resultQueue: string; hub: EventStreamHub; metrics: MetricsRegistry; idleMs: number; retryMs: number; maxAttempts: number; lanes: number }): OutboxLoop {
@@ -26,6 +26,6 @@ export function startOutboxDispatcher(input: { outbox: OutboxStore; queue: Event
       }
     } catch (error) { input.metrics.increment("processingFailures"); await new Promise((resolve) => setTimeout(resolve, input.idleMs)); }
   } };
-  for (let index = 0; index < input.lanes; index += 1) void lane();
-  return { stop: () => { stopped = true; } };
+  const lanes = Array.from({ length: input.lanes }, lane);
+  return { stop: () => { stopped = true; }, done: Promise.all(lanes).then(() => undefined) };
 }

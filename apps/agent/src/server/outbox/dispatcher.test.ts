@@ -13,6 +13,6 @@ test("outbox dispatcher publishes only a claimed committed event", async () => {
     resultQueue: "agent_results", hub: { publish: (value: EventEnvelope) => published.push(value.eventId) } as never,
     metrics: { increment: () => undefined } as never, idleMs: 1, retryMs: 1, maxAttempts: 2, lanes: 1,
   });
-  await new Promise((resolve) => setTimeout(resolve, 20)); loop.stop();
+  await new Promise((resolve) => setTimeout(resolve, 20)); loop.stop(); await loop.done;
   assert.deepEqual(sent, [event.eventId]); assert.deepEqual(published, [event.eventId]); assert.deepEqual(completed, ["result-1:attempt-1"]);
 });

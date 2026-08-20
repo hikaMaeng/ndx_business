@@ -1,5 +1,5 @@
 import { createApp } from "./app.js";
-import { createDatabasePool } from "./database.js";
+import { createDatabasePool, snapshotDatabasePool } from "./database.js";
 import { readEnv } from "./env.js";
 import { PgmqClient } from "./pgmq/client.js";
 import { createWorkerPool } from "./worker/pool.js";
@@ -61,6 +61,16 @@ const refreshMetrics = async (): Promise<void> => {
   const outbox = await outboxStore.counts();
   metrics.setGauge("outboxPending", outbox.pending);
   metrics.setGauge("outboxFailed", outbox.failed);
+  const pools = [
+    ["databasePool", snapshotDatabasePool(database)],
+    ["ingressQueuePool", snapshotDatabasePool(ingressQueueDatabase)],
+    ["queuePool", snapshotDatabasePool(queueDatabase)],
+  ] as const;
+  for (const [name, pool] of pools) {
+    metrics.setGauge(`${name}Total` as "databasePoolTotal" | "ingressQueuePoolTotal" | "queuePoolTotal", pool.total);
+    metrics.setGauge(`${name}Idle` as "databasePoolIdle" | "ingressQueuePoolIdle" | "queuePoolIdle", pool.idle);
+    metrics.setGauge(`${name}Waiting` as "databasePoolWaiting" | "ingressQueuePoolWaiting" | "queuePoolWaiting", pool.waiting);
+  }
 };
 void refreshMetrics();
 const metricsTimer = setInterval(() => { void refreshMetrics().catch((error) => console.error(JSON.stringify({ event: "metrics.refresh.failed", error: error instanceof Error ? error.message : String(error) }))); }, 1000);
@@ -74,23 +84,36 @@ const ingress = startIngressConsumer({ queueTransport: ingressPgmq, eventStore, 
 const scheduler = startScheduler({ database, pool, eventStore, outboxStore, processingStore, metrics, notifyProjection: () => projectionNotifier.notify(), schedulerIdleMs: env.schedulerIdleMs, executionLeaseSeconds: env.visibilityTimeoutSeconds, processingMaxAttempts: env.processingMaxAttempts, processingRetryBaseMs: env.processingRetryBaseMs, waitForWork: () => schedulerNotifier.wait(env.schedulerIdleMs), maxConcurrentDispatches: env.maxWorkerThreads });
 const outbox = startOutboxDispatcher({ outbox: outboxStore, queue: pgmq, resultQueue: env.resultQueue, hub, metrics, idleMs: env.schedulerIdleMs, retryMs: env.outboxRetryBaseMs, maxAttempts: env.outboxMaxAttempts, lanes: env.outboxDispatchers });
 const projections = startProjectionRunners({ store: projectionStore, metrics, waitForWork: (projection) => projectionNotifier.wait(projection, 30_000) });
-const server = createApp(env, pgmq, hub, metrics).listen(env.port, () => console.log(JSON.stringify({ event: "agent.listening", port: env.port, cpuCount: env.cpuCount, minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, metricsEndpoint: env.metricsToken ? "enabled" : "disabled" })));
+const server = createApp(env, pgmq, hub, metrics, async () => { await database.query("SELECT 1"); }).listen(env.port, () => console.log(JSON.stringify({ event: "agent.listening", port: env.port, cpuCount: env.cpuCount, minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, metricsEndpoint: env.metricsToken ? "enabled" : "disabled" })));
 const websocket = attachWebSocketTransport(server, env, pgmq, hub, eventStore, metrics);
 
+const waitWithin = async (work: Promise<unknown>, timeoutMs: number): Promise<boolean> => {
+  const completed = await Promise.race([work.then(() => true), new Promise<false>((resolve) => setTimeout(() => resolve(false), timeoutMs))]);
+  return completed;
+};
+
 async function shutdown(): Promise<void> {
+  console.log(JSON.stringify({ event: "agent.shutdown.started", graceMs: env.shutdownGraceMs }));
   ingress.stop();
+  for (const client of websocket.clients) client.close(1001, "server shutdown");
+  websocket.close();
+  await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  if (!await waitWithin(ingress.done, env.shutdownGraceMs)) console.error(JSON.stringify({ event: "agent.shutdown.ingress.timeout" }));
   scheduler.stop();
   outbox.stop();
   projections.stop();
+  schedulerNotifier.notify();
+  projectionNotifier.notify();
   clearInterval(metricsTimer);
   clearInterval(retentionTimer);
   clearInterval(recoveryTimer);
-  await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-  websocket.close();
+  const drained = await waitWithin(Promise.all([scheduler.done, outbox.done, projections.done]), env.shutdownGraceMs);
+  if (!drained) console.error(JSON.stringify({ event: "agent.shutdown.drain.timeout" }));
+  await pool.destroy();
   await ingressQueueDatabase.end();
   await queueDatabase.end();
   await database.end();
-  await pool.destroy();
+  console.log(JSON.stringify({ event: "agent.shutdown.completed", drained }));
 }
 
 process.once("SIGTERM", () => { void shutdown().then(() => process.exit(0)); });
