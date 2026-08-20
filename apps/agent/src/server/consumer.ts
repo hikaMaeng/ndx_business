@@ -20,8 +20,8 @@ const resultEventId = (event: Pick<EventEnvelope, "transactionKey" | "replyChann
 function failureStatus(message: string): ExecutionStatus { return message.includes("timed out") || message.includes("timeout") ? "timed_out" : message.includes("aborted") ? "cancelled" : "failed"; }
 function isProcessingFailure(payload: ResultPayload): payload is ResultPayload & { error: { code: "processing_permanent_failure"; message: string } } { return payload.error?.code === "processing_permanent_failure"; }
 
-async function workerOutcome(pool: WorkerPool, event: EventEnvelope, signal?: AbortSignal): Promise<{ payload: ResultPayload; status: ExecutionStatus }> {
-  try { return { payload: { ok: true, value: (await runWorker(pool, event, signal)).value }, status: "completed" }; }
+async function workerOutcome(pool: WorkerPool, event: EventEnvelope, signal: AbortSignal | undefined, onAssigned: (workerId: string) => Promise<void>): Promise<{ payload: ResultPayload; status: ExecutionStatus }> {
+  try { return { payload: { ok: true, value: (await runWorker(pool, event, signal, onAssigned)).value }, status: "completed" }; }
   catch (error) {
     if (error instanceof WorkerLostError) throw error;
     const message = error instanceof Error ? error.message : "Worker failed";
@@ -97,7 +97,9 @@ export function startScheduler(input: { database: import("pg").Pool; pool: Worke
     const heartbeatMs = Math.max(100, Math.floor(input.executionLeaseSeconds * 1000 / 3));
     const heartbeat = setInterval(() => { void Promise.all([input.processingStore.renew(jobId, attemptId), renewExecution(input.database, request.transactionKey, attemptId, input.executionLeaseSeconds)]).then(([jobRenewed, executionRenewed]) => { if (!jobRenewed || !executionRenewed) { leaseLost = true; controller.abort(); } }).catch((error) => { leaseLost = true; controller.abort(); input.metrics.increment("processingFailures"); console.error(JSON.stringify({ event: "scheduler.heartbeat.failed", eventId: jobId, attemptId, error: error instanceof Error ? error.message : String(error) })); }); }, heartbeatMs);
     try {
-      const outcome = await workerOutcome(input.pool, request, controller.signal);
+      const outcome = await workerOutcome(input.pool, request, controller.signal, async (workerId) => {
+        if (!await input.processingStore.startAttempt(jobId, attemptId, workerId)) throw new WorkerLostError(`processing attempt ${attemptId} lost before worker assignment`);
+      });
       if (leaseLost) throw new WorkerLostError(`attempt ${attemptId} lost its lease`);
       await publish(request, outcome.payload, async (client) => {
         if (!await completeExecution(client, request.transactionKey, attemptId, outcome.payload, outcome.status)) throw new WorkerLostError(`execution attempt ${attemptId} lost its lease`);

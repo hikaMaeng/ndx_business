@@ -40,7 +40,7 @@ async function initializeDatabase(): Promise<void> {
       await projectionStore.ensureSchema();
       await processingStore.ensureSchema();
       const pruned = await processingStore.pruneOperationalLedgers(env.operationalRetentionDays);
-      if (pruned.processingJobs || pruned.outbox) console.log(JSON.stringify({ event: "operational-ledger.pruned", retentionDays: env.operationalRetentionDays, ...pruned }));
+      if (pruned.processingJobs || pruned.processingAttempts || pruned.outbox) console.log(JSON.stringify({ event: "operational-ledger.pruned", retentionDays: env.operationalRetentionDays, ...pruned }));
       const cursors = await eventStore.pruneChannelCursors(env.cursorRetentionDays);
       if (cursors) console.log(JSON.stringify({ event: "channel-cursor.pruned", retentionDays: env.cursorRetentionDays, cursors }));
       return;

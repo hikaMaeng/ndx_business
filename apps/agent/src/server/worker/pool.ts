@@ -2,25 +2,25 @@ import { randomUUID } from "node:crypto";
 import { Worker } from "node:worker_threads";
 import type { EventEnvelope } from "agent_domain/common";
 
-export interface WorkerResult { value: unknown; }
-export interface WorkerPool { run(event: EventEnvelope, signal?: AbortSignal): Promise<WorkerResult>; destroy(): Promise<void>; snapshot?(): { workers: number; busy: number; queued: number }; }
+export interface WorkerResult { value: unknown; workerId: string; }
+export interface WorkerPool { run(event: EventEnvelope, signal?: AbortSignal, onAssigned?: (workerId: string) => Promise<void>): Promise<WorkerResult>; destroy(): Promise<void>; snapshot?(): { workers: number; busy: number; queued: number }; }
 
 /** A process-level worker loss is retryable; action failures are returned by the worker itself. */
 export class WorkerLostError extends Error {
   constructor(message: string) { super(message); this.name = "WorkerLostError"; }
 }
 
-export function runWorker(pool: WorkerPool, event: EventEnvelope, signal?: AbortSignal): Promise<WorkerResult> { return pool.run(event, signal); }
+export function runWorker(pool: WorkerPool, event: EventEnvelope, signal?: AbortSignal, onAssigned?: (workerId: string) => Promise<void>): Promise<WorkerResult> { return pool.run(event, signal, onAssigned); }
 
-interface PendingTask { id: string; event: EventEnvelope; signal?: AbortSignal; resolve: (result: WorkerResult) => void; reject: (error: Error) => void; abort?: () => void; }
-interface WorkerSlot { worker: Worker; busy: boolean; retired: boolean; task?: PendingTask; }
+interface PendingTask { id: string; event: EventEnvelope; signal?: AbortSignal; onAssigned?: (workerId: string) => Promise<void>; resolve: (result: WorkerResult) => void; reject: (error: Error) => void; abort?: () => void; }
+interface WorkerSlot { worker: Worker; workerId: string; busy: boolean; retired: boolean; task?: PendingTask; }
 
 export function createWorkerPool(options: { minWorkerThreads: number; maxWorkerThreads: number; maxQueue: number; workerUrl?: URL }): WorkerPool {
   const slots: WorkerSlot[] = [];
   const queue: PendingTask[] = [];
   const workerUrl = options.workerUrl ?? new URL("./worker.js", import.meta.url);
 
-  const dispatch = (): void => {
+  const dispatch = async (): Promise<void> => {
     while (slots.length < options.minWorkerThreads && slots.length < options.maxWorkerThreads) slots.push(createSlot());
     for (const slot of slots) {
       if (slot.busy) continue;
@@ -28,6 +28,14 @@ export function createWorkerPool(options: { minWorkerThreads: number; maxWorkerT
       if (!task) return;
       slot.busy = true;
       slot.task = task;
+      try { await task.onAssigned?.(slot.workerId); }
+      catch (error) {
+        slot.task = undefined;
+        slot.busy = false;
+        task.reject(error instanceof Error ? error : new Error(String(error)));
+        continue;
+      }
+      if (slot.retired || slot.task !== task) continue;
       slot.worker.postMessage({ type: "run", id: task.id, event: task.event });
       task.abort = () => slot.worker.postMessage({ type: "abort", id: task.id });
       if (task.signal?.aborted) task.abort();
@@ -35,26 +43,29 @@ export function createWorkerPool(options: { minWorkerThreads: number; maxWorkerT
     }
     if (queue.length > 0 && slots.length < options.maxWorkerThreads) {
       slots.push(createSlot());
-      dispatch();
+      void dispatch();
     }
   };
   const createSlot = (): WorkerSlot => {
     const worker = new Worker(workerUrl);
-    const slot: WorkerSlot = { worker, busy: false, retired: false };
+    const slot: WorkerSlot = { worker, workerId: randomUUID(), busy: false, retired: false };
     worker.on("message", (message: { id: string; ok: boolean; value?: unknown; error?: string }) => {
       if (!slot.task || slot.task.id !== message.id) return;
       const task = slot.task;
       slot.task = undefined;
       slot.busy = false;
       task.signal?.removeEventListener("abort", task.abort!);
-      if (message.ok) task.resolve({ value: message.value });
+      if (message.ok) task.resolve({ value: message.value, workerId: slot.workerId });
       else task.reject(new Error(message.error ?? "Worker failed"));
-      dispatch();
+      void dispatch();
     });
     worker.on("error", (error) => {
       if (slot.retired) return;
       slot.retired = true;
-      if (slot.task) slot.task.reject(new WorkerLostError(error instanceof Error ? error.message : String(error)));
+      if (slot.task) {
+        slot.task.signal?.removeEventListener("abort", slot.task.abort!);
+        slot.task.reject(new WorkerLostError(error instanceof Error ? error.message : String(error)));
+      }
       slot.task = undefined;
       slot.busy = false;
       void replaceSlot(slot);
@@ -62,7 +73,10 @@ export function createWorkerPool(options: { minWorkerThreads: number; maxWorkerT
     worker.on("exit", (code) => {
       if (slot.retired) return;
       slot.retired = true;
-      if (slot.task) slot.task.reject(new WorkerLostError(`worker exited with code ${code}`));
+      if (slot.task) {
+        slot.task.signal?.removeEventListener("abort", slot.task.abort!);
+        slot.task.reject(new WorkerLostError(`worker exited with code ${code}`));
+      }
       slot.task = undefined;
       slot.busy = false;
       void replaceSlot(slot);
@@ -75,19 +89,27 @@ export function createWorkerPool(options: { minWorkerThreads: number; maxWorkerT
     await slot.worker.terminate();
     slots[index] = createSlot();
     console.log(JSON.stringify({ event: "worker.replaced", workerThreads: slots.length }));
-    dispatch();
+    void dispatch();
   };
   console.log(JSON.stringify({ event: "worker.pool.started", minWorkerThreads: options.minWorkerThreads, maxWorkerThreads: options.maxWorkerThreads, maxQueue: options.maxQueue }));
-  dispatch();
+  void dispatch();
 
   return {
-    run(event: EventEnvelope, signal?: AbortSignal): Promise<WorkerResult> {
+    run(event: EventEnvelope, signal?: AbortSignal, onAssigned?: (workerId: string) => Promise<void>): Promise<WorkerResult> {
       if (queue.length >= options.maxQueue) return Promise.reject(new Error("Agent worker queue is full"));
-      return new Promise<WorkerResult>((resolve, reject) => { queue.push({ id: randomUUID(), event, signal, resolve, reject }); dispatch(); });
+      return new Promise<WorkerResult>((resolve, reject) => { queue.push({ id: randomUUID(), event, signal, onAssigned, resolve, reject }); void dispatch(); });
     },
     async destroy(): Promise<void> {
       for (const task of queue.splice(0)) task.reject(new Error("Worker pool stopped"));
-      for (const slot of slots) slot.retired = true;
+      for (const slot of slots) {
+        slot.retired = true;
+        if (slot.task) {
+          slot.task.signal?.removeEventListener("abort", slot.task.abort!);
+          slot.task.reject(new WorkerLostError("worker pool stopped"));
+          slot.task = undefined;
+          slot.busy = false;
+        }
+      }
       await Promise.all(slots.map((slot) => slot.worker.terminate()));
     },
     snapshot(): { workers: number; busy: number; queued: number } { return { workers: slots.length, busy: slots.filter((slot) => slot.busy).length, queued: queue.length }; },

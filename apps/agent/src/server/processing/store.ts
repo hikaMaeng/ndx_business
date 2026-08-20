@@ -4,7 +4,7 @@ import type { EventEnvelope } from "agent_domain/common";
 
 export interface ProcessingJob { eventId: string; attemptId: string; event: EventEnvelope; }
 export interface ProcessingCounts { ready: number; running: number; failed: number; readyOldestMs: number; expiredLeases: number; }
-export interface PrunedOperationalRows { processingJobs: number; outbox: number; }
+export interface PrunedOperationalRows { processingJobs: number; processingAttempts: number; outbox: number; }
 
 /** Durable scheduler input. PGMQ is acknowledged only after this row exists. */
 export class ProcessingStore {
@@ -26,9 +26,16 @@ export class ProcessingStore {
     END $$`);
     await this.pool.query(`CREATE TABLE IF NOT EXISTS event_processing_dlq (
       event_id text PRIMARY KEY, event jsonb NOT NULL, attempts integer NOT NULL, error text NOT NULL, failed_at timestamptz NOT NULL DEFAULT now())`);
+    await this.pool.query(`CREATE TABLE IF NOT EXISTS event_processing_attempt (
+      attempt_id text PRIMARY KEY, event_id text NOT NULL, worker_id text, status text NOT NULL,
+      lease_until timestamptz, started_at timestamptz, heartbeat_at timestamptz, finished_at timestamptz,
+      error text, created_at timestamptz NOT NULL DEFAULT now(),
+      CHECK (status IN ('claimed','running','completed','retrying','failed','lost','joined')))`);
     await this.pool.query("ALTER TABLE event_processing_job ADD COLUMN IF NOT EXISTS attempt_id text");
     await this.pool.query("CREATE INDEX IF NOT EXISTS event_processing_job_claim_idx ON event_processing_job (retry_at, created_at) WHERE status = 'ready'");
     await this.pool.query("CREATE INDEX IF NOT EXISTS event_processing_job_running_lease_idx ON event_processing_job (lease_until) WHERE status = 'running'");
+    await this.pool.query("CREATE UNIQUE INDEX IF NOT EXISTS event_processing_attempt_active_idx ON event_processing_attempt (event_id) WHERE status IN ('claimed','running')");
+    await this.pool.query("CREATE INDEX IF NOT EXISTS event_processing_attempt_event_idx ON event_processing_attempt (event_id, created_at)");
   }
 
   async enqueue(event: EventEnvelope): Promise<void> {
@@ -42,22 +49,42 @@ export class ProcessingStore {
       SELECT event_id FROM event_processing_job
       WHERE (status = 'ready' AND retry_at <= now()) OR (status = 'running' AND (lease_until IS NULL OR lease_until < now()))
       ORDER BY retry_at, created_at FOR UPDATE SKIP LOCKED LIMIT 1
-    ) UPDATE event_processing_job job SET status = 'running', attempts = attempts + 1, attempt_id = $2,
+    ), expired AS (
+      UPDATE event_processing_attempt SET status = 'lost', lease_until = NULL, finished_at = now(), error = 'processing lease expired'
+      WHERE event_id IN (SELECT event_id FROM candidate) AND status IN ('claimed','running') RETURNING event_id
+    ), claimed AS (
+      UPDATE event_processing_job job SET status = 'running', attempts = attempts + 1, attempt_id = $2,
       lease_until = now() + make_interval(secs => $1), updated_at = now()
-    FROM candidate WHERE job.event_id = candidate.event_id RETURNING job.event_id, job.attempt_id, job.event`, [this.leaseSeconds, attemptId]);
+      FROM candidate CROSS JOIN (SELECT count(*) FROM expired) AS forced
+      WHERE job.event_id = candidate.event_id RETURNING job.event_id, job.attempt_id, job.event, job.lease_until
+    ), recorded AS (
+      INSERT INTO event_processing_attempt (attempt_id, event_id, status, lease_until)
+      SELECT attempt_id, event_id, 'claimed', lease_until FROM claimed
+    ) SELECT event_id, attempt_id, event FROM claimed`, [this.leaseSeconds, attemptId]);
     const row = result.rows[0];
     return row ? { eventId: row.event_id, attemptId: row.attempt_id, event: row.event } : undefined;
   }
 
   async complete(eventId: string, attemptId: string): Promise<boolean> {
-    const result = await this.pool.query("UPDATE event_processing_job SET status = 'completed', lease_until = NULL, updated_at = now() WHERE event_id = $1 AND status = 'running' AND attempt_id = $2", [eventId, attemptId]);
+    const result = await this.pool.query(`WITH completed AS (
+      UPDATE event_processing_job SET status = 'completed', lease_until = NULL, updated_at = now() WHERE event_id = $1 AND status = 'running' AND attempt_id = $2 RETURNING event_id
+    ) UPDATE event_processing_attempt SET status = 'completed', lease_until = NULL, finished_at = now()
+      FROM completed WHERE event_processing_attempt.event_id = completed.event_id AND attempt_id = $2`, [eventId, attemptId]);
     return Boolean(result.rowCount);
   }
 
   async renew(eventId: string, attemptId: string): Promise<boolean> {
-    const result = await this.pool.query(`UPDATE event_processing_job
+    const result = await this.pool.query(`WITH renewed AS (
+      UPDATE event_processing_job
       SET lease_until = now() + make_interval(secs => $3), updated_at = now()
-      WHERE event_id = $1 AND status = 'running' AND attempt_id = $2 RETURNING event_id`, [eventId, attemptId, this.leaseSeconds]);
+      WHERE event_id = $1 AND status = 'running' AND attempt_id = $2 RETURNING event_id, lease_until
+    ) UPDATE event_processing_attempt SET heartbeat_at = now(), lease_until = renewed.lease_until
+      FROM renewed WHERE event_processing_attempt.event_id = renewed.event_id AND attempt_id = $2 RETURNING event_processing_attempt.event_id`, [eventId, attemptId, this.leaseSeconds]);
+    return Boolean(result.rowCount);
+  }
+
+  async startAttempt(eventId: string, attemptId: string, workerId: string): Promise<boolean> {
+    const result = await this.pool.query("UPDATE event_processing_attempt SET status = 'running', worker_id = $3, started_at = COALESCE(started_at, now()), heartbeat_at = now() WHERE event_id = $1 AND attempt_id = $2 AND status IN ('claimed','running') RETURNING attempt_id", [eventId, attemptId, workerId]);
     return Boolean(result.rowCount);
   }
 
@@ -69,6 +96,10 @@ export class ProcessingStore {
         lease_until = NULL, attempt_id = NULL,
         retry_at = CASE WHEN owned.attempts >= $3 THEN retry_at ELSE now() + make_interval(secs => LEAST(($4::numeric / 1000) * power(2, owned.attempts - 1), 300)::double precision) END,
         updated_at = now() FROM owned WHERE job.event_id = owned.event_id RETURNING job.status, owned.event, owned.attempts
+    ), attempt AS (
+      UPDATE event_processing_attempt SET status = CASE WHEN transitioned.status = 'failed' THEN 'failed' ELSE 'retrying' END,
+        lease_until = NULL, finished_at = now(), error = $5 FROM transitioned
+      WHERE event_processing_attempt.event_id = transitioned.event_id AND event_processing_attempt.attempt_id = $2
     ), archived AS (
       INSERT INTO event_processing_dlq (event_id, event, attempts, error) SELECT $1, event, attempts, $5 FROM transitioned WHERE status = 'failed'
       ON CONFLICT (event_id) DO NOTHING
@@ -78,15 +109,19 @@ export class ProcessingStore {
 
   /** A duplicate request joins the durable owner; it must not independently retry or produce another result. */
   async join(eventId: string, attemptId: string): Promise<boolean> {
-    const result = await this.pool.query("UPDATE event_processing_job SET status = 'completed', lease_until = NULL, updated_at = now() WHERE event_id = $1 AND status = 'running' AND attempt_id = $2", [eventId, attemptId]);
+    const result = await this.pool.query(`WITH completed AS (
+      UPDATE event_processing_job SET status = 'completed', lease_until = NULL, updated_at = now() WHERE event_id = $1 AND status = 'running' AND attempt_id = $2 RETURNING event_id
+    ) UPDATE event_processing_attempt SET status = 'joined', lease_until = NULL, finished_at = now()
+      FROM completed WHERE event_processing_attempt.event_id = completed.event_id AND attempt_id = $2`, [eventId, attemptId]);
     return Boolean(result.rowCount);
   }
 
   /** Removes only derived operational ledgers; immutable event_store and idempotency claims remain intact. */
   async pruneOperationalLedgers(retentionDays: number): Promise<PrunedOperationalRows> {
     const jobs = await this.pool.query("DELETE FROM event_processing_job WHERE status IN ('completed', 'failed') AND updated_at < now() - make_interval(days => $1)", [retentionDays]);
+    const attempts = await this.pool.query("DELETE FROM event_processing_attempt WHERE status NOT IN ('claimed', 'running') AND finished_at < now() - make_interval(days => $1)", [retentionDays]);
     const outbox = await this.pool.query("DELETE FROM event_outbox WHERE status = 'published' AND published_at < now() - make_interval(days => $1)", [retentionDays]);
-    return { processingJobs: jobs.rowCount ?? 0, outbox: outbox.rowCount ?? 0 };
+    return { processingJobs: jobs.rowCount ?? 0, processingAttempts: attempts.rowCount ?? 0, outbox: outbox.rowCount ?? 0 };
   }
 
   async counts(): Promise<ProcessingCounts> {

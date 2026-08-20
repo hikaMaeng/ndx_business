@@ -795,7 +795,8 @@ server-issued field 발급 뒤 domain event로 변환한다.
 
 - 완료: scheduler 단독 dispatch, ingress notification wakeup, attempt token fencing,
   processing/execution lease heartbeat와 만료 회수, 지수 backoff·최대 시도·DLQ,
-  claim-path partial index, terminal/delivered operational-ledger retention.
+  claim-path partial index, 별도 `event_processing_attempt` worker/lease 이력, terminal/delivered
+  operational-ledger retention.
 - 완료: durable cursor의 subscription fingerprint·stream position/high-water vector,
   bounded replay page, cursor retention, 그리고 event-store 기반 projection checkpoint
   rebuild를 Phase 5/6 구현과 함께 실증했다.
