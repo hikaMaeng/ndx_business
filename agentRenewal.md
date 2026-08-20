@@ -828,6 +828,12 @@ server-issued field 발급 뒤 domain event로 변환한다.
 - worker 오류와 비정상 종료가 모두 controller에 보고된다.
 - retryable 오류가 backoff를 거쳐 재처리된다.
 
+진행 상태:
+
+- 완료: `agent_domain/server`가 ordered static handler registry를 export하고 worker bundle은
+  registry만 호출한다. fixed resident pool은 시작 시 `AGENT_MAX_THREADS`를 모두 예약하며,
+  handler abort와 worker exit를 controller failure로 전환한다.
+
 ### Phase 5 — CQRS와 outbox
 
 - session/run/turn/tool projection 구현

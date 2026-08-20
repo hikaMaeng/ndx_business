@@ -18,6 +18,7 @@ export function attachWebSocketTransport(server: Server, env: AgentEnv, queue: E
     let closed = false;
     let closing = false;
     let unsubscribe: () => void = () => undefined;
+    let mailboxDepth = 0;
     metrics.increment("websocketConnections");
     const closeSlowConsumer = (replay = false) => {
       if (closed || closing) return;
@@ -40,7 +41,10 @@ export function attachWebSocketTransport(server: Server, env: AgentEnv, queue: E
           done();
         }).catch(() => { socket.close(1011, "cursor persistence failed"); done(); });
       });
-    }, () => closeSlowConsumer());
+    }, () => closeSlowConsumer(), (nextDepth) => {
+      metrics.increment("websocketMailboxQueued", nextDepth - mailboxDepth);
+      mailboxDepth = nextDepth;
+    });
     socket.send(JSON.stringify({ type: "ready", channels: ["agent.requests", "agent.results"] } satisfies ChannelServerFrame));
     console.log(JSON.stringify({ event: "websocket.connected" }));
     socket.on("message", async (raw) => {
@@ -111,6 +115,7 @@ export function attachWebSocketTransport(server: Server, env: AgentEnv, queue: E
       closing = true;
       subscriptionGeneration += 1;
       unsubscribe();
+      mailbox.dispose();
       metrics.increment("websocketConnections", -1);
       console.log(JSON.stringify({ event: "websocket.disconnected" }));
     });

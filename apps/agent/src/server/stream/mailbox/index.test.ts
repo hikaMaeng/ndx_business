@@ -34,3 +34,14 @@ test("a blocked recipient is isolated from a recipient that can keep sending", (
   assert.deepEqual(fast, ["1", "2"]);
   releaseSlow?.();
 });
+
+test("reports queued depth and releases it when the connection closes", () => {
+  let done: (() => void) | undefined; const depths: number[] = [];
+  const mailbox = new ConnectionMailbox(2, (_value, next) => { done = next; }, () => undefined, (depth) => depths.push(depth));
+  mailbox.enqueue(event("result", "1"));
+  mailbox.enqueue(event("result", "2"));
+  mailbox.dispose();
+  assert.deepEqual(depths, [1, 2, 0]);
+  done?.();
+  assert.deepEqual(depths, [1, 2, 0]);
+});
