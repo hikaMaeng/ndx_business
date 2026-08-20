@@ -843,6 +843,8 @@ server-issued field 발급 뒤 domain event로 변환한다.
 
 ### Phase 6 — Channel egress
 
+- transaction join 수신자 계약: 같은 `transactionKey`의 서로 다른 `replyChannel`은
+  durable recipient로 등록하고, terminal event를 채널별로 정확히 한 번 fan-out
 - subscription registry 구현
 - channel subscriber reverse index 구현
 - per-connection mailbox 구현
@@ -856,6 +858,8 @@ server-issued field 발급 뒤 domain event로 변환한다.
 완료 조건:
 
 - client ID 직접 라우팅 없이 channel 기준으로 전달된다.
+- 같은 transactionKey에 합류한 각 replyChannel은 자신이 관측 가능한 경로에서
+  실제 실행 결과와 일치하는 terminal event를 정확히 하나 받는다.
 - 서로 다른 채널을 구독한 클라이언트가 서로의 이벤트를 받지 않는다.
 - 재접속 시 cursor 이후 이벤트를 수신한다.
 - replay와 live의 경계에 누락이 없고 per-stream sequence 순서가 보존된다.

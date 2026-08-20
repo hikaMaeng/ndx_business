@@ -6,5 +6,7 @@ is `sessionKey → runKey → turnKey → iterationKey → stepKey → toolCallK
 
 Consumers: `apps/agent` coordinator, PGMQ dispatcher, external-process adapter,
 and browser event client. Invariants: duplicate keys never repeat side effects;
-terminal states are monotonic; PGMQ is delivery only; PostgreSQL owns durable
-state and results; event payloads are validated at the boundary.
+terminal states are monotonic; a transaction registers one recipient for each
+distinct `replyChannel`, and each recipient observes exactly one matching
+terminal event; PGMQ is delivery only; PostgreSQL owns durable state and
+results; event payloads are validated at the boundary.
