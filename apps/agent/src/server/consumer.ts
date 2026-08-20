@@ -18,6 +18,7 @@ class ExecutionInProgressError extends Error {}
 const delay = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const resultEventId = (event: Pick<EventEnvelope, "transactionKey" | "replyChannel">): string => deterministicEventId(`result:${event.transactionKey}:${event.replyChannel ?? "agent.results"}`);
 function failureStatus(message: string): ExecutionStatus { return message.includes("timed out") || message.includes("timeout") ? "timed_out" : message.includes("aborted") ? "cancelled" : "failed"; }
+function isProcessingFailure(payload: ResultPayload): payload is ResultPayload & { error: { code: "processing_permanent_failure"; message: string } } { return payload.error?.code === "processing_permanent_failure"; }
 
 async function workerOutcome(pool: WorkerPool, event: EventEnvelope, signal?: AbortSignal): Promise<{ payload: ResultPayload; status: ExecutionStatus }> {
   try { return { payload: { ok: true, value: (await runWorker(pool, event, signal)).value }, status: "completed" }; }
@@ -80,7 +81,15 @@ export function startScheduler(input: { queueTransport: EventQueueTransport; dat
       await deliver(await input.eventStore.append(toResultDraft(request, conflict)));
       return;
     }
-    if (claim.kind === "duplicate") { if (claim.completed && claim.result) await publish(request, claim.result as ResultPayload); if (!claim.completed) throw new ExecutionInProgressError(`transaction ${request.transactionKey} is already running`); return; }
+    if (claim.kind === "duplicate") {
+      if (claim.completed && claim.result) {
+        const payload = claim.result as ResultPayload;
+        if (isProcessingFailure(payload)) await publishProcessingFailure(request, claim.requestEventId, payload.error.message);
+        else await publish(request, payload);
+      }
+      if (!claim.completed) throw new ExecutionInProgressError(`transaction ${request.transactionKey} is already running`);
+      return;
+    }
     input.metrics.increment("workerStarted"); input.metrics.increment("inFlight");
     let leaseLost = false; const controller = new AbortController();
     const heartbeatMs = Math.max(100, Math.floor(input.executionLeaseSeconds * 1000 / 3));

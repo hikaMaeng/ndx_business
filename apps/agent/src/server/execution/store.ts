@@ -2,14 +2,14 @@ import { createHash } from "node:crypto";
 import type { Pool } from "pg";
 import type { EventEnvelope } from "agent_domain/common";
 
-export type Claim = { kind: "claimed" } | { kind: "duplicate"; completed: boolean; result?: unknown } | { kind: "conflict"; reason: string };
+export type Claim = { kind: "claimed" } | { kind: "duplicate"; completed: boolean; result?: unknown; requestEventId: string } | { kind: "conflict"; reason: string };
 
 function payloadHash(event: EventEnvelope): string {
   return createHash("sha256").update(JSON.stringify({ action: event.action, payload: event.payload })).digest("hex");
 }
 
 function recipientEvent(event: EventEnvelope): EventEnvelope {
-  return event.replyChannel ? event : { ...event, replyChannel: "agent.results" };
+  return { ...(event.replyChannel ? event : { ...event, replyChannel: "agent.results" }), payload: {} };
 }
 
 async function registerRecipient(pool: Pool, event: EventEnvelope): Promise<void> {
@@ -54,8 +54,8 @@ export async function claimExecution(pool: Pool, event: EventEnvelope, attemptId
     [event.transactionKey, event.eventId, hash, attemptId, leaseSeconds],
   );
   if (inserted.rowCount) { await registerRecipient(pool, event); return { kind: "claimed" }; }
-  const existing = await pool.query<{ status: string; result: unknown; payload_hash: string | null; reclaimed: boolean }>(`WITH locked AS (
-      SELECT transaction_key, status, result, payload_hash FROM agent_execution WHERE transaction_key = $1 FOR UPDATE
+  const existing = await pool.query<{ status: string; result: unknown; payload_hash: string | null; request_event_id: string; reclaimed: boolean }>(`WITH locked AS (
+      SELECT transaction_key, request_event_id, status, result, payload_hash FROM agent_execution WHERE transaction_key = $1 FOR UPDATE
     ), recipient AS (
       INSERT INTO agent_execution_recipient (transaction_key, reply_channel, request_event)
       SELECT $1, $5, $6::jsonb FROM locked WHERE payload_hash = $3
@@ -63,14 +63,15 @@ export async function claimExecution(pool: Pool, event: EventEnvelope, attemptId
     ), reclaimed AS (
       UPDATE agent_execution SET attempt_id = $2, lease_until = now() + make_interval(secs => $4), heartbeat_at = now(), attempts = attempts + 1, updated_at = now()
       WHERE transaction_key = $1 AND status = 'running' AND lease_until < now()
+        AND (payload_hash IS NULL OR payload_hash = $3)
       RETURNING transaction_key
-    ) SELECT locked.status, locked.result, locked.payload_hash, EXISTS(SELECT 1 FROM reclaimed) AS reclaimed FROM locked`,
+    ) SELECT locked.status, locked.result, locked.payload_hash, locked.request_event_id, EXISTS(SELECT 1 FROM reclaimed) AS reclaimed FROM locked`,
   [event.transactionKey, attemptId, hash, leaseSeconds, recipientEvent(event).replyChannel, JSON.stringify(recipientEvent(event))]);
   const row = existing.rows[0];
   if (!row) return { kind: "conflict", reason: "transaction claim disappeared" };
   if (row.payload_hash && row.payload_hash !== hash) return { kind: "conflict", reason: "transactionKey reused with a different action or payload" };
   if (row.reclaimed) return { kind: "claimed" };
-  return { kind: "duplicate", completed: ["completed", "failed", "timed_out", "cancelled"].includes(row.status), result: row.result };
+  return { kind: "duplicate", completed: ["completed", "failed", "timed_out", "cancelled"].includes(row.status), result: row.result, requestEventId: row.request_event_id };
 }
 
 export async function executionRecipients(pool: Pool, transactionKey: string): Promise<EventEnvelope[]> {
