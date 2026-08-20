@@ -60,20 +60,23 @@ function publishSamples(): void { const samples = [["orders", "order.created", {
 
 model.subscribe(render); render();
 const cursorStorageKey = "agent.channel.cursor";
-let socket: WebSocket | undefined; let cursor = sessionStorage.getItem(cursorStorageKey) ?? undefined; let connectionGeneration = 0; let reconnectTimer: number | undefined;
+let socket: WebSocket | undefined; let cursor = sessionStorage.getItem(cursorStorageKey) ?? undefined; let connectionGeneration = 0; let reconnectTimer: number | undefined; let reconnectDelayMs = 500;
 function setCursor(value: string | undefined): void { cursor = value; if (value) sessionStorage.setItem(cursorStorageKey, value); else sessionStorage.removeItem(cursorStorageKey); }
-function connectStream(): void {
+function connectStream(reconnecting = false): void {
   const generation = ++connectionGeneration;
+  if (!reconnecting) reconnectDelayMs = 500;
   if (reconnectTimer) { window.clearTimeout(reconnectTimer); reconnectTimer = undefined; }
   socket?.close();
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
   socket = new WebSocket(`${protocol}//${location.host}/ws`);
-  socket.onopen = () => { if (generation !== connectionGeneration) return; model.setConnection("online"); socket?.send(JSON.stringify({ type: "subscribe", channels: model.getSnapshot().subscribedChannels, ...(cursor ? { cursor } : {}) })); };
+  socket.onopen = () => { if (generation !== connectionGeneration) return; reconnectDelayMs = 500; model.setConnection("online"); socket?.send(JSON.stringify({ type: "subscribe", channels: model.getSnapshot().subscribedChannels, ...(cursor ? { cursor } : {}) })); };
   socket.onerror = () => { if (generation === connectionGeneration) model.setConnection("offline"); };
   socket.onclose = () => {
     if (generation !== connectionGeneration) return;
     model.setConnection("offline");
-    reconnectTimer = window.setTimeout(() => { if (generation === connectionGeneration) connectStream(); }, 500);
+    const delayMs = reconnectDelayMs;
+    reconnectDelayMs = Math.min(reconnectDelayMs * 2, 5_000);
+    reconnectTimer = window.setTimeout(() => { if (generation === connectionGeneration) connectStream(true); }, delayMs);
   };
   socket.onmessage = (message) => {
     try {
