@@ -112,7 +112,7 @@ export class EventStore {
     return Object.fromEntries(result.rows.map((row) => [row.stream_id, String(row.sequence)]));
   }
 
-  async replayChannels(channels: string[], positions: Record<string, string>, highWater: Record<string, string>): Promise<EventEnvelope[]> {
+  async replayChannels(channels: string[], positions: Record<string, string>, highWater: Record<string, string>, limit: number): Promise<{ events: EventEnvelope[]; complete: boolean }> {
     const result = await this.pool.query<StoredEventRow>(`WITH bounds AS (
         SELECT high_water.key AS stream_id,
           COALESCE(($2::jsonb ->> high_water.key)::bigint, 0) AS position,
@@ -121,8 +121,8 @@ export class EventStore {
       )
       SELECT ${QUALIFIED_COLUMNS} FROM bounds JOIN event_store ON event_store.stream_id = bounds.stream_id
       WHERE channel = ANY($1::text[]) AND sequence > bounds.position AND sequence <= bounds.high_water
-      ORDER BY event_store.stream_id, event_store.sequence`, [channels, JSON.stringify(positions), JSON.stringify(highWater)]);
-    return result.rows.map(fromRow);
+      ORDER BY event_store.stream_id, event_store.sequence LIMIT $4`, [channels, JSON.stringify(positions), JSON.stringify(highWater), limit + 1]);
+    return { events: result.rows.slice(0, limit).map(fromRow), complete: result.rows.length <= limit };
   }
 
   async openChannelCursor(channels: string[], token?: string): Promise<{ token: string; positions: Record<string, string> }> {

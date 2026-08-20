@@ -81,11 +81,21 @@ test("append invokes its durable side effect on the same transaction client", as
 test("channel replay compares stream positions in PostgreSQL and cursor pruning has a retention bound", async () => {
   const queries: Array<{ sql: string; values: unknown[] | undefined }> = [];
   const store = new EventStore({ query: async (sql: string, values?: unknown[]) => { queries.push({ sql, values }); return { rowCount: 1, rows: [] }; } } as never);
-  await store.replayChannels(["orders"], { "session:one": "9007199254740992" }, { "session:one": "9007199254740994" });
+  await store.replayChannels(["orders"], { "session:one": "9007199254740992" }, { "session:one": "9007199254740994" }, 256);
   await store.pruneChannelCursors(7);
   assert.match(queries[0].sql, /jsonb_each_text\(\$3::jsonb\)/);
   assert.match(queries[0].sql, /event_store\.stream_id = bounds\.stream_id/);
-  assert.deepEqual(queries[0].values, [["orders"], JSON.stringify({ "session:one": "9007199254740992" }), JSON.stringify({ "session:one": "9007199254740994" })]);
+  assert.match(queries[0].sql, /LIMIT \$4/);
+  assert.deepEqual(queries[0].values, [["orders"], JSON.stringify({ "session:one": "9007199254740992" }), JSON.stringify({ "session:one": "9007199254740994" }), 257]);
   assert.match(queries[1].sql, /event_subscription_cursor/);
   assert.deepEqual(queries[1].values, [7]);
+});
+
+test("channel replay reports a bounded page before live routing is allowed", async () => {
+  const rows = Array.from({ length: 257 }, (_, index) => row({ event_id: `event-${index}`, sequence: index + 1 }));
+  const store = new EventStore({ query: async () => ({ rowCount: rows.length, rows }) } as never);
+  const page = await store.replayChannels(["agent.requests"], {}, { "session:one": "257" }, 256);
+  assert.equal(page.events.length, 256);
+  assert.equal(page.complete, false);
+  assert.equal(page.events.at(-1)?.sequence, "256");
 });

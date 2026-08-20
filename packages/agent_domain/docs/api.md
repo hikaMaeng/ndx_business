@@ -18,5 +18,11 @@ stable UUID-shaped identity for an outcome that may be derived more than once.
 `streamIdOf` is the single stream-identity rule: `session:<sessionId>` when a
 session exists, otherwise `channel:<channel>`.
 
+`protocol/channel` has the browser subscription frames. `subscribed` carries
+`replayComplete`; a false value means the server sent one bounded replay page.
+After all page events have durably advanced the cursor it emits `replay` with
+that same opaque cursor. The client must subscribe again until the frame says
+`replayComplete: true`; only a complete replay joins live routing.
+
 `protocol/stream` holds the browser stream model. `protocol/vibe` remains an
 alias over the legacy `AgentEvent` contract.

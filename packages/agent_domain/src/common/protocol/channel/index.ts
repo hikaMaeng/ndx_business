@@ -7,7 +7,8 @@ export type ChannelClientFrame =
 
 export type ChannelServerFrame =
   | { type: "ready"; channels: string[] }
-  | { type: "subscribed"; channels: string[]; cursor?: string }
+  | { type: "subscribed"; channels: string[]; cursor?: string; replayComplete: boolean }
+  | { type: "replay"; cursor: string; replayComplete: boolean }
   | { type: "event"; event: EventEnvelope; cursor: string };
 
 export function parseChannelCursor(token: string | undefined): string | undefined {
@@ -27,7 +28,9 @@ export function parseChannelClientFrame(value: unknown): ChannelClientFrame | un
 export function parseChannelServerFrame(value: unknown): ChannelServerFrame | undefined {
   if (!value || typeof value !== "object") return undefined;
   const frame = value as Record<string, unknown>;
-  if ((frame.type === "ready" || frame.type === "subscribed") && Array.isArray(frame.channels) && frame.channels.every((channel) => typeof channel === "string") && (frame.cursor === undefined || typeof frame.cursor === "string")) return { type: frame.type, channels: frame.channels, ...(typeof frame.cursor === "string" ? { cursor: frame.cursor } : {}) };
+  if (frame.type === "ready" && Array.isArray(frame.channels) && frame.channels.every((channel) => typeof channel === "string")) return { type: "ready", channels: frame.channels };
+  if (frame.type === "subscribed" && Array.isArray(frame.channels) && frame.channels.every((channel) => typeof channel === "string") && typeof frame.replayComplete === "boolean" && (frame.cursor === undefined || typeof frame.cursor === "string")) return { type: "subscribed", channels: frame.channels, replayComplete: frame.replayComplete, ...(typeof frame.cursor === "string" ? { cursor: frame.cursor } : {}) };
+  if (frame.type === "replay" && typeof frame.cursor === "string" && typeof frame.replayComplete === "boolean") return { type: "replay", cursor: frame.cursor, replayComplete: frame.replayComplete };
   if (frame.type !== "event" || typeof frame.cursor !== "string" || !frame.event || typeof frame.event !== "object") return undefined;
   const event = frame.event as Record<string, unknown>;
   if (typeof event.eventId !== "string" || typeof event.streamId !== "string" || typeof event.sequence !== "string" || typeof event.channel !== "string" || typeof event.transactionKey !== "string" || typeof event.action !== "string" || typeof event.correlationId !== "string" || typeof event.createdAt !== "string" || event.eventVersion !== 1 || !event.payload || typeof event.payload !== "object" || Array.isArray(event.payload)) return undefined;

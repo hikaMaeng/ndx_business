@@ -13,3 +13,14 @@ test("a full mailbox drops progress but closes only its slow connection for term
   assert.deepEqual(sent, ["1"]); assert.equal(closed, 1);
   done?.();
 });
+
+test("idle notification waits for the cursor-owning send to finish", () => {
+  let done: (() => void) | undefined; let idle = 0;
+  const mailbox = new ConnectionMailbox(2, (_value, next) => { done = next; }, () => undefined);
+  mailbox.enqueue(event("command", "1"));
+  mailbox.onIdle(() => { idle += 1; });
+  assert.equal(idle, 0);
+  done?.();
+  assert.equal(idle, 1);
+  assert.equal(mailbox.isIdle(), true);
+});

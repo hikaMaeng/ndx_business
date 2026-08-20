@@ -18,3 +18,9 @@ test("channel egress frames require every canonical envelope field", () => {
   assert.equal(parseChannelServerFrame({ type: "event", cursor: "716c013a-bb36-4b1e-a99f-d59af19e27f3", event: { ...event, source: "other" } }), undefined);
   assert.equal(parseChannelServerFrame({ type: "event", cursor: "716c013a-bb36-4b1e-a99f-d59af19e27f3", event: { ...event, correlationId: undefined } }), undefined);
 });
+
+test("subscription acknowledgement declares whether replay has more pages", () => {
+  assert.equal(parseChannelServerFrame({ type: "subscribed", channels: ["orders"], cursor: "716c013a-bb36-4b1e-a99f-d59af19e27f3", replayComplete: false })?.type, "subscribed");
+  assert.equal(parseChannelServerFrame({ type: "subscribed", channels: ["orders"], replayComplete: "false" }), undefined);
+  assert.equal(parseChannelServerFrame({ type: "replay", cursor: "716c013a-bb36-4b1e-a99f-d59af19e27f3", replayComplete: true })?.type, "replay");
+});

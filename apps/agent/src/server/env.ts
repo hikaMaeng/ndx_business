@@ -25,6 +25,7 @@ export interface AgentEnv {
   outboxMaxAttempts: number;
   outboxRetryBaseMs: number;
   websocketMailboxMax: number;
+  websocketReplayMax: number;
   websocketBufferedBytes: number;
 }
 
@@ -65,6 +66,7 @@ export function readEnv(source = process.env): AgentEnv {
     outboxMaxAttempts: positive(source, "AGENT_OUTBOX_MAX_ATTEMPTS", 5),
     outboxRetryBaseMs: positive(source, "AGENT_OUTBOX_RETRY_BASE_MS", 1_000),
     websocketMailboxMax: positive(source, "AGENT_WEBSOCKET_MAILBOX_MAX", 256),
+    websocketReplayMax: positive(source, "AGENT_WEBSOCKET_REPLAY_MAX", 256),
     websocketBufferedBytes: positive(source, "AGENT_WEBSOCKET_BUFFERED_BYTES", 1_048_576),
   };
 }

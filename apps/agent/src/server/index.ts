@@ -75,7 +75,7 @@ const scheduler = startScheduler({ database, pool, eventStore, outboxStore, proc
 const outbox = startOutboxDispatcher({ outbox: outboxStore, queue: pgmq, resultQueue: env.resultQueue, hub, metrics, idleMs: env.schedulerIdleMs, retryMs: env.outboxRetryBaseMs, maxAttempts: env.outboxMaxAttempts, lanes: env.outboxDispatchers });
 const projections = startProjectionRunners({ store: projectionStore, metrics, waitForWork: (projection) => projectionNotifier.wait(projection, 30_000) });
 const server = createApp(env, pgmq, hub, metrics).listen(env.port, () => console.log(JSON.stringify({ event: "agent.listening", port: env.port, cpuCount: env.cpuCount, minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, metricsEndpoint: env.metricsToken ? "enabled" : "disabled" })));
-const websocket = attachWebSocketTransport(server, env, pgmq, hub, eventStore);
+const websocket = attachWebSocketTransport(server, env, pgmq, hub, eventStore, metrics);
 
 async function shutdown(): Promise<void> {
   ingress.stop();
