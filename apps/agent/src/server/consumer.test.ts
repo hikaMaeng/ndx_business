@@ -12,7 +12,7 @@ test("ingress persists and hands off without awaiting worker completion", async 
     queueTransport: { read: async () => ++reads === 1 ? [{ id: "message-1", event, headers: null }] : await new Promise<never>(() => undefined), delete: async (_q: string, id: string) => { deleted.push(id); }, send: async () => "", extendVisibility: async () => undefined, check: async () => undefined },
     eventStore: { append: async (draft: Record<string, unknown>) => ({ ...draft, sequence: "1" }) } as never,
     processingStore: { enqueue: async (value: typeof event) => { jobs.push(value.eventId); } } as never,
-    metrics, notifyScheduler: () => undefined, queue: "agent_requests", visibilityTimeoutSeconds: 1, pollSeconds: 1, batchSize: 1, maxConcurrentHandoffs: 1,
+    metrics, notifyScheduler: () => undefined, publishLive: () => undefined, queue: "agent_requests", visibilityTimeoutSeconds: 1, pollSeconds: 1, batchSize: 1, maxConcurrentHandoffs: 1,
   });
   await new Promise((resolve) => setTimeout(resolve, 20)); ingress.stop();
   assert.deepEqual(jobs, ["event-1"]); assert.deepEqual(deleted, ["message-1"]);

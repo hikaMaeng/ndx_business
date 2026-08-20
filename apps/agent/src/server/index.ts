@@ -59,10 +59,10 @@ const recoveryTimer = setInterval(() => { void recoverExpiredExecutions(database
 const pool = createWorkerPool({ minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, maxQueue: env.maxQueue });
 const hub = new EventStreamHub();
 const schedulerNotifier = createSchedulerNotifier();
-const ingress = startIngressConsumer({ queueTransport: ingressPgmq, eventStore, processingStore, metrics, notifyScheduler: () => schedulerNotifier.notify(), queue: env.queue, visibilityTimeoutSeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, batchSize: env.pollBatchSize, maxConcurrentHandoffs: env.ingressConsumers });
+const ingress = startIngressConsumer({ queueTransport: ingressPgmq, eventStore, processingStore, metrics, notifyScheduler: () => schedulerNotifier.notify(), publishLive: (event) => hub.publish(event), queue: env.queue, visibilityTimeoutSeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, batchSize: env.pollBatchSize, maxConcurrentHandoffs: env.ingressConsumers });
 const scheduler = startScheduler({ queueTransport: pgmq, database, pool, hub, eventStore, deliveryStore, processingStore, metrics, resultQueue: env.resultQueue, schedulerIdleMs: env.schedulerIdleMs, executionLeaseSeconds: env.visibilityTimeoutSeconds, processingMaxAttempts: env.processingMaxAttempts, processingRetryBaseMs: env.processingRetryBaseMs, waitForWork: () => schedulerNotifier.wait(env.schedulerIdleMs), maxConcurrentDispatches: env.maxWorkerThreads });
 const server = createApp(env, pgmq, hub, metrics).listen(env.port, () => console.log(JSON.stringify({ event: "agent.listening", port: env.port, cpuCount: env.cpuCount, minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, metricsEndpoint: env.metricsToken ? "enabled" : "disabled" })));
-const websocket = attachWebSocketTransport(server, env, pgmq, hub);
+const websocket = attachWebSocketTransport(server, env, pgmq, hub, eventStore);
 
 async function shutdown(): Promise<void> {
   ingress.stop();

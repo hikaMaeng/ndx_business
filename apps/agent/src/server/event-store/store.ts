@@ -94,6 +94,21 @@ export class EventStore {
     finally { client.release(); }
   }
 
+  async channelHighWater(channels: string[]): Promise<Record<string, string>> {
+    const result = await this.pool.query<{ stream_id: string; sequence: string | number }>(`SELECT stream_id, max(sequence)::text AS sequence
+      FROM event_store WHERE channel = ANY($1::text[]) GROUP BY stream_id`, [channels]);
+    return Object.fromEntries(result.rows.map((row) => [row.stream_id, String(row.sequence)]));
+  }
+
+  async replayChannels(channels: string[], positions: Record<string, string>, highWater: Record<string, string>): Promise<EventEnvelope[]> {
+    const result = await this.pool.query<StoredEventRow>(`SELECT ${COLUMNS} FROM event_store
+      WHERE channel = ANY($1::text[]) ORDER BY stream_id, sequence`, [channels]);
+    return result.rows.filter((row) => {
+      const sequence = BigInt(row.sequence);
+      return sequence > BigInt(positions[row.stream_id] ?? "0") && sequence <= BigInt(highWater[row.stream_id] ?? "0");
+    }).map(fromRow);
+  }
+
   private record(startedAt: number): void {
     this.metrics?.increment("appendTotal");
     this.metrics?.increment("appendLatencyMsTotal", Date.now() - startedAt);

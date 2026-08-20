@@ -1,37 +1,45 @@
 import type { Server } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
-import { createRequestEvent } from "agent_domain/common";
+import { createRequestEvent, encodeChannelCursor, parseChannelClientFrame, parseChannelCursor, type ChannelServerFrame } from "agent_domain/common";
 import type { AgentEnv } from "../env.js";
 import type { EventQueueTransport } from "../queue/transport.js";
 import { EventStreamHub } from "../stream/hub.js";
+import type { EventStore } from "../event-store/store.js";
 
-type ClientFrame =
-  | { type: "subscribe"; channels: string[] }
-  | { type: "event"; action: string; payload?: Record<string, unknown>; transactionKey?: string; channel?: string; replyChannel?: string; source?: string };
-
-export function attachWebSocketTransport(server: Server, env: AgentEnv, queue: EventQueueTransport, hub: EventStreamHub): WebSocketServer {
+export function attachWebSocketTransport(server: Server, env: AgentEnv, queue: EventQueueTransport, hub: EventStreamHub, eventStore: EventStore): WebSocketServer {
   const websocket = new WebSocketServer({ server, path: "/ws" });
   websocket.on("connection", (socket) => {
     let unsubscribe = hub.subscribe(["agent.requests", "agent.results"], (event) => {
-      if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: "event", event }));
+      if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: "event", event } satisfies ChannelServerFrame));
     });
-    socket.send(JSON.stringify({ type: "ready", channels: ["agent.requests", "agent.results"] }));
+    socket.send(JSON.stringify({ type: "ready", channels: ["agent.requests", "agent.results"] } satisfies ChannelServerFrame));
     console.log(JSON.stringify({ event: "websocket.connected" }));
-    socket.on("message", (raw) => {
-      let frame: ClientFrame;
-      try { frame = JSON.parse(String(raw)) as ClientFrame; } catch { return; }
+    socket.on("message", async (raw) => {
+      let frame;
+      try { frame = parseChannelClientFrame(JSON.parse(String(raw))); } catch { return; }
+      if (!frame) return;
       if (frame.type === "subscribe") {
         unsubscribe();
         const channels = frame.channels.filter((channel) => channel.length > 0).slice(0, 32);
-        unsubscribe = hub.subscribe(channels, (event) => { if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: "event", event })); });
-        socket.send(JSON.stringify({ type: "subscribed", channels }));
+        const positions = parseChannelCursor(frame.cursor, channels);
+        if (!positions) { socket.close(1008, "invalid channel cursor"); return; }
+        const live: import("agent_domain/common").EventEnvelope[] = [];
+        let replaying = true;
+        const highWater = await eventStore.channelHighWater(channels);
+        const send = (event: import("agent_domain/common").EventEnvelope) => { if (socket.readyState === socket.OPEN) socket.send(JSON.stringify({ type: "event", event } satisfies ChannelServerFrame)); };
+        unsubscribe = hub.subscribe(channels, (event) => { if (replaying) live.push(event); else send(event); });
+        const replay = await eventStore.replayChannels(channels, positions, highWater);
+        replay.forEach(send);
+        live.filter((event) => BigInt(event.sequence) > BigInt(highWater[event.streamId] ?? "0")).sort((left, right) => left.streamId.localeCompare(right.streamId) || Number(BigInt(left.sequence) - BigInt(right.sequence))).forEach(send);
+        const cursor = encodeChannelCursor(channels, { ...positions, ...highWater });
+        replaying = false;
+        socket.send(JSON.stringify({ type: "subscribed", channels, cursor } satisfies ChannelServerFrame));
         return;
       }
-      if (frame.type !== "event" || !frame.action) return;
-      const event = createRequestEvent({ action: frame.action, payload: frame.payload ?? {}, transactionKey: frame.transactionKey, channel: frame.channel ?? "agent.requests", source: frame.source ?? "websocket", replyChannel: frame.replyChannel ?? "agent.results" });
+      if (frame.type !== "event") return;
+      const event = createRequestEvent({ action: frame.action, payload: frame.payload, transactionKey: frame.transactionKey, channel: frame.channel, source: "websocket", replyChannel: frame.replyChannel });
       void queue.send(env.queue, event).then(async (messageId) => {
         console.log(JSON.stringify({ event: "event.enqueued", transport: "websocket", action: event.action, eventId: event.eventId, transactionKey: event.transactionKey, messageId }));
-        hub.publish(event);
       }).catch((error) => console.error(JSON.stringify({ event: "websocket.enqueue.failed", action: event.action, transactionKey: event.transactionKey, error: error instanceof Error ? error.message : String(error) })));
     });
     socket.on("close", () => { unsubscribe(); console.log(JSON.stringify({ event: "websocket.disconnected" })); });

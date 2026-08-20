@@ -26,7 +26,7 @@ async function workerOutcome(pool: WorkerPool, event: EventEnvelope, signal?: Ab
 }
 
 /** Thread 1: PGMQ handoff only. It never awaits a worker or result delivery. */
-export function startIngressConsumer(input: { queueTransport: EventQueueTransport; eventStore: EventStore; processingStore: ProcessingStore; metrics: MetricsRegistry; notifyScheduler: () => void; queue: string; visibilityTimeoutSeconds: number; pollSeconds: number; batchSize: number; maxConcurrentHandoffs: number }): Loop {
+export function startIngressConsumer(input: { queueTransport: EventQueueTransport; eventStore: EventStore; processingStore: ProcessingStore; metrics: MetricsRegistry; notifyScheduler: () => void; publishLive: (event: EventEnvelope) => void; queue: string; visibilityTimeoutSeconds: number; pollSeconds: number; batchSize: number; maxConcurrentHandoffs: number }): Loop {
   let stopped = false;
   const handoffLane = async (): Promise<void> => { while (!stopped) {
     try {
@@ -36,6 +36,7 @@ export function startIngressConsumer(input: { queueTransport: EventQueueTranspor
         input.metrics.increment("ingressHandoffActive");
         const persisted = await input.eventStore.append(toEventDraft(message.event));
         await input.processingStore.enqueue(persisted);
+        input.publishLive(persisted);
         await input.queueTransport.delete(input.queue, message.id);
         input.notifyScheduler();
         input.metrics.increment("queueDeletes");

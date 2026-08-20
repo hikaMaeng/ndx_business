@@ -26,7 +26,6 @@ export function createApp(env: AgentEnv, queue: EventQueueTransport, hub: EventS
       const messageId = await queue.send(env.queue, event);
       metrics.increment("ingressAccepted");
       console.log(JSON.stringify({ event: "event.enqueued", action: event.action, eventId: event.eventId, transactionKey: event.transactionKey, channel: event.channel, replyChannel: event.replyChannel, messageId }));
-      hub.publish(event);
       return response.status(202).json({ accepted: true, messageId, eventId: event.eventId, transactionKey: event.transactionKey });
     } catch (error) { return response.status(503).json({ error: error instanceof Error ? error.message : "Event enqueue failed" }); }
   });

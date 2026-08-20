@@ -1,6 +1,6 @@
-import type { AgentEvent, EventEnvelope } from "agent_domain/common";
+import type { EventEnvelope } from "agent_domain/common";
 
-export type StreamEvent = AgentEvent | EventEnvelope;
+export type StreamEvent = EventEnvelope;
 
 interface Subscriber {
   channels: Set<string>;
