@@ -61,12 +61,12 @@ export async function claimExecution(pool: Pool, event: EventEnvelope, attemptId
       SELECT $1, $5, $6::jsonb FROM locked WHERE payload_hash = $3
       ON CONFLICT (transaction_key, reply_channel) DO NOTHING
     ), reclaimed AS (
-      UPDATE agent_execution SET attempt_id = $2, lease_until = now() + make_interval(secs => $4), heartbeat_at = now(), attempts = attempts + 1, updated_at = now()
+      UPDATE agent_execution SET request_event_id = $7, attempt_id = $2, lease_until = now() + make_interval(secs => $4), heartbeat_at = now(), attempts = attempts + 1, updated_at = now()
       WHERE transaction_key = $1 AND status = 'running' AND lease_until < now()
         AND (payload_hash IS NULL OR payload_hash = $3)
       RETURNING transaction_key
     ) SELECT locked.status, locked.result, locked.payload_hash, locked.request_event_id, EXISTS(SELECT 1 FROM reclaimed) AS reclaimed FROM locked`,
-  [event.transactionKey, attemptId, hash, leaseSeconds, recipientEvent(event).replyChannel, JSON.stringify(recipientEvent(event))]);
+  [event.transactionKey, attemptId, hash, leaseSeconds, recipientEvent(event).replyChannel, JSON.stringify(recipientEvent(event)), event.eventId]);
   const row = existing.rows[0];
   if (!row) return { kind: "conflict", reason: "transaction claim disappeared" };
   if (row.payload_hash && row.payload_hash !== hash) return { kind: "conflict", reason: "transactionKey reused with a different action or payload" };
