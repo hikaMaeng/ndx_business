@@ -50,3 +50,15 @@ export function toResultDraft(request: EventEnvelope, result: AgentEvent): Event
     payload: result.payload as Record<string, unknown>,
   });
 }
+
+/** Records a job-scoped permanent processing failure without occupying the transaction result identity. */
+export function toProcessingFailureDraft(request: EventEnvelope, eventId: string, message: string): EventDraft {
+  return createDerivedDraft(request, {
+    eventId,
+    action: `${request.action}.processing.failure`,
+    kind: "failure",
+    source: "scheduler",
+    channel: request.replyChannel ?? request.channel,
+    payload: { ok: false, error: { code: "processing_permanent_failure", message } },
+  });
+}

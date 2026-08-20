@@ -84,3 +84,18 @@ test("retry exhaustion persists a deterministic terminal failure and attempts de
   await new Promise((resolve) => setTimeout(resolve, 30)); scheduler.stop();
   assert.equal(appends, 2, "initial terminal result and permanent failure result both attempt canonical persistence");
 });
+
+test("an already-running transaction defers its duplicate job without consuming the retry budget", async () => {
+  let deferred: { eventId: string; attemptId: string; retryMs: number } | undefined; let retried = false; let claims = 0;
+  const scheduler = startScheduler({
+    queueTransport: { send: async () => "result", read: async () => [], delete: async () => undefined, extendVisibility: async () => undefined, check: async () => undefined },
+    database: { query: async (sql: string) => sql.startsWith("INSERT") || sql.startsWith("UPDATE agent_execution SET attempt_id") ? { rowCount: 0, rows: [] } : { rowCount: 1, rows: [{ status: "running", result: null, payload_hash: null }] } } as never,
+    pool: { run: async () => ({ value: "unused" }), destroy: async () => undefined }, hub: { publish: () => undefined } as never,
+    eventStore: { append: async (draft: Record<string, unknown>) => ({ ...draft, sequence: "1" }) } as never,
+    deliveryStore: { claim: async () => ({ kind: "claimed", attemptId: "delivery-1" }), complete: async () => true } as never,
+    processingStore: { claimNext: async () => ++claims === 1 ? { eventId: event.eventId, attemptId: "attempt-1", event } : undefined, complete: async () => true, renew: async () => true, retryLater: async () => { retried = true; return "retry"; }, defer: async (eventId: string, attemptId: string, retryMs: number) => { deferred = { eventId, attemptId, retryMs }; return true; } } as never,
+    metrics, resultQueue: "agent_results", schedulerIdleMs: 1, executionLeaseSeconds: 60, processingMaxAttempts: 1, processingRetryBaseMs: 250, waitForWork: async () => await new Promise<never>(() => undefined), maxConcurrentDispatches: 1,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30)); scheduler.stop();
+  assert.deepEqual(deferred, { eventId: "event-1", attemptId: "attempt-1", retryMs: 250 }); assert.equal(retried, false);
+});

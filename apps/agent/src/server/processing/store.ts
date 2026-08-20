@@ -76,6 +76,14 @@ export class ProcessingStore {
     return result.rows[0]?.status === "failed" ? "dead" : result.rows[0] ? "retry" : "lost";
   }
 
+  /** An already-running transaction belongs to another attempt, not this job's failure budget. */
+  async defer(eventId: string, attemptId: string, retryMs: number): Promise<boolean> {
+    const result = await this.pool.query(`UPDATE event_processing_job SET status = 'ready', attempts = GREATEST(attempts - 1, 0),
+      lease_until = NULL, attempt_id = NULL, retry_at = now() + make_interval(secs => ($3::numeric / 1000)::double precision), updated_at = now()
+      WHERE event_id = $1 AND status = 'running' AND attempt_id = $2`, [eventId, attemptId, retryMs]);
+    return Boolean(result.rowCount);
+  }
+
   /** Removes only derived operational ledgers; immutable event_store and idempotency claims remain intact. */
   async pruneOperationalLedgers(retentionDays: number): Promise<PrunedOperationalRows> {
     const jobs = await this.pool.query("DELETE FROM event_processing_job WHERE status IN ('completed', 'failed') AND updated_at < now() - make_interval(days => $1)", [retentionDays]);
