@@ -70,7 +70,7 @@ export function startScheduler(input: { queueTransport: EventQueueTransport; dat
       const job = await input.processingStore.claimNext(); if (!job) { await input.waitForWork(); continue; }
       input.metrics.increment("schedulerDispatchActive");
       try { await process(job.event, job.eventId, job.attemptId); if (!await input.processingStore.complete(job.eventId, job.attemptId)) throw new Error(`attempt ${job.attemptId} lost its lease`); }
-      catch (error) { input.metrics.increment("processingFailures"); const message = error instanceof Error ? error.message : String(error); const outcome = await input.processingStore.retryLater(job.eventId, job.attemptId, input.processingMaxAttempts, input.processingRetryBaseMs, message); console.error(JSON.stringify({ event: outcome === "dead" ? "scheduler.dlq" : "scheduler.retry", eventId: job.eventId, error: message })); }
+      catch (error) { input.metrics.increment("processingFailures"); const message = error instanceof Error ? error.message : String(error); const outcome = await input.processingStore.retryLater(job.eventId, job.attemptId, input.processingMaxAttempts, input.processingRetryBaseMs, message); if (outcome === "retry") input.metrics.increment("processingRetries"); if (outcome === "dead") input.metrics.increment("processingDlqTotal"); console.error(JSON.stringify({ event: outcome === "dead" ? "scheduler.dlq" : "scheduler.retry", eventId: job.eventId, error: message })); }
       finally { input.metrics.increment("schedulerDispatchActive", -1); }
     } catch (error) { input.metrics.increment("processingFailures"); console.error(JSON.stringify({ event: "scheduler.poll.failed", error: error instanceof Error ? error.message : String(error) })); await delay(input.schedulerIdleMs); }
   } };
