@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
 import { parentPort } from "node:worker_threads";
 import type { EventEnvelope } from "agent_domain/common";
+import { executeHandler } from "./handlers/index.js";
 
 const controllers = new Map<string, AbortController>();
 
@@ -28,8 +28,7 @@ async function execute(event: EventEnvelope, controller: AbortController): Promi
       if (signal.aborted) throw new Error("worker operation aborted");
       await delay(delayMs > 0 ? 10 : 0);
     }
-    if (event.action === "hash.sha256") return createHash("sha256").update(String(event.payload.input ?? "")).digest("hex");
-    return { acknowledgedAction: event.action, payload: event.payload, worker: "agent-worker" };
+    return executeHandler(event, signal);
   })();
   if (timeoutMs !== undefined) return withTimeout(operation, timeoutMs, controller);
   return operation;
