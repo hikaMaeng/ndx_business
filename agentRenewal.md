@@ -793,7 +793,7 @@ server-issued field 발급 뒤 domain event로 변환한다.
 
 진행 상태:
 
-- 완료: scheduler 단독 dispatch, ingress notification wakeup, attempt token fencing,
+- 완료: scheduler 단독 dispatch와 bounded worker-queue prefetch, ingress notification wakeup, attempt token fencing,
   processing/execution lease heartbeat와 만료 회수, 지수 backoff·최대 시도·DLQ,
   claim-path partial index, 별도 `event_processing_attempt` worker/lease 이력, terminal/delivered
   operational-ledger retention.
