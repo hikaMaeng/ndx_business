@@ -7,7 +7,7 @@ export interface SchedulerNotifier {
 export function createSchedulerNotifier(): SchedulerNotifier {
   let permits = 0; const waiters: Array<() => void> = [];
   return {
-    notify(): void { const waiter = waiters.shift(); if (waiter) waiter(); else permits += 1; },
+    notify(): void { const waiter = waiters.shift(); if (waiter) waiter(); else permits = 1; },
     wait(timeoutMs: number): Promise<void> {
       if (permits > 0) { permits -= 1; return Promise.resolve(); }
       return new Promise((resolve) => {

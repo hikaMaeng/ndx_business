@@ -45,7 +45,7 @@ export class ProcessingStore {
 
   async renew(eventId: string, attemptId: string): Promise<boolean> {
     const result = await this.pool.query(`UPDATE event_processing_job
-      SET lease_until = now() + make_interval(secs => $2), updated_at = now()
+      SET lease_until = now() + make_interval(secs => $3), updated_at = now()
       WHERE event_id = $1 AND status = 'running' AND attempt_id = $2 RETURNING event_id`, [eventId, attemptId, this.leaseSeconds]);
     return Boolean(result.rowCount);
   }

@@ -7,3 +7,11 @@ test("a handoff notification wakes an idle scheduler without waiting for the tim
   notifier.notify(); await waiting;
   assert.ok(performance.now() - started < 100);
 });
+
+test("bursty notifications retain one wakeup permit, not one empty claim per event", async () => {
+  const notifier = createSchedulerNotifier();
+  for (let index = 0; index < 100; index += 1) notifier.notify();
+  await notifier.wait(1);
+  const started = performance.now(); await notifier.wait(20);
+  assert.ok(performance.now() - started >= 15);
+});
