@@ -24,3 +24,13 @@ test("idle notification waits for the cursor-owning send to finish", () => {
   assert.equal(idle, 1);
   assert.equal(mailbox.isIdle(), true);
 });
+
+test("a blocked recipient is isolated from a recipient that can keep sending", () => {
+  let releaseSlow: (() => void) | undefined; let slowClosed = 0; const fast: string[] = [];
+  const slow = new ConnectionMailbox(1, (_value, next) => { releaseSlow = next; }, () => { slowClosed += 1; });
+  const healthy = new ConnectionMailbox(2, (value, next) => { fast.push(value.eventId); next(); }, () => undefined);
+  for (const value of [event("result", "1"), event("result", "2")]) { slow.enqueue(value); healthy.enqueue(value); }
+  assert.equal(slowClosed, 1);
+  assert.deepEqual(fast, ["1", "2"]);
+  releaseSlow?.();
+});

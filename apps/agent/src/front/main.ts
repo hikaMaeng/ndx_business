@@ -60,8 +60,19 @@ function publishSamples(): void { const samples = [["orders", "order.created", {
 
 model.subscribe(render); render();
 const cursorStorageKey = "agent.channel.cursor";
-let socket: WebSocket | undefined; let cursor = sessionStorage.getItem(cursorStorageKey) ?? undefined; let connectionGeneration = 0; let reconnectTimer: number | undefined; let reconnectDelayMs = 500;
-function setCursor(value: string | undefined): void { cursor = value; if (value) sessionStorage.setItem(cursorStorageKey, value); else sessionStorage.removeItem(cursorStorageKey); }
+type StoredCursor = { channels: string[]; cursor: string };
+function channelFingerprint(): string[] { return [...new Set(model.getSnapshot().subscribedChannels)].sort(); }
+function sameChannels(left: string[], right: string[]): boolean { return left.length === right.length && left.every((channel, index) => channel === right[index]); }
+function readCursor(): string | undefined {
+  try {
+    const stored = JSON.parse(sessionStorage.getItem(cursorStorageKey) ?? "") as Partial<StoredCursor>;
+    if (typeof stored.cursor === "string" && Array.isArray(stored.channels) && stored.channels.every((channel) => typeof channel === "string") && sameChannels(stored.channels, channelFingerprint())) return stored.cursor;
+  } catch { /* a legacy or malformed cursor cannot be safely resumed */ }
+  sessionStorage.removeItem(cursorStorageKey);
+  return undefined;
+}
+let socket: WebSocket | undefined; let cursor = readCursor(); let connectionGeneration = 0; let reconnectTimer: number | undefined; let reconnectDelayMs = 500;
+function setCursor(value: string | undefined): void { cursor = value; if (value) sessionStorage.setItem(cursorStorageKey, JSON.stringify({ channels: channelFingerprint(), cursor: value } satisfies StoredCursor)); else sessionStorage.removeItem(cursorStorageKey); }
 function connectStream(reconnecting = false): void {
   const generation = ++connectionGeneration;
   if (!reconnecting) reconnectDelayMs = 500;
