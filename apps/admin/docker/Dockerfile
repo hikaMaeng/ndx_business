@@ -1,10 +1,15 @@
 # Runtime-only Admin control-plane image. PostgreSQL, pgvector, and PGMQ are
 # image-owned runtime dependencies; the application bundle is built on host.
 FROM node:26-bookworm-slim AS node-runtime
-FROM pgvector/pgvector:pg18
+FROM pgvector/pgvector:pg18 AS vector-runtime
+# PGMQ's official PostgreSQL 18 image supplies the server extension binary.
+# pgvector files are copied in below because Admin owns both extensions.
+FROM ghcr.io/pgmq/pg18-pgmq:v1.10.0
 
 WORKDIR /app
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=vector-runtime /usr/lib/postgresql/18/lib/vector.so /usr/lib/postgresql/18/lib/vector.so
+COPY --from=vector-runtime /usr/share/postgresql/18/extension/vector* /usr/share/postgresql/18/extension/
 COPY --chown=postgres:postgres apps/admin/dist ./dist
 COPY apps/admin/docker/postgres/initdb/001-extensions.sql /docker-entrypoint-initdb.d/001-extensions.sql
 COPY apps/admin/docker/admin-entrypoint.sh /usr/local/bin/admin-entrypoint.sh
