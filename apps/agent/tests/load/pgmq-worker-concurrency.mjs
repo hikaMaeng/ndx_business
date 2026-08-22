@@ -6,7 +6,9 @@ const total = Number(process.env.AGENT_DELAY_TOTAL ?? 2_048);
 const workers = Number(process.env.AGENT_DELAY_WORKERS ?? 96);
 const delayMs = Number(process.env.AGENT_DELAY_MS ?? 5_000);
 const streams = Number(process.env.AGENT_DELAY_STREAMS ?? 512);
-const timeoutMs = Number(process.env.AGENT_DELAY_TIMEOUT_MS ?? 150_000);
+// Keep subscriptions alive long enough to distinguish an SLO miss from a
+// terminal-result loss. The SLO is still enforced separately below.
+const timeoutMs = Number(process.env.AGENT_DELAY_TIMEOUT_MS ?? 300_000);
 const overheadMs = Number(process.env.AGENT_DELAY_SLO_OVERHEAD_MS ?? 15_000);
 assert.ok(Number.isInteger(total) && total > 0);
 assert.ok(Number.isInteger(workers) && workers > 0);
