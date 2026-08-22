@@ -1,27 +1,33 @@
-# Runtime-only image. The project is built on the host; this copies the result.
-# Never add a build step here - see the docker-compose-module-design skill.
-FROM node:26-alpine
+# Runtime-only Admin control-plane image. PostgreSQL, pgvector, and PGMQ are
+# image-owned runtime dependencies; the application bundle is built on host.
+FROM node:26-bookworm-slim AS node-runtime
+FROM pgvector/pgvector:pg18
 
 WORKDIR /app
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+COPY --chown=postgres:postgres apps/admin/dist ./dist
+COPY apps/admin/docker/postgres/initdb/001-extensions.sql /docker-entrypoint-initdb.d/001-extensions.sql
+COPY apps/admin/docker/admin-entrypoint.sh /usr/local/bin/admin-entrypoint.sh
 
-# dist is a self-contained bundle, so the image's Node major is the runtime
-# contract on its own and owes nothing to the host toolchain version.
-COPY --chown=node:node apps/admin/dist ./dist
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libatomic1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && chmod 0755 /usr/local/bin/admin-entrypoint.sh \
+    && mkdir -p /app/data \
+    && chown -R postgres:postgres /app
 
-RUN mkdir -p /app/data && chown node:node /app/data
+ENV NODE_ENV=production \
+    PORT=18080 \
+    POSTGRES_DB=ndx_business \
+    POSTGRES_USER=postgres \
+    POSTGRES_PASSWORD=postgres \
+    PGDATA=/var/lib/postgresql/data
 
-ENV NODE_ENV=production
-ENV PORT=18080
-
-# The base image ships an unprivileged `node` user. Use it: nothing here needs
-# root, and a compromised process should not own the filesystem.
-USER node
-
+USER postgres
 EXPOSE 18080
+EXPOSE 5432
 
-# Self-reported health, so `docker compose ps` and depends_on conditions mean
-# something. Uses global fetch rather than adding curl to the image.
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:'+process.env.PORT+'/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=5 \
+  CMD bash -c "pg_isready -h 127.0.0.1 -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\" && node -e \"fetch('http://127.0.0.1:'+process.env.PORT+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""
 
-CMD ["node", "dist/server/index.js"]
+CMD ["/usr/local/bin/admin-entrypoint.sh"]

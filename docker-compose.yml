@@ -37,7 +37,7 @@ services:
       AGENT_ROLE: gateway
     depends_on:
       admin:
-        condition: service_started
+        condition: service_healthy
     ports:
       - "${AGENT_HOST_PORT:-18081}:18081"
     networks:
@@ -56,7 +56,7 @@ services:
       AGENT_ROLE: worker
     depends_on:
       admin:
-        condition: service_started
+        condition: service_healthy
     # Internal only: workers never accept client traffic.
     networks:
       - ndx-business_internal
@@ -74,7 +74,7 @@ services:
       AGENT_ROLE: router
     depends_on:
       admin:
-        condition: service_started
+        condition: service_healthy
     # Internal only: router fans results into Gateway-specific PGMQ queues.
     networks:
       - ndx-business_internal
