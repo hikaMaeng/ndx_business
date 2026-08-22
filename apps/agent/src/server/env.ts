@@ -16,6 +16,7 @@ export interface AgentEnv {
   minWorkerThreads: number;
   maxWorkerThreads: number;
   maxQueue: number;
+  routerConcurrency: number;
   databasePoolMax: number;
   metricsToken: string;
   websocketMailboxMax: number;
@@ -37,6 +38,7 @@ export function readEnv(source = process.env): AgentEnv {
   const minWorkerThreads = positive(source, "AGENT_MIN_THREADS", maxWorkerThreads);
   if (minWorkerThreads > maxWorkerThreads) throw new Error("AGENT_MIN_THREADS must not exceed AGENT_MAX_THREADS");
   const visibilityTimeoutSeconds = positive(source, "QUEUE_VISIBILITY_TIMEOUT_SECONDS", 60);
+  const databasePoolMax = positive(source, "AGENT_DATABASE_POOL_MAX", Math.min(48, Math.max(16, Math.ceil(maxWorkerThreads / 2))));
   return {
     role,
     port: positive(source, "PORT", 18081),
@@ -53,7 +55,8 @@ export function readEnv(source = process.env): AgentEnv {
     minWorkerThreads,
     maxWorkerThreads,
     maxQueue: positive(source, "AGENT_MAX_QUEUE", 64),
-    databasePoolMax: positive(source, "AGENT_DATABASE_POOL_MAX", Math.min(48, Math.max(16, Math.ceil(maxWorkerThreads / 2)))),
+    databasePoolMax,
+    routerConcurrency: positive(source, "AGENT_ROUTER_CONCURRENCY", Math.min(24, databasePoolMax)),
     metricsToken: source.AGENT_METRICS_TOKEN ?? "",
     websocketMailboxMax: positive(source, "AGENT_WEBSOCKET_MAILBOX_MAX", 256),
     websocketReplayMax: positive(source, "AGENT_WEBSOCKET_REPLAY_MAX", 256),

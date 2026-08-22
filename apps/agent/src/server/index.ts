@@ -16,7 +16,9 @@ import { createServer } from "node:http";
 
 const env = readEnv();
 const database = createDatabasePool(env.databaseUrl, env.databasePoolMax);
-const queueDatabase = createDatabasePool(env.databaseUrl, 16);
+// The router has many short, independent PGMQ sends. Give its bounded fan-out
+// enough queue connections without increasing worker long-poll pressure.
+const queueDatabase = createDatabasePool(env.databaseUrl, env.role === "router" ? env.routerConcurrency + 1 : 16);
 const queue = new PgmqClient(queueDatabase);
 const metrics = new MetricsRegistry();
 const eventStore = new EventStore(database, metrics);
@@ -50,7 +52,7 @@ if (env.role === "worker") {
   process.once("SIGTERM", () => { void shutdown().then(() => process.exit(0)); });
   process.once("SIGINT", () => { void shutdown().then(() => process.exit(0)); });
 } else if (env.role === "router") {
-  const router = startResultRouter({ queue, resultQueue: env.resultQueue, gatewayQueuePrefix: env.gatewayQueuePrefix, subscriptions, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds });
+  const router = startResultRouter({ queue, resultQueue: env.resultQueue, gatewayQueuePrefix: env.gatewayQueuePrefix, subscriptions, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, maxInFlight: env.routerConcurrency });
   const server = createServer((request, response) => { response.writeHead(request.url === "/health" ? 200 : 404); response.end(); }).listen(env.port);
   console.log(JSON.stringify({ event: "agent.router.started", resultQueue: env.resultQueue }));
   const shutdown = async (): Promise<void> => { router.stop(); server.close(); await router.done; clearInterval(metricsTimer); await queueDatabase.end(); await database.end(); };
