@@ -9,13 +9,36 @@ interface PgmqMessage<TEvent extends IngressEvent | EventEnvelope> {
 }
 
 export class PgmqClient implements EventQueueTransport {
+  private readonly pendingSends = new Map<string, Array<{ message: IngressEvent | EventEnvelope; resolve: (id: string) => void; reject: (error: unknown) => void }>>();
+  private readonly flushTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
   constructor(private readonly pool: Pool) {}
 
   async check(): Promise<void> { await this.pool.query("SELECT 1"); }
 
-  async send(queue: string, message: IngressEvent | EventEnvelope): Promise<string> {
-    const result = await this.pool.query<{ send: string | number }>("SELECT pgmq.send($1, $2::jsonb) AS send", [queue, JSON.stringify(message)]);
-    return String(result.rows[0].send);
+  send(queue: string, message: IngressEvent | EventEnvelope): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const batch = this.pendingSends.get(queue) ?? [];
+      batch.push({ message, resolve, reject });
+      this.pendingSends.set(queue, batch);
+      if (batch.length >= 128) void this.flush(queue);
+      else if (!this.flushTimers.has(queue)) this.flushTimers.set(queue, setTimeout(() => { void this.flush(queue); }, 2));
+    });
+  }
+
+  private async flush(queue: string): Promise<void> {
+    const timer = this.flushTimers.get(queue);
+    if (timer) clearTimeout(timer);
+    this.flushTimers.delete(queue);
+    const batch = this.pendingSends.get(queue);
+    if (!batch?.length) return;
+    this.pendingSends.delete(queue);
+    try {
+      const result = await this.pool.query<{ id: string | number }>("SELECT pgmq.send_batch($1::text, ARRAY(SELECT value FROM jsonb_array_elements($2::jsonb))) AS id", [queue, JSON.stringify(batch.map(({ message }) => message))]);
+      if (result.rows.length !== batch.length) throw new Error(`PGMQ send_batch returned ${result.rows.length} ids for ${batch.length} messages`);
+      batch.forEach((entry, index) => entry.resolve(String(result.rows[index].id)));
+    } catch (error) { batch.forEach((entry) => entry.reject(error)); }
+    if (this.pendingSends.has(queue)) void this.flush(queue);
   }
 
   async read(queue: string, options: { visibilityTimeoutSeconds: number; quantity: number; pollSeconds: number }): Promise<EventQueueMessage[]> {
