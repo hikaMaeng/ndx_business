@@ -14,3 +14,11 @@ test("an aborted handler fails before side effects", async () => {
   const controller = new AbortController(); controller.abort();
   await assert.rejects(executeHandler(event("hash.sha256", { input: "abc" }), controller.signal), /worker operation aborted/);
 });
+
+test("the benchmark delay handler honours its requested duration", async () => {
+  const signal = new AbortController();
+  const started = performance.now();
+  const value = await executeHandler({ action: "test.delay", payload: { simulateDelayMs: 10 } } as never, signal.signal);
+  assert.deepEqual(value, { delayedMs: 10 });
+  assert.ok(performance.now() - started >= 8);
+});
