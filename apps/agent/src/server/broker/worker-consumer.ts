@@ -13,7 +13,7 @@ function resultId(event: EventEnvelope): string { return deterministicEventId(`r
 function conflictId(event: EventEnvelope): string { return deterministicEventId(`conflict:${event.eventId}`); }
 
 /** A Worker server is only a PGMQ command consumer and PGMQ result producer. */
-export function startWorkerConsumer(input: { queue: EventQueueTransport; commandQueue: string; resultQueue: string; eventStore: EventStore; executions: ExecutionStore; pool: WorkerPool; metrics: MetricsRegistry; visibilitySeconds: number; pollSeconds: number; batchSize: number }): BrokerLoop {
+export function startWorkerConsumer(input: { queue: EventQueueTransport; commandQueue: string; resultQueue: string; eventStore: EventStore; executions: ExecutionStore; pool: WorkerPool; metrics: MetricsRegistry; visibilitySeconds: number; pollSeconds: number; batchSize: number; maxInFlight: number }): BrokerLoop {
   let stopped = false;
   const process = async (message: { id: string; event: IngressEvent }): Promise<void> => {
     const command = await input.eventStore.append(toEventDraft(message.event));
@@ -65,16 +65,26 @@ export function startWorkerConsumer(input: { queue: EventQueueTransport; command
     await input.queue.delete(input.commandQueue, message.id);
     input.metrics.increment("queueDeletes");
   };
+  const inFlight = new Set<Promise<void>>();
+  const schedule = (message: { id: string; event: IngressEvent }): void => {
+    let task: Promise<void>;
+    task = process(message).catch((error) => {
+      input.metrics.increment("processingFailures");
+      console.error(JSON.stringify({ event: "worker.command.retry", messageId: message.id, error: error instanceof Error ? error.message : String(error) }));
+    }).finally(() => inFlight.delete(task));
+    inFlight.add(task);
+  };
   const lane = async (): Promise<void> => { while (!stopped) {
     try {
       const messages = await input.queue.read(input.commandQueue, { visibilityTimeoutSeconds: input.visibilitySeconds, quantity: input.batchSize, pollSeconds: input.pollSeconds });
       input.metrics.increment("queueReads"); input.metrics.increment("queueMessages", messages.length);
-      await Promise.all(messages.map(async (message) => {
-        try { await process({ id: message.id, event: message.event as IngressEvent }); }
-        catch (error) { input.metrics.increment("processingFailures"); console.error(JSON.stringify({ event: "worker.command.retry", messageId: message.id, error: error instanceof Error ? error.message : String(error) })); }
-      }));
+      for (const message of messages) {
+        while (!stopped && inFlight.size >= input.maxInFlight) await Promise.race(inFlight);
+        if (stopped) break;
+        schedule({ id: message.id, event: message.event as IngressEvent });
+      }
     } catch (error) { console.error(JSON.stringify({ event: "worker.consumer.retry", error: error instanceof Error ? error.message : String(error) })); }
-  } };
+  } await Promise.allSettled(inFlight); };
   const done = lane();
   return { stop: () => { stopped = true; }, done };
 }

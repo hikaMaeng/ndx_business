@@ -14,7 +14,7 @@ test("worker consumes a PGMQ command, emits a result event, then acknowledges th
     commandQueue: "agent_commands", resultQueue: "agent_results", eventStore: store as never,
     executions: { claim: async () => ({ kind: "claimed", attemptId: "attempt-a" }), complete: async () => true, recipients: async () => [{ ...command, kind: "command", eventVersion: 1, streamId: "session:unknown:agent.requests", sequence: "1", correlationId: "tx-1", source: "client" }], renew: async () => true } as never,
     pool: { run: async () => ({ value: "digest", workerId: "worker-a" }) } as never,
-    metrics: { increment: () => undefined } as never, visibilitySeconds: 60, pollSeconds: 1, batchSize: 1,
+    metrics: { increment: () => undefined } as never, visibilitySeconds: 60, pollSeconds: 1, batchSize: 1, maxInFlight: 2,
   });
   await new Promise((resolve) => setTimeout(resolve, 15)); loop.stop();
   assert.equal(sent.length, 1); assert.equal(sent[0]?.channel, "orders"); assert.equal(sent[0]?.payload.ok, true);
@@ -28,7 +28,7 @@ test("a joined transaction acknowledges its duplicate command without repeating 
     commandQueue: "agent_commands", resultQueue: "agent_results", eventStore: { append: async (): Promise<EventEnvelope> => ({ ...command, kind: "command", eventVersion: 1, streamId: "session:unknown:agent.requests", sequence: "1", correlationId: "tx-1", source: "client" }) } as never,
     executions: { claim: async () => ({ kind: "joined", completed: false }), complete: async () => true, recipients: async () => [], renew: async () => true } as never,
     pool: { run: async () => { runs += 1; return { value: "unexpected", workerId: "worker-a" }; } } as never,
-    metrics: { increment: () => undefined } as never, visibilitySeconds: 60, pollSeconds: 1, batchSize: 1,
+    metrics: { increment: () => undefined } as never, visibilitySeconds: 60, pollSeconds: 1, batchSize: 1, maxInFlight: 2,
   });
   await new Promise((resolve) => setTimeout(resolve, 15)); loop.stop();
   assert.equal(runs, 0);

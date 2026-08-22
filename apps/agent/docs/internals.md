@@ -11,3 +11,5 @@
 ## Broker topology
 
 `src/server/broker/worker-consumer.ts#startWorkerConsumer` consumes `AGENT_QUEUE` and publishes a derived terminal event to `AGENT_RESULT_QUEUE`. `src/server/broker/result-router.ts#startResultRouter` reads that shared result queue, queries `agent_gateway_subscription`, and writes one copy to each live Gateway queue. `src/server/broker/gateway-delivery.ts#startGatewayDelivery` reads only one Gateway queue and calls the local `EventStreamHub`.
+
+The Worker consumer bounds local durable work at `AGENT_MAX_THREADS + AGENT_MAX_QUEUE`, but it does not wait for an entire PGMQ read batch to finish. When one Worker Thread completes, the next already-read command can enter the pool immediately; this preserves pool saturation for long-running actions.

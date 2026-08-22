@@ -43,7 +43,7 @@ const metricsTimer = setInterval(refreshMetrics, 1000);
 
 if (env.role === "worker") {
   const pool = createWorkerPool({ minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, maxQueue: env.maxQueue });
-  const consumer = startWorkerConsumer({ queue, commandQueue: env.queue, resultQueue: env.resultQueue, eventStore, executions, pool, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, batchSize: env.pollBatchSize });
+  const consumer = startWorkerConsumer({ queue, commandQueue: env.queue, resultQueue: env.resultQueue, eventStore, executions, pool, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, batchSize: env.pollBatchSize, maxInFlight: env.maxWorkerThreads + env.maxQueue });
   const server = createServer((request, response) => { response.writeHead(request.url === "/health" ? 200 : 404); response.end(); }).listen(env.port);
   console.log(JSON.stringify({ event: "agent.worker.started", commandQueue: env.queue, resultQueue: env.resultQueue }));
   const shutdown = async (): Promise<void> => { consumer.stop(); server.close(); await consumer.done; await pool.destroy(); clearInterval(metricsTimer); await queueDatabase.end(); await database.end(); };
