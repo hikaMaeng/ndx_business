@@ -1,12 +1,5 @@
 import type { WorkerActionHandler } from "./contract.js";
 
-function wait(milliseconds: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, milliseconds);
-    signal.addEventListener("abort", () => { clearTimeout(timer); reject(new Error("worker operation aborted")); }, { once: true });
-  });
-}
-
 /** Benchmark-only action: makes worker-capacity measurements comparable and repeatable. */
 export const testDelayHandler: WorkerActionHandler = {
   name: "test.delay",
@@ -18,3 +11,9 @@ export const testDelayHandler: WorkerActionHandler = {
     return { delayedMs: delayMs };
   },
 };
+function wait(milliseconds: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, milliseconds);
+    signal.addEventListener("abort", () => { clearTimeout(timer); reject(new Error("worker operation aborted")); }, { once: true });
+  });
+}

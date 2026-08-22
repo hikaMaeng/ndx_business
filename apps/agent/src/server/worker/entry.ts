@@ -27,7 +27,9 @@ async function execute(event: EventEnvelope, controller: AbortController): Promi
   const payload = event.payload as Record<string, unknown>;
   const delayMs = typeof payload.simulateDelayMs === "number" ? payload.simulateDelayMs : 0;
   const timeoutMs = typeof payload.timeoutMs === "number" ? payload.timeoutMs : undefined;
-  const operation = delay(delayMs, signal).then(() => executeHandler(event, signal));
+  // The benchmark handler owns its delay. Other handlers keep the existing
+  // payload-driven simulation delay used by timeout and failure tests.
+  const operation = event.action === "test.delay" ? executeHandler(event, signal) : delay(delayMs, signal).then(() => executeHandler(event, signal));
   if (timeoutMs !== undefined) return withTimeout(operation, timeoutMs, controller);
   return operation;
 }
