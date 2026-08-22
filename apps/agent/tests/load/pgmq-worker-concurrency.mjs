@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { Agent, request } from "node:http";
 import WebSocket from "ws";
 
 const baseUrl = process.env.AGENT_URL ?? "http://127.0.0.1:18081";
@@ -19,6 +20,19 @@ const prefix = `pgmq-load-${Date.now()}`;
 const expected = new Set(Array.from({ length: total }, (_, index) => `${prefix}-${index}`));
 const received = new Set();
 const failures = [];
+const ingressAgent = new Agent({ keepAlive: true, maxSockets: 128 });
+
+function submit(event) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify(event);
+    const url = new URL("/api/events", baseUrl);
+    const outgoing = request(url, { method: "POST", agent: ingressAgent, headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body) } }, (response) => {
+      response.resume();
+      response.on("end", () => resolve(response.statusCode));
+    });
+    outgoing.on("error", reject); outgoing.end(body);
+  });
+}
 
 function connect(channel) {
   return new Promise((resolve, reject) => {
@@ -41,11 +55,7 @@ const sockets = await Promise.all(channels.map(connect));
 const started = performance.now();
 try {
   const responses = await Promise.all(Array.from({ length: total }, async (_, index) => {
-    const response = await fetch(`${baseUrl}/api/events`, {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "test.delay", transactionKey: `${prefix}-${index}`, channel: "load.requests", replyChannel: channels[index % channels.length], payload: { simulateDelayMs: delayMs, sessionKey: `load-session-${index % streams}` } }),
-    });
-    return response.status;
+    return submit({ action: "test.delay", transactionKey: `${prefix}-${index}`, channel: "load.requests", replyChannel: channels[index % channels.length], payload: { simulateDelayMs: delayMs, sessionKey: `load-session-${index % streams}` } });
   }));
   assert.ok(responses.every((status) => status === 202), `non-202 ingress responses: ${responses.filter((status) => status !== 202).length}`);
   const deadline = Date.now() + timeoutMs;
@@ -58,4 +68,5 @@ try {
   console.log(JSON.stringify({ test: "pgmq-worker-concurrency", prefix, total, workers, streams, delayMs, criticalPathMs, overheadMs, elapsedMs, terminalResults: received.size }));
 } finally {
   for (const socket of sockets) socket.close();
+  ingressAgent.destroy();
 }
