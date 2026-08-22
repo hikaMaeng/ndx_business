@@ -326,6 +326,25 @@ published_port_valid() {
   [[ -n "$port_target" && "$port_number" =~ ^[1-9][0-9]*$ ]]
 }
 
+service_has_published_port() {
+  local target
+  target="$(service_target_port_of "$1")"
+  [[ -n "$target" ]]
+}
+
+internal_health_status() {
+  local service="$1" container status
+  for _ in {1..30}; do
+    container="$(docker compose ps -q "$service" 2>/dev/null || true)"
+    status="$(docker inspect "$container" --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' 2>/dev/null || true)"
+    [[ "$status" == "healthy" ]] && { printf '%s' "$status"; return 0; }
+    [[ "$status" == "exited" || "$status" == "dead" ]] && { printf '%s' "$status"; return 1; }
+    sleep 1
+  done
+  printf '%s' "${status:-unknown}"
+  return 1
+}
+
 emit_report() {
   local status="$1"
   local total_ms="$2"
@@ -367,7 +386,7 @@ for service in "${services[@]}"; do
   if [[ -f "$deploy_marker" ]] &&
     [[ "$(cat "$deploy_marker")" == "$current_runtime_fingerprint" ]] &&
     printf '%s\n' "${running_services[@]}" | grep -Fxq "$service" &&
-    published_port_valid "$current_port"; then
+    { ! service_has_published_port "$service" || published_port_valid "$current_port"; }; then
     echo "service already current: $service"
   else
     services_to_refresh+=("$service")
@@ -506,8 +525,14 @@ for service in "${services[@]}"; do
   health_report=""
 
   if [[ -z "$port_target" ]]; then
-    port_reason="published-port-missing"
-    verify_status="failed"
+    if internal_status="$(internal_health_status "$service")"; then
+      port_reason="internal-only"
+      health_report=" health[docker]=ok"
+      deploy_report_lines+=("health service=$service scope=internal docker=$internal_status")
+    else
+      port_reason="internal-unhealthy(${internal_status:-unknown})"
+      verify_status="failed"
+    fi
   elif ! published_port_valid "$port_target"; then
     port_reason="published-port-invalid"
     verify_status="failed"

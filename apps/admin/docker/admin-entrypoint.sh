@@ -37,6 +37,14 @@ for attempt in $(seq 1 60); do
   sleep 1
 done
 
+# Init scripts run only for a brand-new PostgreSQL data directory. Reassert
+# runtime extensions here so an upgraded image can safely reuse an existing
+# volume that predates the Agent broker.
+psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" <<'SQL'
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS pgmq;
+SQL
+
 node /app/dist/server/index.js &
 admin_pid=$!
 
