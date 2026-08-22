@@ -22,7 +22,10 @@ export class PgmqClient implements EventQueueTransport {
       batch.push({ message, resolve, reject });
       this.pendingSends.set(queue, batch);
       if (batch.length >= 128) void this.flush(queue);
-      else if (!this.flushTimers.has(queue)) this.flushTimers.set(queue, setTimeout(() => { void this.flush(queue); }, 2));
+      // A short window lets concurrent HTTP/WebSocket arrivals share one
+      // durable PGMQ transaction. It bounds single-message acknowledgement
+      // latency while avoiding a queue-locking transaction per request.
+      else if (!this.flushTimers.has(queue)) this.flushTimers.set(queue, setTimeout(() => { void this.flush(queue); }, 10));
     });
   }
 
