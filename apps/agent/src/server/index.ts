@@ -15,10 +15,14 @@ import { ExecutionStore } from "./idempotency/store.js";
 import { createServer } from "node:http";
 
 const env = readEnv();
-const database = createDatabasePool(env.databaseUrl, env.databasePoolMax);
-// The router has many short, independent PGMQ sends. Give its bounded fan-out
-// enough queue connections without increasing worker long-poll pressure.
-const queueDatabase = createDatabasePool(env.databaseUrl, env.role === "router" ? env.routerConcurrency + 1 : 16);
+// These three roles share one PostgreSQL instance. Their combined connection
+// ceilings stay below its 100-client default: gateway 20+12, worker 24+12,
+// router 12+13. This preserves a small operating reserve for PostgreSQL and
+// administration while still allowing independent result fan-out.
+const databasePoolLimit = env.role === "worker" ? Math.min(env.databasePoolMax, 24) : env.role === "router" ? Math.min(env.databasePoolMax, env.routerConcurrency) : Math.min(env.databasePoolMax, 20);
+const queuePoolLimit = env.role === "router" ? env.routerConcurrency + 1 : 12;
+const database = createDatabasePool(env.databaseUrl, databasePoolLimit);
+const queueDatabase = createDatabasePool(env.databaseUrl, queuePoolLimit);
 const queue = new PgmqClient(queueDatabase);
 const metrics = new MetricsRegistry();
 const eventStore = new EventStore(database, metrics);

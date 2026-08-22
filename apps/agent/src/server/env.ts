@@ -56,7 +56,7 @@ export function readEnv(source = process.env): AgentEnv {
     maxWorkerThreads,
     maxQueue: positive(source, "AGENT_MAX_QUEUE", 64),
     databasePoolMax,
-    routerConcurrency: positive(source, "AGENT_ROUTER_CONCURRENCY", Math.min(24, databasePoolMax)),
+    routerConcurrency: positive(source, "AGENT_ROUTER_CONCURRENCY", Math.min(12, databasePoolMax)),
     metricsToken: source.AGENT_METRICS_TOKEN ?? "",
     websocketMailboxMax: positive(source, "AGENT_WEBSOCKET_MAILBOX_MAX", 256),
     websocketReplayMax: positive(source, "AGENT_WEBSOCKET_REPLAY_MAX", 256),
