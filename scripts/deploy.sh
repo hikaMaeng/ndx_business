@@ -291,7 +291,10 @@ service_fingerprint() {
         # source directly, so that source is the deploy payload.
         runtime_payload="apps/$service"
       fi
-      find docker-compose.yml "apps/$service/docker" "$runtime_payload" \
+      # `env_file` values are runtime input too: compose does not rebuild an
+      # image for them, so omitting this generated file would leave containers
+      # running with a previous queue, endpoint, or capacity setting.
+      find docker-compose.yml "apps/$service/docker" "apps/$service/docker/.env" "$runtime_payload" \
         -type f -print 2>/dev/null | sort -u | while IFS= read -r path; do
           sha256_of "$path"
         done
@@ -305,7 +308,7 @@ service_fingerprint() {
       owner_app="${dockerfile%/docker/Dockerfile}"
       runtime_payload="$owner_app/dist"
       if [[ -n "$dockerfile" && -d "$owner_app" && -d "$runtime_payload" ]]; then
-        find docker-compose.yml "$dockerfile" "$runtime_payload" \
+        find docker-compose.yml "$dockerfile" "$owner_app/docker/.env" "$runtime_payload" \
           -type f -print 2>/dev/null | sort -u | while IFS= read -r path; do
             sha256_of "$path"
           done
