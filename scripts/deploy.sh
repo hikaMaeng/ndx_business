@@ -296,12 +296,25 @@ service_fingerprint() {
           sha256_of "$path"
         done
     else
-      # A service with no module of its own - an external image, a database -
-      # has no payload on disk. Its compose definition is the only thing that
-      # can change, so hash that instead of hashing a directory that is not
-      # there and calling the result stable.
-      compose_query "$service" 'JSON.stringify(svc)'
-      sha256_of docker-compose.yml
+      # A role-only service may share an app image with a published sibling
+      # (agent-worker and agent-router use the Agent Dockerfile). Its own
+      # service folder is absent, but its runtime payload is not: changing the
+      # shared app dist must recreate every role that runs that image.
+      local dockerfile owner_app runtime_payload
+      dockerfile="$(compose_query "$service" 'svc?.build?.dockerfile')"
+      owner_app="${dockerfile%/docker/Dockerfile}"
+      runtime_payload="$owner_app/dist"
+      if [[ -n "$dockerfile" && -d "$owner_app" && -d "$runtime_payload" ]]; then
+        find docker-compose.yml "$dockerfile" "$runtime_payload" \
+          -type f -print 2>/dev/null | sort -u | while IFS= read -r path; do
+            sha256_of "$path"
+          done
+      else
+        # An external image or database has no repository runtime payload. Its
+        # compose declaration is then the complete deploy input.
+        compose_query "$service" 'JSON.stringify(svc)'
+        sha256_of docker-compose.yml
+      fi
     fi
   } | sha256_of | awk '{print $1}'
 }
