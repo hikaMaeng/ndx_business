@@ -14,6 +14,7 @@ COPY --chown=postgres:postgres apps/admin/dist ./dist
 COPY apps/admin/docker/postgres/initdb/001-extensions.sql /docker-entrypoint-initdb.d/001-extensions.sql
 COPY apps/admin/docker/admin-entrypoint.sh /usr/local/bin/admin-entrypoint.sh
 
+USER root
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libatomic1 \
     && rm -rf /var/lib/apt/lists/* \
