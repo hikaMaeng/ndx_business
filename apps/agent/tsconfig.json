@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": { "module": "ESNext", "moduleResolution": "Bundler", "noEmit": true, "resolveJsonModule": true, "types": ["vite/client"], "baseUrl": "../..", "paths": { "agent_domain/common": ["packages/agent_domain/dist/common/index.d.ts"], "agent_domain/front": ["packages/agent_domain/dist/front/index.d.ts"] } },
+  "include": ["src/front", "assets/i18n", "vite.config.ts"]
+}

@@ -1,0 +1,80 @@
+import { randomUUID } from "node:crypto";
+import { deterministicEventId } from "agent_domain/server";
+import type { EventEnvelope, IngressEvent } from "agent_domain/common";
+import type { EventQueueTransport } from "../queue/transport.js";
+import { EventStore } from "../event-store/store.js";
+import { toEventDraft, toResultDraft } from "../ingress/event-draft.js";
+import { runWorker, type WorkerPool, WorkerLostError } from "../worker/pool.js";
+import type { MetricsRegistry } from "../metrics/registry.js";
+import type { BrokerLoop } from "./gateway-delivery.js";
+import { ExecutionStore, type ResultPayload } from "../idempotency/store.js";
+
+function resultId(event: EventEnvelope): string { return deterministicEventId(`result:${event.transactionKey}:${event.replyChannel ?? event.channel}`); }
+function conflictId(event: EventEnvelope): string { return deterministicEventId(`conflict:${event.eventId}`); }
+
+/** A Worker server is only a PGMQ command consumer and PGMQ result producer. */
+export function startWorkerConsumer(input: { queue: EventQueueTransport; commandQueue: string; resultQueue: string; eventStore: EventStore; executions: ExecutionStore; pool: WorkerPool; metrics: MetricsRegistry; visibilitySeconds: number; pollSeconds: number; batchSize: number }): BrokerLoop {
+  let stopped = false;
+  const process = async (message: { id: string; event: IngressEvent }): Promise<void> => {
+    const command = await input.eventStore.append(toEventDraft(message.event));
+    const claim = await input.executions.claim(command, randomUUID());
+    if (claim.kind === "conflict") {
+      const conflict = await input.eventStore.append(toResultDraft(command, { eventId: conflictId(command), action: `${command.action}.conflict`, channel: command.replyChannel ?? command.channel, createdAt: new Date().toISOString(), source: "worker", payload: { ok: false, error: { code: "idempotency_conflict", message: claim.reason } } }));
+      await input.queue.send(input.resultQueue, conflict);
+      await input.queue.delete(input.commandQueue, message.id);
+      input.metrics.increment("queueDeletes");
+      return;
+    }
+    if (claim.kind === "joined" && !claim.completed) {
+      input.metrics.increment("processingJoined");
+      await input.queue.delete(input.commandQueue, message.id);
+      input.metrics.increment("queueDeletes");
+      return;
+    }
+    let payload: ResultPayload;
+    try {
+      if (claim.kind === "claimed") {
+        input.metrics.increment("workerStarted");
+        const controller = new AbortController();
+        let leaseLost = false;
+        const heartbeat = setInterval(() => { void input.executions.renew(command.transactionKey, claim.attemptId).then((owned) => {
+          if (!owned) { leaseLost = true; controller.abort(); }
+        }).catch(() => { leaseLost = true; controller.abort(); }); }, Math.max(1_000, Math.floor(input.visibilitySeconds * 1_000 / 3)));
+        try {
+          const worker = await runWorker(input.pool, command, controller.signal);
+          if (leaseLost) throw new WorkerLostError("worker lost the execution lease");
+          payload = { ok: true, value: worker.value };
+        }
+        finally { clearInterval(heartbeat); }
+        input.metrics.increment("workerCompleted");
+        if (!await input.executions.complete(command.transactionKey, claim.attemptId, payload)) throw new WorkerLostError("worker lost the execution lease");
+      } else {
+        payload = claim.result ?? { ok: false, error: { code: "missing_terminal_result", message: "completed execution had no result" } };
+      }
+    } catch (error) {
+      if (error instanceof WorkerLostError) throw error;
+      payload = { ok: false, error: { code: "worker_failed", message: error instanceof Error ? error.message : String(error) } };
+      input.metrics.increment("workerFailed");
+      if (claim.kind === "claimed" && !await input.executions.complete(command.transactionKey, claim.attemptId, payload)) throw new WorkerLostError("worker lost the execution lease");
+    }
+    const recipients = await input.executions.recipients(command.transactionKey);
+    for (const recipient of recipients) {
+      const result = await input.eventStore.append(toResultDraft(recipient, { eventId: resultId(recipient), action: `${recipient.action}.result`, channel: recipient.replyChannel ?? recipient.channel, createdAt: new Date().toISOString(), source: "worker", payload }));
+      await input.queue.send(input.resultQueue, result);
+    }
+    await input.queue.delete(input.commandQueue, message.id);
+    input.metrics.increment("queueDeletes");
+  };
+  const lane = async (): Promise<void> => { while (!stopped) {
+    try {
+      const messages = await input.queue.read(input.commandQueue, { visibilityTimeoutSeconds: input.visibilitySeconds, quantity: input.batchSize, pollSeconds: input.pollSeconds });
+      input.metrics.increment("queueReads"); input.metrics.increment("queueMessages", messages.length);
+      await Promise.all(messages.map(async (message) => {
+        try { await process({ id: message.id, event: message.event as IngressEvent }); }
+        catch (error) { input.metrics.increment("processingFailures"); console.error(JSON.stringify({ event: "worker.command.retry", messageId: message.id, error: error instanceof Error ? error.message : String(error) })); }
+      }));
+    } catch (error) { console.error(JSON.stringify({ event: "worker.consumer.retry", error: error instanceof Error ? error.message : String(error) })); }
+  } };
+  const done = lane();
+  return { stop: () => { stopped = true; }, done };
+}

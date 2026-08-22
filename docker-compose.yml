@@ -22,6 +22,62 @@ services:
       - admin_data:/app/data
     networks:
       - ndx-business_internal
+  agent:
+    build:
+      context: .
+      dockerfile: apps/agent/docker/Dockerfile
+    image: ndx-business-agent:latest
+    container_name: agent
+    init: true
+    restart: unless-stopped
+    env_file:
+      - path: apps/agent/docker/.env
+        required: false
+    environment:
+      AGENT_ROLE: gateway
+    depends_on:
+      admin:
+        condition: service_started
+    ports:
+      - "${AGENT_HOST_PORT:-18081}:18081"
+    networks:
+      - ndx-business_internal
+  agent-worker:
+    build:
+      context: .
+      dockerfile: apps/agent/docker/Dockerfile
+    image: ndx-business-agent:latest
+    init: true
+    restart: unless-stopped
+    env_file:
+      - path: apps/agent/docker/.env
+        required: false
+    environment:
+      AGENT_ROLE: worker
+    depends_on:
+      admin:
+        condition: service_started
+    # Internal only: workers never accept client traffic.
+    networks:
+      - ndx-business_internal
+  agent-router:
+    build:
+      context: .
+      dockerfile: apps/agent/docker/Dockerfile
+    image: ndx-business-agent:latest
+    init: true
+    restart: unless-stopped
+    env_file:
+      - path: apps/agent/docker/.env
+        required: false
+    environment:
+      AGENT_ROLE: router
+    depends_on:
+      admin:
+        condition: service_started
+    # Internal only: router fans results into Gateway-specific PGMQ queues.
+    networks:
+      - ndx-business_internal
 
 volumes:
   admin_data:
