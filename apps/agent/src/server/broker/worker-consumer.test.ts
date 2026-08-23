@@ -14,7 +14,7 @@ test("worker consumes a PGMQ command, emits a result event, then acknowledges th
     commandQueue: "agent_commands", resultQueue: "agent_results", eventStore: store as never,
     executions: { claim: async () => ({ kind: "claimed", attemptId: "attempt-a" }), complete: async () => true, recipients: async () => [{ ...command, kind: "command", eventVersion: 1, streamId: "session:unknown:agent.requests", sequence: "1", correlationId: "tx-1", source: "client" }], renew: async () => true } as never,
     pool: { run: async () => ({ value: "digest", workerId: "worker-a" }) } as never,
-    metrics: { increment: () => undefined } as never, visibilitySeconds: 60, pollSeconds: 1, batchSize: 1, maxInFlight: 2,
+    metrics: { increment: () => undefined } as never, visibilitySeconds: 60, pollSeconds: 1, batchSize: 1, maxInFlight: 2, maxAttempts: 5,
   });
   await new Promise((resolve) => setTimeout(resolve, 15)); loop.stop();
   assert.equal(sent.length, 1); assert.equal(sent[0]?.channel, "orders"); assert.equal(sent[0]?.payload.ok, true);
@@ -26,9 +26,9 @@ test("a joined transaction preserves its command for lease-expiry recovery witho
   const loop = startWorkerConsumer({
     queue: { read: async () => read ? await new Promise<never>(() => undefined) : (read = true, [{ id: "20", event: command, headers: null }]), delete: async (_queue: string, id: string) => { deleted.push(id); } } as never,
     commandQueue: "agent_commands", resultQueue: "agent_results", eventStore: { append: async (): Promise<EventEnvelope> => ({ ...command, kind: "command", eventVersion: 1, streamId: "session:unknown:agent.requests", sequence: "1", correlationId: "tx-1", source: "client" }) } as never,
-    executions: { claim: async () => ({ kind: "joined", requestEventId: command.eventId, completed: false }), complete: async () => true, recipients: async () => [], renew: async () => true } as never,
+    executions: { claim: async () => ({ kind: "joined", requestEventId: command.eventId, completed: false }), complete: async () => true, recipients: async () => [], renew: async () => true, recordRedelivery: async () => undefined } as never,
     pool: { run: async () => { runs += 1; return { value: "unexpected", workerId: "worker-a" }; } } as never,
-    metrics: { increment: () => undefined } as never, visibilitySeconds: 60, pollSeconds: 1, batchSize: 1, maxInFlight: 2,
+    metrics: { increment: () => undefined } as never, visibilitySeconds: 60, pollSeconds: 1, batchSize: 1, maxInFlight: 2, maxAttempts: 5,
   });
   await new Promise((resolve) => setTimeout(resolve, 15)); loop.stop();
   assert.equal(runs, 0);
@@ -42,7 +42,7 @@ test("a fresh duplicate command joins work but can be acknowledged", async () =>
     commandQueue: "agent_commands", resultQueue: "agent_results", eventStore: { append: async (): Promise<EventEnvelope> => ({ ...command, kind: "command", eventVersion: 1, streamId: "channel:agent.requests", sequence: "1", correlationId: "tx-1", source: "client" }) } as never,
     executions: { claim: async () => ({ kind: "joined", requestEventId: "original-command", completed: false }), complete: async () => true, recipients: async () => [], renew: async () => true } as never,
     pool: { run: async () => ({ value: "unexpected", workerId: "worker-a" }) } as never,
-    metrics: { increment: () => undefined } as never, visibilitySeconds: 60, pollSeconds: 1, batchSize: 1, maxInFlight: 2,
+    metrics: { increment: () => undefined } as never, visibilitySeconds: 60, pollSeconds: 1, batchSize: 1, maxInFlight: 2, maxAttempts: 5,
   });
   await new Promise((resolve) => setTimeout(resolve, 15)); loop.stop();
   assert.deepEqual(deleted, ["20"]);
@@ -63,7 +63,7 @@ test("a running worker renews both its execution and PGMQ visibility leases", as
       renew: async () => { renewals += 1; return true; },
     } as never,
     pool: { run: async () => { await new Promise((resolve) => setTimeout(resolve, 1_050)); return { value: "digest", workerId: "worker-a" }; } } as never,
-    metrics: { increment: () => undefined } as never, visibilitySeconds: 3, pollSeconds: 1, batchSize: 1, maxInFlight: 2,
+    metrics: { increment: () => undefined } as never, visibilitySeconds: 3, pollSeconds: 1, batchSize: 1, maxInFlight: 2, maxAttempts: 5,
   });
   await new Promise((resolve) => setTimeout(resolve, 1_150)); loop.stop();
   assert.ok(renewals >= 1);

@@ -4,16 +4,18 @@ import type { EventEnvelope, IngressEvent } from "agent_domain/common";
 import type { EventQueueTransport } from "../queue/transport.js";
 import { EventStore } from "../event-store/store.js";
 import { toEventDraft, toResultDraft } from "../ingress/event-draft.js";
+import { toProcessingFailureDraft } from "../ingress/event-draft.js";
 import { runWorker, type WorkerPool, WorkerLostError } from "../worker/pool.js";
 import type { MetricsRegistry } from "../metrics/registry.js";
 import type { BrokerLoop } from "./gateway-delivery.js";
 import { ExecutionStore, type ResultPayload } from "../idempotency/store.js";
+import { nextReadBackoff, wait } from "./backoff.js";
 
-function resultId(event: EventEnvelope): string { return deterministicEventId(`result:${event.transactionKey}:${event.replyChannel ?? event.channel}`); }
+function resultId(event: EventEnvelope): string { return deterministicEventId(`result:${event.transactionKey}:${event.streamId}:${event.replyChannel ?? event.channel}`); }
 function conflictId(event: EventEnvelope): string { return deterministicEventId(`conflict:${event.eventId}`); }
 
 /** A Worker server is only a PGMQ command consumer and PGMQ result producer. */
-export function startWorkerConsumer(input: { queue: EventQueueTransport; commandQueue: string; resultQueue: string; eventStore: EventStore; executions: ExecutionStore; pool: WorkerPool; metrics: MetricsRegistry; visibilitySeconds: number; pollSeconds: number; batchSize: number; maxInFlight: number }): BrokerLoop {
+export function startWorkerConsumer(input: { queue: EventQueueTransport; commandQueue: string; resultQueue: string; eventStore: EventStore; executions: ExecutionStore; pool: WorkerPool; metrics: MetricsRegistry; visibilitySeconds: number; pollSeconds: number; batchSize: number; maxInFlight: number; maxAttempts: number }): BrokerLoop {
   let stopped = false;
   const process = async (message: { id: string; event: IngressEvent }): Promise<void> => {
     const command = await input.eventStore.append(toEventDraft(message.event));
@@ -33,7 +35,7 @@ export function startWorkerConsumer(input: { queue: EventQueueTransport; command
       if (claim.requestEventId !== command.eventId) {
         await input.queue.delete(input.commandQueue, message.id);
         input.metrics.increment("queueDeletes");
-      }
+      } else await input.executions.recordRedelivery(command.transactionKey);
       return;
     }
     let payload: ResultPayload;
@@ -42,9 +44,17 @@ export function startWorkerConsumer(input: { queue: EventQueueTransport; command
         input.metrics.increment("workerStarted");
         const controller = new AbortController();
         let leaseLost = false;
-        const heartbeat = setInterval(() => { void Promise.all([input.executions.renew(command.transactionKey, claim.attemptId), input.queue.extendVisibility(input.commandQueue, message.id, input.visibilitySeconds)]).then(([owned]) => {
-          if (!owned) { leaseLost = true; controller.abort(); }
-        }).catch(() => { leaseLost = true; controller.abort(); }); }, Math.max(1_000, Math.floor(input.visibilitySeconds * 1_000 / 3)));
+        const heartbeat = setInterval(() => {
+          // DB ownership fences execution. A transient PGMQ set_vt failure may duplicate delivery,
+          // but must not abort the owner: the retained source command is safe to reclaim later.
+          void input.executions.renew(command.transactionKey, claim.attemptId).then((owned) => {
+            if (!owned) { leaseLost = true; controller.abort(); }
+          }).catch(() => { leaseLost = true; controller.abort(); });
+          void input.queue.extendVisibility(input.commandQueue, message.id, input.visibilitySeconds).catch((error) => {
+            input.metrics.increment("queueVisibilityRenewFailures");
+            console.error(JSON.stringify({ event: "worker.visibility.renew.failed", messageId: message.id, error: error instanceof Error ? error.message : String(error) }));
+          });
+        }, Math.max(1_000, Math.floor(input.visibilitySeconds * 1_000 / 3)));
         try {
           const worker = await runWorker(input.pool, command, controller.signal);
           if (leaseLost) throw new WorkerLostError("worker lost the execution lease");
@@ -71,24 +81,35 @@ export function startWorkerConsumer(input: { queue: EventQueueTransport; command
     input.metrics.increment("queueDeletes");
   };
   const inFlight = new Set<Promise<void>>();
-  const schedule = (message: { id: string; event: IngressEvent }): void => {
+  const schedule = (message: { id: string; event: IngressEvent; readCount: number }): void => {
     let task: Promise<void>;
     task = process(message).catch((error) => {
       input.metrics.increment("processingFailures");
       console.error(JSON.stringify({ event: "worker.command.retry", messageId: message.id, error: error instanceof Error ? error.message : String(error) }));
+      if (message.readCount < input.maxAttempts) return;
+      return (async () => {
+        // A pre-terminal infrastructure error needs a finite terminal state too. Archive first so
+        // it cannot spin forever; a canonical command can additionally emit a visible failure.
+        await input.queue.archive(input.commandQueue, message.id);
+        input.metrics.increment("processingDlqTotal");
+        const command = await input.eventStore.append(toEventDraft(message.event));
+        const failure = await input.eventStore.append(toProcessingFailureDraft(command, deterministicEventId(`processing-failed:${command.eventId}:${command.streamId}:${command.replyChannel ?? command.channel}`), error instanceof Error ? error.message : String(error)));
+        await input.queue.send(input.resultQueue, failure);
+      })();
     }).finally(() => inFlight.delete(task));
     inFlight.add(task);
   };
-  const lane = async (): Promise<void> => { while (!stopped) {
+  const lane = async (): Promise<void> => { let backoffMs = 100; while (!stopped) {
     try {
       const messages = await input.queue.read(input.commandQueue, { visibilityTimeoutSeconds: input.visibilitySeconds, quantity: input.batchSize, pollSeconds: input.pollSeconds });
       input.metrics.increment("queueReads"); input.metrics.increment("queueMessages", messages.length);
+      backoffMs = 100;
       for (const message of messages) {
         while (!stopped && inFlight.size >= input.maxInFlight) await Promise.race(inFlight);
         if (stopped) break;
-        schedule({ id: message.id, event: message.event as IngressEvent });
+        schedule({ id: message.id, event: message.event as IngressEvent, readCount: message.readCount });
       }
-    } catch (error) { console.error(JSON.stringify({ event: "worker.consumer.retry", error: error instanceof Error ? error.message : String(error) })); }
+    } catch (error) { input.metrics.increment("brokerReadFailures"); console.error(JSON.stringify({ event: "worker.consumer.retry", backoffMs, error: error instanceof Error ? error.message : String(error) })); await wait(backoffMs); backoffMs = nextReadBackoff(backoffMs); }
   } await Promise.allSettled(inFlight); };
   const done = lane();
   return { stop: () => { stopped = true; }, done };

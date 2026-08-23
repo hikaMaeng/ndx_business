@@ -3,6 +3,7 @@ import type { EventQueueTransport } from "../queue/transport.js";
 import type { GatewaySubscriptionStore } from "../subscription/store.js";
 import type { MetricsRegistry } from "../metrics/registry.js";
 import type { BrokerLoop } from "./gateway-delivery.js";
+import { nextReadBackoff, wait } from "./backoff.js";
 
 function gatewayQueue(prefix: string, gatewayId: string): string { return `${prefix}${gatewayId.replace(/[^a-zA-Z0-9_]/g, "_")}`; }
 
@@ -23,6 +24,12 @@ export function startResultRouter(input: { queue: EventQueueTransport; resultQue
   };
   const route = async (message: { id: string; event: EventEnvelope }): Promise<void> => {
     const gateways = await input.subscriptions.gatewaysFor(message.event.channel);
+    // Do not turn a short subscription outage or submit-before-subscribe race into data loss.
+    // Leaving the PGMQ message leased makes the router retry after its visibility timeout.
+    if (gateways.length === 0) {
+      input.metrics.increment("routerUnmatchedResults");
+      return;
+    }
     await Promise.all(gateways.map(async (gatewayId) => {
       const target = gatewayQueue(input.gatewayQueuePrefix, gatewayId);
       await ensureGatewayQueue(target);
@@ -40,15 +47,16 @@ export function startResultRouter(input: { queue: EventQueueTransport; resultQue
     }).finally(() => inFlight.delete(task));
     inFlight.add(task);
   };
-  const run = async (): Promise<void> => { while (!stopped) {
+  const run = async (): Promise<void> => { let backoffMs = 100; while (!stopped) {
     try {
       const messages = await input.queue.read(input.resultQueue, { visibilityTimeoutSeconds: input.visibilitySeconds, quantity: 32, pollSeconds: input.pollSeconds });
+      input.metrics.increment("queueReads"); input.metrics.increment("queueMessages", messages.length); backoffMs = 100;
       for (const message of messages) {
         while (!stopped && inFlight.size >= input.maxInFlight) await Promise.race(inFlight);
         if (stopped) break;
         schedule({ id: message.id, event: message.event as EventEnvelope });
       }
-    } catch (error) { console.error(JSON.stringify({ event: "router.result.retry", error: error instanceof Error ? error.message : String(error) })); }
+    } catch (error) { input.metrics.increment("brokerReadFailures"); console.error(JSON.stringify({ event: "router.result.retry", backoffMs, error: error instanceof Error ? error.message : String(error) })); await wait(backoffMs); backoffMs = nextReadBackoff(backoffMs); }
   } await Promise.allSettled(inFlight); };
   const done = run();
   return { stop: () => { stopped = true; }, done };

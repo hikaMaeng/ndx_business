@@ -87,7 +87,8 @@ export class EventStore {
     try {
       await client.query("BEGIN");
       const persisted: EventEnvelope[] = [];
-      for (const event of [...events].sort((left, right) => left.eventId.localeCompare(right.eventId))) {
+      // Sequence rows, rather than event ids, are the shared lock. This order keeps future multi-stream batches deadlock-free.
+      for (const event of [...events].sort((left, right) => left.streamId.localeCompare(right.streamId) || left.eventId.localeCompare(right.eventId))) {
         await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [event.eventId]);
         const existing = await client.query<StoredEventRow>(`SELECT ${COLUMNS} FROM event_store WHERE event_id = $1`, [event.eventId]);
         if (existing.rowCount) {
@@ -153,6 +154,11 @@ export class EventStore {
 
   async pruneChannelCursors(retentionDays: number): Promise<number> {
     const pruned = await this.pool.query("DELETE FROM event_subscription_cursor WHERE updated_at < now() - make_interval(days => $1)", [retentionDays]);
+    return pruned.rowCount ?? 0;
+  }
+
+  async prune(retentionDays: number): Promise<number> {
+    const pruned = await this.pool.query("DELETE FROM event_store WHERE stored_at < now() - make_interval(days => $1)", [retentionDays]);
     return pruned.rowCount ?? 0;
   }
 

@@ -13,6 +13,8 @@ const streams = Number(process.env.AGENT_COMPOSITE_STREAMS ?? 512);
 const joinTotal = Number(process.env.AGENT_COMPOSITE_JOIN_TOTAL ?? 128);
 const conflictTotal = Number(process.env.AGENT_COMPOSITE_CONFLICT_TOTAL ?? 32);
 const leaseDelayMs = Number(process.env.AGENT_COMPOSITE_LEASE_DELAY_MS ?? 65_000);
+const visibilitySeconds = Number(process.env.QUEUE_VISIBILITY_TIMEOUT_SECONDS ?? 60);
+const executionLeaseSeconds = Number(process.env.AGENT_EXECUTION_LEASE_SECONDS ?? visibilitySeconds);
 const subscribersPerChannel = Number(process.env.AGENT_COMPOSITE_SUBSCRIBERS ?? 2);
 const concurrency = Number(process.env.AGENT_COMPOSITE_INGRESS_CONCURRENCY ?? 128);
 const timeoutMs = Number(process.env.AGENT_COMPOSITE_TIMEOUT_MS ?? 180_000);
@@ -25,6 +27,8 @@ const metricsToken = process.env.AGENT_METRICS_TOKEN;
 
 for (const [name, value, minimum] of [["total", total, 1], ["workers", workers, 1], ["delayMs", delayMs, 1_000], ["streams", streams, 1], ["joinTotal", joinTotal, 0], ["conflictTotal", conflictTotal, 1], ["leaseDelayMs", leaseDelayMs, 1_000], ["subscribersPerChannel", subscribersPerChannel, 1], ["concurrency", concurrency, 1]]) assert.ok(Number.isInteger(value) && value >= minimum, `${name} must be an integer >= ${minimum}`);
 assert.ok(joinTotal <= total, "joinTotal must not exceed total");
+assert.ok(leaseDelayMs > visibilitySeconds * 1_000, "lease probe must exceed PGMQ visibility timeout");
+assert.ok(executionLeaseSeconds > visibilitySeconds, "lease proof requires an execution lease longer than PGMQ visibility");
 
 const prefix = `pgmq-composite-${Date.now()}`;
 const delayChannels = Array.from({ length: 4 }, (_, index) => `${prefix}.delay.${index}`);
@@ -64,6 +68,13 @@ function submit(event) {
   });
 }
 
+async function metrics() {
+  assert.ok(metricsToken, "AGENT_METRICS_TOKEN is required to prove the deployed gateway metrics contract");
+  const response = await fetch(new URL("/metrics", baseUrl), { headers: { authorization: `Bearer ${metricsToken}` } });
+  assert.equal(response.status, 200, "metrics endpoint must be authenticated and available");
+  return response.json();
+}
+
 function percentile(values, ratio) {
   const sorted = [...values].sort((left, right) => left - right);
   return Math.round(sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * ratio) - 1)] ?? 0);
@@ -81,7 +92,7 @@ function subscribe(channel, ordinal) {
       if (frame.type === "subscribed") { clearTimeout(timeout); subscribers.push(subscriber); resolve(); return; }
       if (frame.type !== "event") return;
       const target = expectedByChannel.get(channel)?.get(frame.event.transactionKey);
-      if (!target) return;
+      if (!target) { subscriber.failures.push({ unexpected: frame.event }); return; }
       if (frame.event.channel !== channel || frame.event.action !== target.action || frame.event.payload?.ok !== target.ok) subscriber.failures.push(frame.event);
       if (subscriber.seen.has(frame.event.transactionKey)) { subscriber.duplicates += 1; return; }
       subscriber.seen.set(frame.event.transactionKey, Date.now() - target.submittedAt);
@@ -126,8 +137,8 @@ for (let index = 0; index < total; index += 1) {
 }
 for (let index = 0; index < conflictTotal; index += 1) {
   const transactionKey = `${prefix}-conflict-${index}`;
-  expected(transactionKey, conflictOkChannel, "hash.sha256.result", true);
-  expected(transactionKey, conflictErrorChannel, "hash.sha256.conflict", false);
+  expected(transactionKey, conflictOkChannel, "test.delay.result", true);
+  expected(transactionKey, conflictErrorChannel, "test.delay.conflict", false);
 }
 const leaseTransaction = `${prefix}-lease`;
 expected(leaseTransaction, leaseChannel, "test.delay.result", true);
@@ -138,14 +149,13 @@ try {
   const conflictOriginals = await Promise.all(Array.from({ length: conflictTotal }, (_, index) => {
     const transactionKey = `${prefix}-conflict-${index}`;
     markExpected(transactionKey, conflictOkChannel);
-    return submit({ action: "hash.sha256", transactionKey, channel: "composite.requests", replyChannel: conflictOkChannel, payload: { input: `original-${index}`, sessionKey: `${prefix}-conflict-session-${index}` } });
+    return submit({ action: "test.delay", transactionKey, channel: "composite.requests", replyChannel: conflictOkChannel, payload: { simulateDelayMs: delayMs, sessionKey: `${prefix}-conflict-session-${index}` } });
   }));
   assert.ok(conflictOriginals.every((status) => status === 202), "conflict originals must be accepted");
-  await waitFor("conflict original results", () => subscribers.filter((subscriber) => subscriber.channel === conflictOkChannel).every((subscriber) => subscriber.seen.size === conflictTotal));
   const conflictRetries = await Promise.all(Array.from({ length: conflictTotal }, (_, index) => {
     const transactionKey = `${prefix}-conflict-${index}`;
     markExpected(transactionKey, conflictErrorChannel);
-    return submit({ action: "hash.sha256", transactionKey, channel: "composite.requests", replyChannel: conflictErrorChannel, payload: { input: `different-${index}`, sessionKey: `${prefix}-conflict-session-${index}` } });
+    return submit({ action: "test.delay", transactionKey, channel: "composite.requests", replyChannel: conflictErrorChannel, payload: { simulateDelayMs: delayMs + 1, sessionKey: `${prefix}-conflict-session-${index}` } });
   }));
   assert.ok(conflictRetries.every((status) => status === 202), "conflict retries must be accepted");
 
@@ -187,14 +197,17 @@ try {
   const completedExecutions = Number(sql(`SELECT count(*) FROM agent_execution WHERE transaction_key LIKE ${sqlLiteral(`${prefix}%`)} AND status = 'completed'`));
   const runningExecutions = Number(sql(`SELECT count(*) FROM agent_execution WHERE transaction_key LIKE ${sqlLiteral(`${prefix}%`)} AND status = 'running'`));
   const leaseAttempts = Number(sql(`SELECT attempts FROM agent_execution WHERE transaction_key = ${sqlLiteral(leaseTransaction)}`));
+  const leaseRedeliveries = Number(sql(`SELECT queue_redeliveries FROM agent_execution WHERE transaction_key = ${sqlLiteral(leaseTransaction)}`));
   const queues = Object.fromEntries([commandQueue, resultQueue, gatewayQueue].map((queue) => [queue, queuePrefixCount(queue)]));
   assert.equal(eventRows, expectedCommandCount + expectedTerminalCount, "event store must contain every command and terminal event");
   assert.equal(completedExecutions, expectedExecutionCount, "every logical execution must complete");
   assert.equal(runningExecutions, 0, "no execution may remain running");
   assert.equal(leaseAttempts, 1, "visibility heartbeat must prevent long-handler reclaim");
+  assert.equal(leaseRedeliveries, 0, "visibility heartbeat must prevent PGMQ redelivery while the independent execution lease stays valid");
   assert.deepEqual(queues, Object.fromEntries(Object.keys(queues).map((queue) => [queue, 0])), "all PGMQ paths must drain this workload");
+  const gatewayMetrics = await metrics();
 
-  console.log(JSON.stringify({ test: "pgmq-composite-workload", prefix, total, joinTotal, conflictTotal, leaseDelayMs, workers, streams, channels: channels.length, subscribers: subscribers.length, ingressP50Ms: percentile(ingressLatencies, 0.50), ingressP95Ms: percentile(ingressLatencies, 0.95), terminalP50Ms: percentile(allSubscribers, 0.50), terminalP95Ms: percentile(allSubscribers, 0.95), terminalP99Ms: percentile(allSubscribers, 0.99), lowerBoundMs, overheadMs, elapsedMs, expectedTerminalCount, eventRows, completedExecutions, leaseAttempts, queues }));
+  console.log(JSON.stringify({ test: "pgmq-composite-workload", prefix, total, joinTotal, conflictTotal, leaseDelayMs, visibilitySeconds, executionLeaseSeconds, workers, streams, channels: channels.length, subscribers: subscribers.length, ingressP50Ms: percentile(ingressLatencies, 0.50), ingressP95Ms: percentile(ingressLatencies, 0.95), terminalP50Ms: percentile(allSubscribers, 0.50), terminalP95Ms: percentile(allSubscribers, 0.95), terminalP99Ms: percentile(allSubscribers, 0.99), lowerBoundMs, overheadMs, elapsedMs, expectedTerminalCount, eventRows, completedExecutions, leaseAttempts, leaseRedeliveries, gatewayMetrics, queues }));
 } finally {
   await Promise.all(subscribers.map((subscriber) => new Promise((resolve) => { subscriber.socket.once("close", resolve); subscriber.socket.close(); })));
   ingressAgent.destroy();

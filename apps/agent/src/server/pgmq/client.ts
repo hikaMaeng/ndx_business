@@ -6,6 +6,7 @@ interface PgmqMessage<TEvent extends IngressEvent | EventEnvelope> {
   msg_id: string | number;
   message: TEvent;
   headers: Record<string, unknown> | null;
+  read_ct: number | null;
 }
 
 export class PgmqClient implements EventQueueTransport {
@@ -46,7 +47,7 @@ export class PgmqClient implements EventQueueTransport {
 
   async read(queue: string, options: { visibilityTimeoutSeconds: number; quantity: number; pollSeconds: number }): Promise<EventQueueMessage[]> {
     const result = await this.pool.query<PgmqMessage<IngressEvent | EventEnvelope>>("SELECT * FROM pgmq.read_with_poll($1, $2, $3, $4, 100)", [queue, options.visibilityTimeoutSeconds, options.quantity, options.pollSeconds]);
-    return result.rows.map((row) => ({ id: String(row.msg_id), event: row.message, headers: row.headers }));
+    return result.rows.map((row) => ({ id: String(row.msg_id), event: row.message, headers: row.headers, readCount: Number(row.read_ct ?? 1) }));
   }
 
   async delete(queue: string, id: string): Promise<void> {
@@ -55,6 +56,10 @@ export class PgmqClient implements EventQueueTransport {
 
   async extendVisibility(queue: string, id: string, seconds: number): Promise<void> {
     await this.pool.query("SELECT pgmq.set_vt($1::text, $2::bigint, $3::integer)", [queue, id, seconds]);
+  }
+
+  async archive(queue: string, id: string): Promise<void> {
+    await this.pool.query("SELECT pgmq.archive($1::text, $2::bigint)", [queue, id]);
   }
 
   async ensure(queue: string): Promise<void> {

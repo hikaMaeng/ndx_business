@@ -8,7 +8,7 @@
 - `joined`: 같은 transaction이 실행 중이거나 완료됐다. 실행 중인 최초 request의 visibility 재전달만 source message를 남겨 lease reclaim을 보존하고, 다른 event ID의 새 duplicate는 delete한다.
 - `conflict`: 같은 transactionKey에 다른 action/payload가 들어왔다. 요청자 channel에 conflict result를 보낸다.
 
-claimed attempt는 `QUEUE_VISIBILITY_TIMEOUT_SECONDS / 3` 주기로 PGMQ visibility와 DB execution lease를 함께 갱신한다. 둘 중 하나라도 실패하면 handler를 abort하고 source message를 delete하지 않는다.
+claimed attempt는 visibility timeout의 1/3 주기로 PGMQ visibility와 DB execution lease를 각각 갱신한다. DB execution lease 갱신이 실패하면 다른 attempt가 소유권을 얻은 것이므로 handler를 abort한다. PGMQ `set_vt`의 일시 실패는 abort하지 않는다. 이때 재노출된 source message는 미완료 join으로 보존되어, owner가 죽을 때만 안전하게 reclaim된다.
 
 ## fan-out
 
@@ -25,3 +25,4 @@ WebSocket은 구독 직후 high-water mark를 잡고 과거 event replay와 이�
 - PGMQ는 일감 인계, PostgreSQL은 순서·상태·구독의 사실 원천이다. 이유: Gateway와 Worker를 독립 배치한다.
 - Worker는 command를 직접 Gateway로 되돌리지 않고 result queue에 쓴다. 이유: Router가 다수 Gateway의 fan-out 위치를 한 곳으로 만든다.
 - 미완료 join의 최초 request만 delete하지 않는다. 이유: visibility 재전달된 원본을 지우면 실행 lease 만료 뒤 재처리할 trigger가 사라진다.
+- router는 구독 Gateway가 없는 result를 delete하지 않는다. 이유: submit과 subscribe의 순서 차이 또는 Gateway lease 갱신 실패가 결과 유실이 되어서는 안 된다.

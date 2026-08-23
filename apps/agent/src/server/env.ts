@@ -10,6 +10,9 @@ export interface AgentEnv {
   gatewayId: string;
   subscriptionLeaseSeconds: number;
   visibilityTimeoutSeconds: number;
+  executionLeaseSeconds: number;
+  maxAttempts: number;
+  retentionDays: number;
   pollSeconds: number;
   pollBatchSize: number;
   cpuCount: number;
@@ -49,6 +52,9 @@ export function readEnv(source = process.env): AgentEnv {
     gatewayId: source.AGENT_GATEWAY_ID ?? source.HOSTNAME ?? globalThis.crypto.randomUUID(),
     subscriptionLeaseSeconds: positive(source, "AGENT_SUBSCRIPTION_LEASE_SECONDS", 30),
     visibilityTimeoutSeconds,
+    executionLeaseSeconds: positive(source, "AGENT_EXECUTION_LEASE_SECONDS", visibilityTimeoutSeconds),
+    maxAttempts: positive(source, "AGENT_MAX_ATTEMPTS", 5),
+    retentionDays: positive(source, "AGENT_RETENTION_DAYS", 30),
     pollSeconds: positive(source, "QUEUE_POLL_SECONDS", 5),
     pollBatchSize: positive(source, "QUEUE_POLL_BATCH_SIZE", 8),
     cpuCount,

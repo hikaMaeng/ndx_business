@@ -38,4 +38,9 @@ export class GatewaySubscriptionStore {
     const rows = await this.pool.query<{ gateway_id: string }>("SELECT DISTINCT gateway_id FROM agent_gateway_subscription WHERE channel = $1 AND lease_until > now()", [channel]);
     return rows.rows.map((row) => row.gateway_id);
   }
+
+  async pruneExpired(): Promise<number> {
+    const pruned = await this.pool.query("DELETE FROM agent_gateway_subscription WHERE lease_until < now()");
+    return pruned.rowCount ?? 0;
+  }
 }

@@ -6,7 +6,8 @@ export const testDelayHandler: WorkerActionHandler = {
   matches: (action) => action === "test.delay",
   async execute(event, signal) {
     const requested = Number(event.payload.simulateDelayMs);
-    const delayMs = Number.isFinite(requested) ? Math.max(1, Math.min(60_000, Math.floor(requested))) : 5_000;
+    // Benchmark tests deliberately need to cross the broker visibility timeout.
+    const delayMs = Number.isFinite(requested) ? Math.max(1, Math.min(120_000, Math.floor(requested))) : 5_000;
     await wait(delayMs, signal);
     return { delayedMs: delayMs };
   },
