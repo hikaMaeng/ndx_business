@@ -14,12 +14,13 @@ const joinTotal = Number(process.env.AGENT_COMPOSITE_JOIN_TOTAL ?? 128);
 const conflictTotal = Number(process.env.AGENT_COMPOSITE_CONFLICT_TOTAL ?? 32);
 const leaseDelayMs = Number(process.env.AGENT_COMPOSITE_LEASE_DELAY_MS ?? 65_000);
 const visibilitySeconds = Number(process.env.QUEUE_VISIBILITY_TIMEOUT_SECONDS ?? 60);
-const executionLeaseSeconds = Number(process.env.AGENT_EXECUTION_LEASE_SECONDS ?? visibilitySeconds);
+const executionLeaseSeconds = Number(process.env.AGENT_EXECUTION_LEASE_SECONDS ?? visibilitySeconds * 2);
 const subscribersPerChannel = Number(process.env.AGENT_COMPOSITE_SUBSCRIBERS ?? 2);
 const concurrency = Number(process.env.AGENT_COMPOSITE_INGRESS_CONCURRENCY ?? 128);
 const timeoutMs = Number(process.env.AGENT_COMPOSITE_TIMEOUT_MS ?? 180_000);
 const overheadMs = Number(process.env.AGENT_COMPOSITE_SLO_OVERHEAD_MS ?? 20_000);
 const databaseContainer = process.env.AGENT_PGMQ_DB_CONTAINER ?? "admin";
+const workerContainer = process.env.AGENT_WORKER_CONTAINER ?? "ndx-business-agent-worker-1";
 const commandQueue = process.env.AGENT_QUEUE ?? "agent_requests";
 const resultQueue = process.env.AGENT_RESULT_QUEUE ?? "agent_results";
 const gatewayQueue = `${process.env.AGENT_GATEWAY_QUEUE_PREFIX ?? "agent_gateway_"}${process.env.AGENT_GATEWAY_ID ?? "agent"}`;
@@ -116,6 +117,14 @@ function sql(query) {
   return execFileSync("docker", ["exec", databaseContainer, "psql", "-U", "postgres", "-d", "ndx_business", "-At", "-c", query], { encoding: "utf8" }).trim();
 }
 
+function deployedWorkerSettings() {
+  const [container] = JSON.parse(execFileSync("docker", ["inspect", workerContainer], { encoding: "utf8" }));
+  const values = new Map(container.Config.Env.map((entry) => entry.split("=", 2)));
+  const deployedVisibilitySeconds = Number(values.get("QUEUE_VISIBILITY_TIMEOUT_SECONDS") ?? 60);
+  const deployedExecutionLeaseSeconds = Number(values.get("AGENT_EXECUTION_LEASE_SECONDS") ?? deployedVisibilitySeconds * 2);
+  return { deployedVisibilitySeconds, deployedExecutionLeaseSeconds };
+}
+
 function sqlLiteral(value) { return `'${value.replaceAll("'", "''")}'`; }
 
 function queuePrefixCount(queue) {
@@ -144,6 +153,9 @@ const leaseTransaction = `${prefix}-lease`;
 expected(leaseTransaction, leaseChannel, "test.delay.result", true);
 
 try {
+  const deployed = deployedWorkerSettings();
+  assert.equal(visibilitySeconds, deployed.deployedVisibilitySeconds, "harness visibility setting must match the deployed Worker");
+  assert.equal(executionLeaseSeconds, deployed.deployedExecutionLeaseSeconds, "harness execution lease setting must match the deployed Worker");
   await Promise.all(channels.flatMap((channel) => Array.from({ length: subscribersPerChannel }, (_, ordinal) => subscribe(channel, ordinal))));
 
   const conflictOriginals = await Promise.all(Array.from({ length: conflictTotal }, (_, index) => {

@@ -83,19 +83,29 @@ export function startWorkerConsumer(input: { queue: EventQueueTransport; command
   const inFlight = new Set<Promise<void>>();
   const schedule = (message: { id: string; event: IngressEvent; readCount: number }): void => {
     let task: Promise<void>;
-    task = process(message).catch((error) => {
+    task = process(message).catch(async (error) => {
       input.metrics.increment("processingFailures");
       console.error(JSON.stringify({ event: "worker.command.retry", messageId: message.id, error: error instanceof Error ? error.message : String(error) }));
       if (message.readCount < input.maxAttempts) return;
-      return (async () => {
-        // A pre-terminal infrastructure error needs a finite terminal state too. Archive first so
-        // it cannot spin forever; a canonical command can additionally emit a visible failure.
+      try {
+        // Persist and fan out the terminal failure first. If any step fails we intentionally leave
+        // the source message visible for retry; archive-before-notify is a silent-loss bug.
+        const command = await input.eventStore.append(toEventDraft(message.event));
+        const payload: ResultPayload = { ok: false, error: { code: "processing_permanent_failure", message: error instanceof Error ? error.message : String(error) } };
+        // An active execution is not ours to terminate. It will either finish or lose its DB lease
+        // before this redelivered message can provide the terminal failure.
+        if (!await input.executions.failExpired(command.transactionKey, payload)) return;
+        for (const recipient of await input.executions.recipients(command.transactionKey)) {
+          const failure = await input.eventStore.append(toProcessingFailureDraft(recipient, deterministicEventId(`processing-failed:${command.eventId}:${recipient.streamId}:${recipient.replyChannel ?? recipient.channel}`), payload.error!.message));
+          await input.queue.send(input.resultQueue, failure);
+        }
         await input.queue.archive(input.commandQueue, message.id);
         input.metrics.increment("processingDlqTotal");
-        const command = await input.eventStore.append(toEventDraft(message.event));
-        const failure = await input.eventStore.append(toProcessingFailureDraft(command, deterministicEventId(`processing-failed:${command.eventId}:${command.streamId}:${command.replyChannel ?? command.channel}`), error instanceof Error ? error.message : String(error)));
-        await input.queue.send(input.resultQueue, failure);
-      })();
+      } catch (dlqError) {
+        // The loop owns every rejection. A failed DLQ side effect must not terminate Node.
+        input.metrics.increment("processingFailures");
+        console.error(JSON.stringify({ event: "worker.command.dlq.retry", messageId: message.id, error: dlqError instanceof Error ? dlqError.message : String(dlqError) }));
+      }
     }).finally(() => inFlight.delete(task));
     inFlight.add(task);
   };

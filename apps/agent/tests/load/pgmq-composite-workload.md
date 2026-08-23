@@ -7,6 +7,9 @@
 ```powershell
 $env:AGENT_GATEWAY_ID = "<docker inspect agent hostname>"
 $env:AGENT_METRICS_TOKEN = "<AGENT_METRICS_TOKEN>"
+$env:QUEUE_VISIBILITY_TIMEOUT_SECONDS = "3"
+$env:AGENT_EXECUTION_LEASE_SECONDS = "30"
+$env:AGENT_COMPOSITE_LEASE_DELAY_MS = "8000"
 node apps/agent/tests/load/pgmq-composite-workload.mjs
 ```
 
@@ -21,7 +24,7 @@ Harness는 Docker의 `admin` PostgreSQL 컨테이너를 읽어 event store, exec
 | stream | 512 |
 | transaction join | 128건, 다른 reply channel 추가 |
 | payload conflict | 32건 |
-| visibility probe | 65,000ms delay 1건 |
+| visibility probe | 배포 Worker의 visibility보다 긴 delay 1건, execution lease는 그보다 길어야 함 |
 | 논리 channel / WebSocket subscriber | 7 / 14 |
 
 delay 실행의 worker-only 하한은 `ceil(2048 / 96) × 5,000 = 110,000ms`다. 기본 허용 시간은 하한 + 20,000ms다. visibility probe는 throughput command보다 먼저 보내므로 65초가 benchmark의 직렬 tail이 되지 않는다.
@@ -52,7 +55,7 @@ delay 실행의 worker-only 하한은 `ceil(2048 / 96) × 5,000 = 110,000ms`다.
 
 1. 모든 subscriber가 예상 action·channel·성공/실패 값을 정확히 한 번 받는다.
 2. event store 행 수는 command + terminal event 예상값과 같고, 모든 logical execution은 completed다.
-3. 65초 실행의 `agent_execution.attempts`는 1이다. 즉 PGMQ visibility heartbeat가 재claim을 막았다.
+3. visibility보다 긴 실행의 `agent_execution.attempts=1` 및 `queue_redeliveries=0`이다. 즉 PGMQ visibility heartbeat가 실제 재전달을 막았다.
 4. command, result, Gateway queue의 workload prefix 잔여가 모두 0이다.
 5. elapsed가 worker 하한 + overhead 이내다.
 

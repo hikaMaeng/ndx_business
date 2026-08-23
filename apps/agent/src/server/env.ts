@@ -52,7 +52,9 @@ export function readEnv(source = process.env): AgentEnv {
     gatewayId: source.AGENT_GATEWAY_ID ?? source.HOSTNAME ?? globalThis.crypto.randomUUID(),
     subscriptionLeaseSeconds: positive(source, "AGENT_SUBSCRIPTION_LEASE_SECONDS", 30),
     visibilityTimeoutSeconds,
-    executionLeaseSeconds: positive(source, "AGENT_EXECUTION_LEASE_SECONDS", visibilityTimeoutSeconds),
+    // The execution fence must outlive a single PGMQ visibility lease so a visibility probe
+    // can distinguish queue redelivery from a database ownership reclaim.
+    executionLeaseSeconds: positive(source, "AGENT_EXECUTION_LEASE_SECONDS", visibilityTimeoutSeconds * 2),
     maxAttempts: positive(source, "AGENT_MAX_ATTEMPTS", 5),
     retentionDays: positive(source, "AGENT_RETENTION_DAYS", 30),
     pollSeconds: positive(source, "QUEUE_POLL_SECONDS", 5),
