@@ -9,7 +9,7 @@ Gateway만 host port `18081`을 공개한다. Worker는 command queue를 읽는 
 | `event_store`, `event_stream_sequence` | canonical event와 stream별 sequence | [`EventStore`](../src/server/event-store/store.ts) |
 | `event_subscription_cursor` | channel별 cursor position | [`EventStore`](../src/server/event-store/store.ts) |
 | `agent_execution`, `agent_execution_recipient` | transaction claim, 실행 결과, reply channel 집합 | [`ExecutionStore`](../src/server/idempotency/store.ts) |
-| `agent_gateway_subscription` | Gateway가 받는 channel과 lease | [`GatewaySubscriptionStore`](../src/server/subscription/store.ts) |
+| `agent_gateway_instance`, `agent_gateway_subscription` | Gateway queue identity의 단일 owner와 channel 구독 lease | [`GatewaySubscriptionStore`](../src/server/subscription/store.ts) |
 
 현재 `event_delivery` 같은 recipient별 전달 ledger는 없다. 동일 result가 PGMQ를 통해 다시 전달될 수 있으므로 최종 consumer는 `eventId`를 중복 제거 키로 사용해야 한다.
 

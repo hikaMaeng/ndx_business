@@ -29,14 +29,14 @@ Harness는 Docker의 `admin` PostgreSQL 컨테이너를 읽어 event store, exec
 
 delay 실행의 worker-only 하한은 `ceil(2048 / 96) × 5,000 = 110,000ms`다. 기본 허용 시간은 하한 + 20,000ms다. visibility probe는 throughput command보다 먼저 보내므로 65초가 benchmark의 직렬 tail이 되지 않는다.
 
-## 2026-08-23 결과
+## 2026-08-23 최신 결과
 
 ```json
 {
-  "elapsedMs": 112361,
-  "terminalP50Ms": 52586,
-  "terminalP95Ms": 105561,
-  "terminalP99Ms": 110178,
+  "elapsedMs": 112210,
+  "terminalP50Ms": 54206,
+  "terminalP95Ms": 105679,
+  "terminalP99Ms": 110311,
   "expectedTerminalCount": 2241,
   "eventRows": 4482,
   "completedExecutions": 2081,
@@ -44,12 +44,12 @@ delay 실행의 worker-only 하한은 `ceil(2048 / 96) × 5,000 = 110,000ms`다.
   "queues": {
     "agent_requests": 0,
     "agent_results": 0,
-    "agent_gateway_d72e8ba8bd1d": 0
+    "agent_gateway_agent": 0
   }
 }
 ```
 
-이는 기존 순수 2,048 delay baseline(112,769ms)과 같은 worker 하한 안에서, join·conflict·다중 subscriber·긴 visibility lease까지 함께 검증한 결과다. Gateway ID는 컨테이너마다 달라지므로 결과의 queue 이름은 재실행 시 달라진다.
+이는 기존 순수 2,048 delay baseline(112,769ms)과 같은 worker 하한 안에서, join·conflict·다중 subscriber·긴 visibility lease까지 함께 검증한 결과다. `AGENT_TERMINAL_PERSISTENCE_ALERT_ATTEMPTS=10`도 컨테이너 env와 `/metrics.configuration`의 교차검증 대상이다. 기본 Gateway ID는 `agent`이며, 같은 ID의 두 번째 process는 queue 경쟁 소비 대신 DB identity lease에서 기동 실패한다.
 
 ## 통과 조건
 

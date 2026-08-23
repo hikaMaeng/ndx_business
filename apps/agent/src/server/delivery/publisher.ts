@@ -2,9 +2,11 @@ import type { EventQueueTransport } from "../queue/transport.js";
 import { nextReadBackoff, wait } from "../broker/backoff.js";
 import { DeliveryStore } from "./store.js";
 import type { MetricsRegistry } from "../metrics/registry.js";
-export type DeliveryPublisher = { stop(): void; done: Promise<void> };
+import { DeliveryNotifier } from "./notifier.js";
+export type DeliveryPublisher = { stop(): void; wake(): void; done: Promise<void> };
 export function startDeliveryPublisher(input: { queue: EventQueueTransport; store: DeliveryStore; maxAttempts: number; metrics: MetricsRegistry }): DeliveryPublisher {
   let stopped = false;
+  const notifier = new DeliveryNotifier();
   const retry = async (claims: ReadonlyArray<{ eventId: string; attemptId: string }>, queueName: string, error: unknown): Promise<void> => {
     const message = error instanceof Error ? error.message : String(error);
     try {
@@ -21,7 +23,7 @@ export function startDeliveryPublisher(input: { queue: EventQueueTransport; stor
       console.error(JSON.stringify({ event: "delivery.publisher.claim.retry", backoffMs, error: error instanceof Error ? error.message : String(error) }));
       await wait(backoffMs); backoffMs = nextReadBackoff(backoffMs); continue;
     }
-    if (!claims.length) { await wait(backoffMs); backoffMs = Math.min(1_000, backoffMs * 2); continue; }
+    if (!claims.length) { await notifier.wait(backoffMs); backoffMs = Math.min(1_000, backoffMs * 2); continue; }
     backoffMs = 50;
     const byQueue = new Map<string, typeof claims>();
     for (const claim of claims) byQueue.set(claim.queueName, [...(byQueue.get(claim.queueName) ?? []), claim]);
@@ -35,5 +37,5 @@ export function startDeliveryPublisher(input: { queue: EventQueueTransport; stor
       } catch (error) { await retry(fences, queueName, error); }
     }
   } })();
-  return { stop: () => { stopped = true; }, done };
+  return { stop: () => { stopped = true; notifier.notify(); }, wake: () => notifier.notify(), done };
 }

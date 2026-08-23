@@ -123,3 +123,12 @@ test("channel replay reports a bounded page before live routing is allowed", asy
   assert.equal(page.complete, false);
   assert.equal(page.events.at(-1)?.sequence, "256");
 });
+
+test("event retention never deletes the durable stream watermark", async () => {
+  const statements: string[] = [];
+  const store = new EventStore({ query: async (sql: string) => { statements.push(sql); return { rowCount: 3, rows: [] }; } } as never);
+  assert.equal(await store.prune(30), 3);
+  assert.equal(statements.length, 1);
+  assert.match(statements[0]!, /DELETE FROM event_store/);
+  assert.doesNotMatch(statements[0]!, /event_stream_sequence/);
+});

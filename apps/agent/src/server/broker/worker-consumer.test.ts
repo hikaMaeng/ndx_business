@@ -104,7 +104,7 @@ test("an exhausted execution attempt records a processing failure before archivi
 test("a completed execution retains its broker message when terminal persistence fails without consuming another execution attempt", async () => {
   let read = false; const deleted: string[] = []; const metrics: string[] = [];
   const loop = startWorkerConsumer({
-    queue: { read: async () => read ? await new Promise<never>(() => undefined) : (read = true, [{ id: "terminal-1", event: command, headers: null }]), delete: async (_queue: string, id: string) => { deleted.push(id); } } as never,
+    queue: { read: async () => read ? await new Promise<never>(() => undefined) : (read = true, [{ id: "terminal-1", event: command, headers: null, readCount: 2 }]), delete: async (_queue: string, id: string) => { deleted.push(id); } } as never,
     commandQueue: "agent_commands", resultQueue: "agent_results", eventStore: {
       append: async (draft: EventDraft): Promise<EventEnvelope> => {
         if (draft.kind === "result") throw new Error("database unavailable");
@@ -113,9 +113,9 @@ test("a completed execution retains its broker message when terminal persistence
     } as never, deliveries: { enqueue: async () => undefined } as never,
     executions: { claim: async () => ({ kind: "joined", requestEventId: command.eventId, completed: true, result: { ok: true, value: "done" } }), recipients: async () => [{ ...command, kind: "command", eventVersion: 1, streamId: "channel:agent.requests", sequence: "1", correlationId: "tx-1", source: "client" }], renew: async () => true } as never,
     pool: { run: async () => ({ value: "unexpected", workerId: "worker-a" }) } as never,
-    metrics: { increment: (name: string) => { metrics.push(name); } } as never, visibilitySeconds: 60, pollSeconds: 1, batchSize: 1, maxInFlight: 2, maxExecutionAttempts: 1,
+    metrics: { increment: (name: string) => { metrics.push(name); } } as never, visibilitySeconds: 60, pollSeconds: 1, batchSize: 1, maxInFlight: 2, maxExecutionAttempts: 1, terminalPersistenceAlertAttempts: 2,
   });
   await new Promise((resolve) => setTimeout(resolve, 20)); loop.stop();
   assert.deepEqual(deleted, []);
-  assert.deepEqual(metrics, ["queueReads", "queueMessages", "terminalPersistenceRetries"]);
+  assert.deepEqual(metrics, ["queueReads", "queueMessages", "terminalPersistenceRetries", "terminalPersistenceAlerts"]);
 });

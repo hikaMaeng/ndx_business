@@ -40,7 +40,7 @@ export class DeliveryStore {
   async complete(eventId: string, attemptId: string): Promise<boolean> {
     return (await this.completeMany([{ eventId, attemptId }])).length === 1;
   }
-  async retry(eventId: string, attemptId: string, maxAttempts = Number.MAX_SAFE_INTEGER, error = "delivery retry"): Promise<void> {
+  async retry(eventId: string, attemptId: string, maxAttempts = 2_147_483_647, error = "delivery retry"): Promise<void> {
     await this.retryMany([{ eventId, attemptId }], maxAttempts, error);
   }
   async completeMany(claims: ReadonlyArray<{ eventId: string; attemptId: string }>): Promise<string[]> {

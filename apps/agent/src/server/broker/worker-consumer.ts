@@ -17,10 +17,14 @@ function conflictId(event: EventEnvelope): string { return deterministicEventId(
 class TerminalPersistenceError extends Error {}
 
 /** A Worker server is only a PGMQ command consumer and PGMQ result producer. */
-export function startWorkerConsumer(input: { queue: EventQueueTransport; commandQueue: string; resultQueue: string; eventStore: EventStore; deliveries: DeliveryStore; executions: ExecutionStore; pool: WorkerPool; metrics: MetricsRegistry; visibilitySeconds: number; pollSeconds: number; batchSize: number; maxInFlight: number; maxExecutionAttempts: number }): BrokerLoop {
+export function startWorkerConsumer(input: { queue: EventQueueTransport; commandQueue: string; resultQueue: string; eventStore: EventStore; deliveries: DeliveryStore; executions: ExecutionStore; pool: WorkerPool; metrics: MetricsRegistry; visibilitySeconds: number; pollSeconds: number; batchSize: number; maxInFlight: number; maxExecutionAttempts: number; terminalPersistenceAlertAttempts?: number; onTerminalPersisted?: () => void }): BrokerLoop {
   let stopped = false;
-  const persistResult = (draft: Parameters<EventStore["append"]>[0]): Promise<EventEnvelope> => input.eventStore.append(draft, (client, event) => input.deliveries.enqueue(client, input.resultQueue, event));
-  const process = async (message: { id: string; event: IngressEvent }): Promise<void> => {
+  const persistResult = async (draft: Parameters<EventStore["append"]>[0]): Promise<EventEnvelope> => {
+    const persisted = await input.eventStore.append(draft, (client, event) => input.deliveries.enqueue(client, input.resultQueue, event));
+    input.onTerminalPersisted?.();
+    return persisted;
+  };
+  const process = async (message: { id: string; event: IngressEvent; readCount: number }): Promise<void> => {
     const command = await input.eventStore.append(toEventDraft(message.event));
     const claim = await input.executions.claim(command, randomUUID());
     if (claim.kind === "conflict") {
@@ -109,6 +113,10 @@ export function startWorkerConsumer(input: { queue: EventQueueTransport; command
       if (error instanceof TerminalPersistenceError) {
         input.metrics.increment("terminalPersistenceRetries");
         console.error(JSON.stringify({ event: "worker.terminal.retry", messageId: message.id, error: error.message }));
+        if (message.readCount === (input.terminalPersistenceAlertAttempts ?? 10)) {
+          input.metrics.increment("terminalPersistenceAlerts");
+          console.error(JSON.stringify({ event: "worker.terminal.persistence.alert", messageId: message.id, readCount: message.readCount, threshold: input.terminalPersistenceAlertAttempts ?? 10, error: error.message }));
+        }
       } else {
         input.metrics.increment("processingFailures");
         console.error(JSON.stringify({ event: "worker.command.retry", messageId: message.id, error: error instanceof Error ? error.message : String(error) }));

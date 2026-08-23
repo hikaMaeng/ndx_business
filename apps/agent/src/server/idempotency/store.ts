@@ -46,6 +46,8 @@ export class ExecutionStore {
     await this.pool.query("ALTER TABLE agent_execution_recipient ADD COLUMN IF NOT EXISTS stream_id text");
     await this.pool.query("UPDATE agent_execution_recipient SET stream_id = COALESCE(stream_id, request_event->>'streamId', 'channel:' || reply_channel) WHERE stream_id IS NULL");
     await this.pool.query("ALTER TABLE agent_execution_recipient ALTER COLUMN stream_id SET NOT NULL");
+    await this.pool.query("CREATE INDEX IF NOT EXISTS agent_execution_completed_idx ON agent_execution (completed_at) WHERE status IN ('completed', 'failed')");
+    await this.pool.query("CREATE INDEX IF NOT EXISTS agent_execution_running_lease_idx ON agent_execution (lease_until, updated_at) WHERE status = 'running'");
     const primaryKey = await this.pool.query<{ columns: string[] }>(`SELECT array_agg(att.attname ORDER BY key.ordinality) AS columns
       FROM pg_constraint con JOIN unnest(con.conkey) WITH ORDINALITY AS key(attnum, ordinality) ON true
       JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = key.attnum
@@ -114,12 +116,13 @@ export class ExecutionStore {
     await this.pool.query("UPDATE agent_execution SET queue_redeliveries = queue_redeliveries + 1, updated_at = now() WHERE transaction_key = $1 AND status = 'running'", [transactionKey]);
   }
 
-  /** Legacy or crashed owners without a recoverable broker message must not block retention forever. */
-  async recoverAbandoned(): Promise<number> {
-    const recovered = await this.pool.query(`UPDATE agent_execution SET status='failed', result=$1::jsonb, lease_until=NULL,
-      updated_at=now(), completed_at=now() WHERE status='running' AND (lease_until IS NULL OR lease_until < now())`,
-    [JSON.stringify({ ok: false, error: { code: "execution_abandoned", message: "execution lease expired without a recoverable broker message" } })]);
-    return recovered.rowCount ?? 0;
+  /**
+   * An expired lease is deliberately observable rather than terminalised here.
+   * The retained PGMQ command is the only authority that may reclaim an attempt.
+   */
+  async expiredRunningCount(): Promise<number> {
+    const result = await this.pool.query<{ count: string | number }>("SELECT count(*)::text AS count FROM agent_execution WHERE status='running' AND (lease_until IS NULL OR lease_until < now())");
+    return Number(result.rows[0]?.count ?? 0);
   }
 
   async prune(retentionDays: number): Promise<number> {

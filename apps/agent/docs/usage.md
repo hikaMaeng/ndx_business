@@ -6,7 +6,8 @@ Compose에서는 `AGENT_ROLE=gateway|worker|router`로 같은 이미지를 세 �
 | --- | --- |
 | `AGENT_QUEUE`, `AGENT_RESULT_QUEUE` | command와 result의 공유 PGMQ queue |
 | `AGENT_GATEWAY_QUEUE_PREFIX` | Gateway별 결과 queue 접두사 |
-| `AGENT_GATEWAY_ID` | Gateway별 구독·결과 queue 식별자. 미설정 시 `HOSTNAME`, 그다음 UUID |
+| `AGENT_GATEWAY_ID` | Gateway별 구독·결과 queue 식별자. 미설정 시 `HOSTNAME`, 그다음 UUID. 같은 ID의 두 live Gateway는 DB lease 때문에 두 번째가 기동 실패한다. |
+| `AGENT_TERMINAL_PERSISTENCE_ALERT_ATTEMPTS` | terminal event 저장 실패가 PGMQ read count 몇 회에 도달하면 운영 경보를 남길지 정하는 임계값 |
 | `QUEUE_VISIBILITY_TIMEOUT_SECONDS` | PGMQ read visibility lease 기간 |
 | `AGENT_EXECUTION_LEASE_SECONDS` | PostgreSQL execution ownership lease 기간. 미설정 시 visibility의 2배 |
 | `AGENT_MAX_DELIVERY_READS` | Router가 구독 Gateway 없는 result를 archive하기 전 허용하는 PGMQ delivery read 수 |

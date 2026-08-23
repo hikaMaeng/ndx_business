@@ -9,7 +9,7 @@ export function writeMetrics(request: IncomingMessage, response: ServerResponse,
   response.writeHead(200, { "content-type": "application/json" });
   response.end(JSON.stringify({ service: "agent", configuration: {
     visibilityTimeoutSeconds: env.visibilityTimeoutSeconds, executionLeaseSeconds: env.executionLeaseSeconds,
-    maxExecutionAttempts: env.maxExecutionAttempts, maxOutboxAttempts: env.maxOutboxAttempts,
+    maxExecutionAttempts: env.maxExecutionAttempts, maxOutboxAttempts: env.maxOutboxAttempts, terminalPersistenceAlertAttempts: env.terminalPersistenceAlertAttempts,
     maxDeliveryReads: env.maxDeliveryReads, retentionDays: env.retentionDays, routerConcurrency: env.routerConcurrency,
   }, metrics: metrics.snapshot() }));
   return true;

@@ -22,6 +22,7 @@ export interface MetricsSnapshot {
   processingDlqTotal: number;
   queueVisibilityRenewFailures: number;
   terminalPersistenceRetries: number;
+  terminalPersistenceAlerts: number;
   outboxDeliveryRetries: number;
   outboxDeadLetters: number;
   websocketConnections: number;
@@ -45,7 +46,7 @@ export class MetricsRegistry {
     appendTotal: 0, appendDuplicates: 0, appendFailures: 0, appendLatencyMsTotal: 0,
     workerStarted: 0, workerCompleted: 0, workerFailed: 0, processingFailures: 0, processingJoined: 0,
     ingressAccepted: 0, brokerReadFailures: 0, routerUnmatchedResults: 0, routerArchivedUnmatchedResults: 0, processingDlqTotal: 0, queueVisibilityRenewFailures: 0,
-    terminalPersistenceRetries: 0, outboxDeliveryRetries: 0, outboxDeadLetters: 0,
+    terminalPersistenceRetries: 0, terminalPersistenceAlerts: 0, outboxDeliveryRetries: 0, outboxDeadLetters: 0,
     websocketConnections: 0, websocketMailboxQueued: 0, websocketDelivered: 0, websocketProgressDropped: 0, websocketSlowConsumerClosed: 0, websocketReplayOverflow: 0, websocketSendFailures: 0,
     databasePoolTotal: 0, databasePoolIdle: 0, databasePoolWaiting: 0,
     queuePoolTotal: 0, queuePoolIdle: 0, queuePoolWaiting: 0,

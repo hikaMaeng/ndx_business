@@ -24,6 +24,10 @@ npm run lint --workspace agent
 | 실행 시도 소진 | recipient별 `*.processing.failure` outbox 행이 먼저 생기고 source message가 archive됨 |
 | result queue 전송 실패 | terminal event와 outbox row가 남고 publisher retry 뒤 queue 전송·fence 완료됨 |
 | outbox retry 소진 | 동일 row가 `dead`·`last_error`로 남고 `outboxDeadLetters`가 증가하며 자동 삭제되지 않음 |
+| retention 뒤 유휴 stream 재사용 | event 행을 prune해도 `event_stream_sequence` watermark가 남고 새 event의 sequence가 이전 cursor position보다 큼 |
+| 만료 execution lease | Gateway retention이 row를 terminalise하지 않고, source PGMQ 재전달이 fenced reclaim함 |
+| Gateway identity 충돌 | 같은 `AGENT_GATEWAY_ID`의 두 번째 process가 queue consume 전에 기동 실패함 |
+| terminal persistence 장기 실패 | source는 남고 execution attempt는 증가하지 않으며 read-count 임계에서 `terminalPersistenceAlerts`가 증가함 |
 | WebSocket replay | `ready`·`subscribed`·`event`·`replay` 및 cursor advance 확인 |
 
 ## 부하 검증
