@@ -114,6 +114,14 @@ export class ExecutionStore {
     await this.pool.query("UPDATE agent_execution SET queue_redeliveries = queue_redeliveries + 1, updated_at = now() WHERE transaction_key = $1 AND status = 'running'", [transactionKey]);
   }
 
+  /** Legacy or crashed owners without a recoverable broker message must not block retention forever. */
+  async recoverAbandoned(): Promise<number> {
+    const recovered = await this.pool.query(`UPDATE agent_execution SET status='failed', result=$1::jsonb, lease_until=NULL,
+      updated_at=now(), completed_at=now() WHERE status='running' AND (lease_until IS NULL OR lease_until < now())`,
+    [JSON.stringify({ ok: false, error: { code: "execution_abandoned", message: "execution lease expired without a recoverable broker message" } })]);
+    return recovered.rowCount ?? 0;
+  }
+
   async prune(retentionDays: number): Promise<number> {
     const pruned = await this.pool.query(`WITH expired AS (
       DELETE FROM agent_execution WHERE completed_at < now() - make_interval(days => $1) RETURNING transaction_key

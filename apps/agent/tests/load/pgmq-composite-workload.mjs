@@ -121,9 +121,16 @@ function sql(query) {
 function deployedWorkerSettings() {
   const [container] = JSON.parse(execFileSync("docker", ["inspect", workerContainer], { encoding: "utf8" }));
   const values = new Map(container.Config.Env.map((entry) => entry.split("=", 2)));
-  const deployedVisibilitySeconds = Number(values.get("QUEUE_VISIBILITY_TIMEOUT_SECONDS") ?? 60);
-  const deployedExecutionLeaseSeconds = Number(values.get("AGENT_EXECUTION_LEASE_SECONDS") ?? deployedVisibilitySeconds * 2);
-  return { deployedVisibilitySeconds, deployedExecutionLeaseSeconds };
+  for (const name of ["QUEUE_VISIBILITY_TIMEOUT_SECONDS", "AGENT_EXECUTION_LEASE_SECONDS", "AGENT_MAX_EXECUTION_ATTEMPTS", "AGENT_MAX_OUTBOX_ATTEMPTS", "AGENT_MAX_DELIVERY_READS", "AGENT_RETENTION_DAYS", "AGENT_ROUTER_CONCURRENCY"]) assert.ok(values.has(name), `deployed Worker must explicitly define ${name}`);
+  return {
+    visibilityTimeoutSeconds: Number(values.get("QUEUE_VISIBILITY_TIMEOUT_SECONDS")),
+    executionLeaseSeconds: Number(values.get("AGENT_EXECUTION_LEASE_SECONDS")),
+    maxExecutionAttempts: Number(values.get("AGENT_MAX_EXECUTION_ATTEMPTS")),
+    maxOutboxAttempts: Number(values.get("AGENT_MAX_OUTBOX_ATTEMPTS")),
+    maxDeliveryReads: Number(values.get("AGENT_MAX_DELIVERY_READS")),
+    retentionDays: Number(values.get("AGENT_RETENTION_DAYS")),
+    routerConcurrency: Number(values.get("AGENT_ROUTER_CONCURRENCY")),
+  };
 }
 
 function deployedGatewayQueue() {
@@ -164,10 +171,12 @@ expected(leaseTransaction, leaseChannel, "test.delay.result", true);
 
 try {
   const deployed = deployedWorkerSettings();
-  assert.equal(visibilitySeconds, deployed.deployedVisibilitySeconds, "harness visibility setting must match the deployed Worker");
-  assert.equal(executionLeaseSeconds, deployed.deployedExecutionLeaseSeconds, "harness execution lease setting must match the deployed Worker");
+  assert.equal(visibilitySeconds, deployed.visibilityTimeoutSeconds, "harness visibility setting must match the deployed Worker");
+  assert.equal(executionLeaseSeconds, deployed.executionLeaseSeconds, "harness execution lease setting must match the deployed Worker");
   gatewayQueue = deployedGatewayQueue();
-  const baselineMetrics = (await metrics()).metrics;
+  const baseline = await metrics();
+  assert.deepEqual(baseline.configuration, deployed, "Gateway metrics must report the deployed reliability configuration");
+  const baselineMetrics = baseline.metrics;
   await Promise.all(channels.flatMap((channel) => Array.from({ length: subscribersPerChannel }, (_, ordinal) => subscribe(channel, ordinal))));
 
   const conflictOriginals = await Promise.all(Array.from({ length: conflictTotal }, (_, index) => {

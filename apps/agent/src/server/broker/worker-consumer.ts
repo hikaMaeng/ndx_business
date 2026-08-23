@@ -14,6 +14,7 @@ import { DeliveryStore } from "../delivery/store.js";
 
 function resultId(event: EventEnvelope): string { return deterministicEventId(`result:${event.transactionKey}:${event.streamId}:${event.replyChannel ?? event.channel}`); }
 function conflictId(event: EventEnvelope): string { return deterministicEventId(`conflict:${event.eventId}`); }
+class TerminalPersistenceError extends Error {}
 
 /** A Worker server is only a PGMQ command consumer and PGMQ result producer. */
 export function startWorkerConsumer(input: { queue: EventQueueTransport; commandQueue: string; resultQueue: string; eventStore: EventStore; deliveries: DeliveryStore; executions: ExecutionStore; pool: WorkerPool; metrics: MetricsRegistry; visibilitySeconds: number; pollSeconds: number; batchSize: number; maxInFlight: number; maxExecutionAttempts: number }): BrokerLoop {
@@ -82,29 +83,36 @@ export function startWorkerConsumer(input: { queue: EventQueueTransport; command
       if (claim.kind === "claimed" && !await input.executions.complete(command.transactionKey, claim.attemptId, payload)) throw new WorkerLostError("worker lost the execution lease");
       }
     }
-    const recipients = await input.executions.recipients(command.transactionKey);
-    const permanentFailure = payload.error?.code === "processing_permanent_failure";
-    for (const recipient of recipients) {
-      if (permanentFailure) {
-        await persistResult(toProcessingFailureDraft(recipient, deterministicEventId(`processing-failed:${recipient.transactionKey}:${recipient.streamId}:${recipient.replyChannel ?? recipient.channel}`), payload.error?.message ?? "processing failed"));
-      } else {
-        await persistResult(toResultDraft(recipient, { eventId: resultId(recipient), action: `${recipient.action}.result`, channel: recipient.replyChannel ?? recipient.channel, createdAt: new Date().toISOString(), source: "worker", payload }));
+    try {
+      const recipients = await input.executions.recipients(command.transactionKey);
+      const permanentFailure = payload.error?.code === "processing_permanent_failure";
+      for (const recipient of recipients) {
+        if (permanentFailure) {
+          await persistResult(toProcessingFailureDraft(recipient, deterministicEventId(`processing-failed:${recipient.transactionKey}:${recipient.streamId}:${recipient.replyChannel ?? recipient.channel}`), payload.error?.message ?? "processing failed"));
+        } else {
+          await persistResult(toResultDraft(recipient, { eventId: resultId(recipient), action: `${recipient.action}.result`, channel: recipient.replyChannel ?? recipient.channel, createdAt: new Date().toISOString(), source: "worker", payload }));
+        }
       }
-    }
-    if (permanentFailure) {
-      await input.queue.archive(input.commandQueue, message.id);
-      input.metrics.increment("processingDlqTotal");
-    } else {
-      await input.queue.delete(input.commandQueue, message.id);
-      input.metrics.increment("queueDeletes");
-    }
+      if (permanentFailure) {
+        await input.queue.archive(input.commandQueue, message.id);
+        input.metrics.increment("processingDlqTotal");
+      } else {
+        await input.queue.delete(input.commandQueue, message.id);
+        input.metrics.increment("queueDeletes");
+      }
+    } catch (error) { throw new TerminalPersistenceError(error instanceof Error ? error.message : String(error)); }
   };
   const inFlight = new Set<Promise<void>>();
   const schedule = (message: { id: string; event: IngressEvent; readCount: number }): void => {
     let task: Promise<void>;
     task = process(message).catch(async (error) => {
-      input.metrics.increment("processingFailures");
-      console.error(JSON.stringify({ event: "worker.command.retry", messageId: message.id, error: error instanceof Error ? error.message : String(error) }));
+      if (error instanceof TerminalPersistenceError) {
+        input.metrics.increment("terminalPersistenceRetries");
+        console.error(JSON.stringify({ event: "worker.terminal.retry", messageId: message.id, error: error.message }));
+      } else {
+        input.metrics.increment("processingFailures");
+        console.error(JSON.stringify({ event: "worker.command.retry", messageId: message.id, error: error instanceof Error ? error.message : String(error) }));
+      }
     }).finally(() => inFlight.delete(task));
     inFlight.add(task);
   };

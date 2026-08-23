@@ -35,6 +35,9 @@ services:
         required: false
     environment:
       AGENT_ROLE: gateway
+      # Stable in the default single-Gateway deployment. Scaled Gateway instances
+      # must override this with a distinct durable identity.
+      AGENT_GATEWAY_ID: agent
     depends_on:
       admin:
         condition: service_healthy

@@ -193,6 +193,20 @@ for service in "${services[@]}"; do
   if [[ -f "$env_template" && ! -f "$env_local" ]]; then
     cp "$env_template" "$env_local"
     echo "materialized $env_local from $env_template"
+  elif [[ -f "$env_template" ]]; then
+    # The local file can carry machine-specific credentials, so never overwrite it.
+    # Append only newly introduced non-secret template keys; existing local values remain authoritative.
+    appended=0
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ -z "$line" || "$line" == \#* ]] && continue
+      key="${line%%=*}"
+      [[ "$key" =~ ^[A-Z][A-Z0-9_]*$ ]] || continue
+      if ! grep -Fqx "${key}=" "$env_local" && ! grep -Eq "^${key}=" "$env_local"; then
+        printf '%s\n' "$line" >> "$env_local"
+        appended=$((appended + 1))
+      fi
+    done < "$env_template"
+    if [[ "$appended" -gt 0 ]]; then echo "reconciled $env_local from $env_template appended=$appended"; fi
   fi
 done
 

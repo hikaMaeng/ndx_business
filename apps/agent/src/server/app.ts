@@ -6,6 +6,7 @@ import type { AgentEnv } from "./env.js";
 import type { EventQueueTransport } from "./queue/transport.js";
 import { EventStreamHub } from "./stream/hub.js";
 import type { MetricsRegistry } from "./metrics/registry.js";
+import { writeMetrics } from "./metrics/endpoint.js";
 
 export function createApp(env: AgentEnv, queue: EventQueueTransport, hub: EventStreamHub, metrics: MetricsRegistry, checkDatabase: () => Promise<void>): express.Express {
   const app = express();
@@ -13,11 +14,7 @@ export function createApp(env: AgentEnv, queue: EventQueueTransport, hub: EventS
   app.use(express.json({ limit: "256kb" }));
   app.get("/health", (_request, response) => response.json({ status: "ok", service: "agent" }));
   app.get("/ready", async (_request, response) => { try { await Promise.all([queue.check(), checkDatabase()]); response.json({ status: "ready" }); } catch { response.status(503).json({ status: "unavailable" }); } });
-  app.get("/metrics", (request, response) => {
-    if (!env.metricsToken) return response.status(404).json({ error: "metrics endpoint is disabled" });
-    if (request.get("authorization") !== `Bearer ${env.metricsToken}`) return response.status(401).json({ error: "metrics token required" });
-    return response.json({ service: "agent", metrics: metrics.snapshot() });
-  });
+  app.get("/metrics", (request, response) => { writeMetrics(request, response, env, metrics); });
   app.post("/api/events", async (request, response) => {
     try {
       const body = request.body as { action?: unknown; payload?: unknown; transactionKey?: unknown; channel?: unknown; source?: unknown; replyChannel?: unknown };

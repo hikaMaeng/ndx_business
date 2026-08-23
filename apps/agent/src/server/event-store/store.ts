@@ -159,6 +159,7 @@ export class EventStore {
 
   async prune(retentionDays: number): Promise<number> {
     const pruned = await this.pool.query("DELETE FROM event_store WHERE stored_at < now() - make_interval(days => $1)", [retentionDays]);
+    await this.pool.query("DELETE FROM event_stream_sequence AS sequence WHERE NOT EXISTS (SELECT 1 FROM event_store WHERE stream_id = sequence.stream_id)");
     return pruned.rowCount ?? 0;
   }
 

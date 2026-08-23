@@ -13,6 +13,7 @@ export interface AgentEnv {
   executionLeaseSeconds: number;
   maxDeliveryReads: number;
   maxExecutionAttempts: number;
+  maxOutboxAttempts: number;
   retentionDays: number;
   pollSeconds: number;
   pollBatchSize: number;
@@ -58,6 +59,7 @@ export function readEnv(source = process.env): AgentEnv {
     executionLeaseSeconds: positive(source, "AGENT_EXECUTION_LEASE_SECONDS", visibilityTimeoutSeconds * 2),
     maxDeliveryReads: positive(source, "AGENT_MAX_DELIVERY_READS", 5),
     maxExecutionAttempts: positive(source, "AGENT_MAX_EXECUTION_ATTEMPTS", 5),
+    maxOutboxAttempts: positive(source, "AGENT_MAX_OUTBOX_ATTEMPTS", 10),
     retentionDays: positive(source, "AGENT_RETENTION_DAYS", 30),
     pollSeconds: positive(source, "QUEUE_POLL_SECONDS", 5),
     pollBatchSize: positive(source, "QUEUE_POLL_BATCH_SIZE", 8),

@@ -16,6 +16,8 @@ Worker 소실은 handler 오류와 다르다. 소실된 attempt가 execution 상
 
 같은 transaction에 다른 `replyChannel`이 합류하면 [`agent_execution_recipient`](../src/server/idempotency/store.ts) row가 추가된다. terminal result를 만들 때 Worker는 recipient마다 `channel`을 바꾼 canonical event와 [`agent_result_delivery`](../src/server/delivery/store.ts) outbox row를 같은 transaction으로 만든다. publisher는 outbox row를 lease claim하여 result queue로 전송한 뒤 같은 attempt id로 완료 fence를 건다. Router는 `agent_gateway_subscription`을 조회해 해당 Gateway 전용 queue로 복제한다.
 
+outbox claim은 ready retry와 만료 running lease를 별도 partial-index CTE에서 가져온다. 유휴 publisher는 50ms에서 최대 1초까지 backoff하므로 delivered ledger 크기에 비례한 polling scan을 만들지 않는다. queue send 뒤 completion fence 일부만 잃으면 확인된 event는 재발행하지 않고 잃은 fence만 retry한다. retry 한도에 도달한 row는 `dead`와 오류 원인을 남긴다.
+
 이 과정은 전달을 한 번만 보장하지 않는다. 동일 event가 result queue·Gateway queue·WebSocket에서 다시 보일 수 있다. event store append는 같은 `eventId`를 하나의 저장 행으로 수렴시키지만, 최종 client는 `eventId` dedupe가 필요하다.
 
 ## cursor와 느린 소켓

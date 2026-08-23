@@ -7,7 +7,9 @@
 | `POST /api/events` | `action`과 object `payload`를 받아 `agent_requests`에 기록하고 `202`를 반환한다. |
 | `GET /health` | Gateway 프로세스 생존을 `200`으로 반환한다. |
 | `GET /ready` | PGMQ와 PostgreSQL 확인 성공 시 `200`, 실패 시 `503`을 반환한다. |
-| `GET /metrics` | `AGENT_METRICS_TOKEN`이 없으면 `404`; 있으면 `Authorization: Bearer <token>`으로만 `200`을 반환한다. |
+| `GET /metrics` | `AGENT_METRICS_TOKEN`이 없으면 `404`; 있으면 `Authorization: Bearer <token>`으로만 `200`을 반환한다. Gateway·내부 Worker·Router 모두 동일한 인증 계약을 제공한다. |
+
+`/metrics` 응답의 `configuration`은 visibility, execution/outbox attempt 한도, retention, Router concurrency의 실제 process 값을 반환한다. credential이나 DB URL은 노출하지 않는다. `metrics.outboxDeliveryRetries`, `metrics.outboxDeadLetters`, `metrics.terminalPersistenceRetries`로 결과 전송 실패와 terminal persistence 재시도를 구분한다.
 
 `POST /api/events`의 `action`은 필수다. `payload`가 object가 아니면 `{}`가 된다. 생략한 `channel`은 `agent.requests`, `replyChannel`은 `agent.results`, `transactionKey`는 서버 생성 UUID를 사용한다.
 
