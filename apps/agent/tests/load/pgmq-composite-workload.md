@@ -1,0 +1,59 @@
+# PGMQ 복합 부하 검증
+
+실행: 2026-08-23, 배포 대상: Gateway·Worker·Router 컨테이너, Worker Thread 96개.
+
+## 실행 명령
+
+```powershell
+$env:AGENT_GATEWAY_ID = "<docker inspect agent hostname>"
+$env:AGENT_METRICS_TOKEN = "<AGENT_METRICS_TOKEN>"
+node apps/agent/tests/load/pgmq-composite-workload.mjs
+```
+
+Harness는 Docker의 `admin` PostgreSQL 컨테이너를 읽어 event store, execution, PGMQ queue를 검증한다. 따라서 실제 Compose stack에서만 실행한다.
+
+## 기본 workload
+
+| 항목 | 값 |
+| --- | ---: |
+| 독립 delay 실행 | 2,048 × 5,000ms |
+| Worker Thread | 96 |
+| stream | 512 |
+| transaction join | 128건, 다른 reply channel 추가 |
+| payload conflict | 32건 |
+| visibility probe | 65,000ms delay 1건 |
+| 논리 channel / WebSocket subscriber | 7 / 14 |
+
+delay 실행의 worker-only 하한은 `ceil(2048 / 96) × 5,000 = 110,000ms`다. 기본 허용 시간은 하한 + 20,000ms다. visibility probe는 throughput command보다 먼저 보내므로 65초가 benchmark의 직렬 tail이 되지 않는다.
+
+## 2026-08-23 결과
+
+```json
+{
+  "elapsedMs": 112361,
+  "terminalP50Ms": 52586,
+  "terminalP95Ms": 105561,
+  "terminalP99Ms": 110178,
+  "expectedTerminalCount": 2241,
+  "eventRows": 4482,
+  "completedExecutions": 2081,
+  "leaseAttempts": 1,
+  "queues": {
+    "agent_requests": 0,
+    "agent_results": 0,
+    "agent_gateway_d72e8ba8bd1d": 0
+  }
+}
+```
+
+이는 기존 순수 2,048 delay baseline(112,769ms)과 같은 worker 하한 안에서, join·conflict·다중 subscriber·긴 visibility lease까지 함께 검증한 결과다. Gateway ID는 컨테이너마다 달라지므로 결과의 queue 이름은 재실행 시 달라진다.
+
+## 통과 조건
+
+1. 모든 subscriber가 예상 action·channel·성공/실패 값을 정확히 한 번 받는다.
+2. event store 행 수는 command + terminal event 예상값과 같고, 모든 logical execution은 completed다.
+3. 65초 실행의 `agent_execution.attempts`는 1이다. 즉 PGMQ visibility heartbeat가 재claim을 막았다.
+4. command, result, Gateway queue의 workload prefix 잔여가 모두 0이다.
+5. elapsed가 worker 하한 + overhead 이내다.
+
+초기 harness는 65초 probe를 2,176개 delay command 뒤에 넣어 172,944ms로 실패했다. 이는 result Router 성능 저하가 아니라 probe 자체가 약 108초 queue 대기 후 실행된 test 설계 오류였다. probe를 먼저 시작하도록 고쳐 실제 critical path를 측정한다.

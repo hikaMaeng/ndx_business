@@ -24,4 +24,8 @@ npm run lint --workspace agent
 
 ## 부하 검증
 
-제출 수만큼 terminal result가 관측됐는지와 command/result/Gateway queue가 모두 비워졌는지를 함께 확인한다. 현재 DLQ·최대시도 정책은 없으므로 “DLQ 0”은 완료 기준이 아니다. 결과에는 Worker 수, handler 지연, stream 수, reply channel 수, queue 이름, p95/p99, duplicate event 수를 기록한다.
+[`pgmq-composite-workload.mjs`](../tests/load/pgmq-composite-workload.mjs)는 기존의 순수 delay benchmark를 대체하는 배포 E2E harness다. 기본 workload는 2,048개의 5초 delay 실행, 128개의 다채널 transaction join, 32개의 payload conflict, visibility timeout보다 긴 65초 실행, 7개 논리 channel과 channel당 2개 WebSocket subscriber를 함께 사용한다. 최근 실측값과 재현 절차는 [복합 부하 증적](../tests/load/pgmq-composite-workload.md)에 남긴다.
+
+완료 기준은 단순 queue drain이 아니다. 모든 subscriber가 정확한 action·성공/실패 값을 받고, event store의 command/result 행 수·완료 execution 수·긴 실행의 attempt 수·세 PGMQ queue의 prefix별 잔여가 모두 예상값과 일치해야 한다. 결과에는 Worker 수, handler 지연, stream 수, channel·subscriber 수, ingress/terminal p50·p95·p99, lower bound, elapsed, queue 잔여를 기록한다.
+
+현재 DLQ·최대시도 정책은 없으므로 “DLQ 0”은 완료 기준이 아니다.
