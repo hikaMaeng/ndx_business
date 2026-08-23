@@ -113,7 +113,7 @@ export function startWorkerConsumer(input: { queue: EventQueueTransport; command
       if (error instanceof TerminalPersistenceError) {
         input.metrics.increment("terminalPersistenceRetries");
         console.error(JSON.stringify({ event: "worker.terminal.retry", messageId: message.id, error: error.message }));
-        if (message.readCount === (input.terminalPersistenceAlertAttempts ?? 10)) {
+        if (message.readCount >= (input.terminalPersistenceAlertAttempts ?? 10)) {
           input.metrics.increment("terminalPersistenceAlerts");
           console.error(JSON.stringify({ event: "worker.terminal.persistence.alert", messageId: message.id, readCount: message.readCount, threshold: input.terminalPersistenceAlertAttempts ?? 10, error: error.message }));
         }

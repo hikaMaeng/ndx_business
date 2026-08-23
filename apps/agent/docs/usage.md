@@ -6,7 +6,7 @@ Compose에서는 `AGENT_ROLE=gateway|worker|router`로 같은 이미지를 세 �
 | --- | --- |
 | `AGENT_QUEUE`, `AGENT_RESULT_QUEUE` | command와 result의 공유 PGMQ queue |
 | `AGENT_GATEWAY_QUEUE_PREFIX` | Gateway별 결과 queue 접두사 |
-| `AGENT_GATEWAY_ID` | Gateway별 구독·결과 queue 식별자. 미설정 시 `HOSTNAME`, 그다음 UUID. 같은 ID의 두 live Gateway는 DB lease 때문에 두 번째가 기동 실패한다. |
+| `AGENT_GATEWAY_ID` | Gateway별 구독·결과 queue 식별자. 미설정 시 `HOSTNAME`, 그다음 UUID. 같은 ID의 두 번째 Gateway는 queue를 소비하지 않고 live lease가 끝날 때까지 standby로 대기한다. |
 | `AGENT_TERMINAL_PERSISTENCE_ALERT_ATTEMPTS` | terminal event 저장 실패가 PGMQ read count 몇 회에 도달하면 운영 경보를 남길지 정하는 임계값 |
 | `QUEUE_VISIBILITY_TIMEOUT_SECONDS` | PGMQ read visibility lease 기간 |
 | `AGENT_EXECUTION_LEASE_SECONDS` | PostgreSQL execution ownership lease 기간. 미설정 시 visibility의 2배 |
@@ -27,3 +27,5 @@ client 순서는 다음과 같다.
 4. `eventId`로 중복 terminal event를 제거하고 cursor를 저장해 재접속 시 subscribe frame에 넣는다.
 
 현재 Compose 파일은 `container_name: agent`와 단일 port publish를 사용하므로 `docker compose --scale agent=N`을 지원하지 않는다. 다중 Gateway가 필요하면 먼저 Compose/ingress를 replica 가능하도록 바꾸고 각 replica에 고유 Gateway ID를 공급해야 한다.
+
+SIGTERM 배포는 Gateway가 PGMQ reader를 멈춘 뒤 lease를 명시 해제하므로, 정상 handoff는 최대 한 poll 기간 안에 교체된다. SIGKILL·host 장애처럼 해제가 불가능한 종료에서는 새 process가 기본 30초 이내에 기존 lease 만료를 기다린 뒤 takeover한다. 기다리는 process는 retention·PGMQ 소비·WebSocket port를 열지 않는다.

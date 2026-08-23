@@ -1,5 +1,7 @@
 import type { Pool } from "pg";
 
+export type GatewayClaim = { owned: true } | { owned: false; retryAfterMs: number };
+
 /** Durable routing registry. See docs/internals.md#broker-topology. */
 export class GatewaySubscriptionStore {
   constructor(private readonly pool: Pool, private readonly leaseSeconds: number) {}
@@ -17,13 +19,17 @@ export class GatewaySubscriptionStore {
   }
 
   /** A queue has one consumer owner; a second process using its identity must fail closed. */
-  async claimGateway(gatewayId: string, instanceId: string): Promise<boolean> {
+  async claimGateway(gatewayId: string, instanceId: string): Promise<GatewayClaim> {
     const claimed = await this.pool.query(`INSERT INTO agent_gateway_instance (gateway_id, instance_id, lease_until)
       VALUES ($1, $2::uuid, now() + make_interval(secs => $3))
       ON CONFLICT (gateway_id) DO UPDATE SET instance_id=EXCLUDED.instance_id, lease_until=EXCLUDED.lease_until, updated_at=now()
       WHERE agent_gateway_instance.instance_id=$2::uuid OR agent_gateway_instance.lease_until < now()
       RETURNING gateway_id`, [gatewayId, instanceId, this.leaseSeconds]);
-    return Boolean(claimed.rowCount);
+    if (claimed.rowCount) return { owned: true };
+    const held = await this.pool.query<{ retry_after_ms: number | string }>(`SELECT GREATEST(100,
+      ceil(extract(epoch FROM lease_until - now()) * 1000)::integer) AS retry_after_ms
+      FROM agent_gateway_instance WHERE gateway_id = $1`, [gatewayId]);
+    return { owned: false, retryAfterMs: Number(held.rows[0]?.retry_after_ms ?? 100) };
   }
 
   async replaceConnection(gatewayId: string, connectionId: string, channels: readonly string[]): Promise<void> {
@@ -61,7 +67,8 @@ export class GatewaySubscriptionStore {
   }
 
   async pruneExpired(): Promise<number> {
-    const pruned = await this.pool.query("DELETE FROM agent_gateway_subscription WHERE lease_until < now()");
-    return pruned.rowCount ?? 0;
+    const subscriptions = await this.pool.query("DELETE FROM agent_gateway_subscription WHERE lease_until < now()");
+    const instances = await this.pool.query("DELETE FROM agent_gateway_instance WHERE lease_until < now()");
+    return (subscriptions.rowCount ?? 0) + (instances.rowCount ?? 0);
   }
 }

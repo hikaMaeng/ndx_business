@@ -58,6 +58,7 @@ test("sequence counter migration starts after every existing stream position", a
   await new EventStore(pool as never).ensureSchema();
   assert.ok(statements.some((sql) => sql.includes("SELECT stream_id, max(sequence) FROM event_store GROUP BY stream_id")));
   assert.ok(statements.some((sql) => sql.includes("event_store_channel_stream_sequence_idx")));
+  assert.ok(statements.some((sql) => sql.includes("event_store_stored_at_idx")));
   assert.ok(statements.some((sql) => sql.includes("COALESCE(NULLIF(payload->>'sessionKey','')")));
 });
 

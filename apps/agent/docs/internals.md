@@ -33,3 +33,5 @@ WebSocket은 구독 직후 high-water mark를 잡고 과거 event replay와 이�
 - `event_stream_sequence`는 retention과 독립된 stream watermark다. 이유: 보관된 event가 모두 사라져도 살아 있는 cursor가 더 작은 새 sequence를 영구히 건너뛰면 안 된다.
 - Gateway queue identity는 `agent_gateway_instance` lease로 단일 process만 소유한다. 이유: 동일 ID의 replica가 queue를 경쟁 소비하면 다른 replica의 WebSocket event를 삭제할 수 있다.
 - 만료 execution lease는 observer가 terminalise하지 않는다. 이유: PGMQ 재전달이 fenced reclaim을 수행할 권리를 갖고, terminal result는 Worker transaction만 기록할 수 있다.
+- Gateway는 `agent_gateway_instance` lease를 먼저 확보한 뒤에만 다른 schema 초기화, queue 보장, retention, socket delivery를 시작한다. 이유: 대기·중복 Gateway가 운영 데이터를 정리하거나 queue를 경쟁 소비하면 안 된다.
+- 정상 Gateway handoff는 queue reader 종료 뒤 instance lease를 해제한다. 이유: 기존 reader가 더 이상 message를 consume하지 않는 것을 확인한 뒤 새 Gateway를 허용하면서, 오래 열린 WebSocket이 lease 해제를 막지 않게 한다.

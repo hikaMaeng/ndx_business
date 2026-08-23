@@ -49,6 +49,7 @@ export class EventStore {
     await this.pool.query("CREATE INDEX IF NOT EXISTS event_store_channel_stream_sequence_idx ON event_store (channel, stream_id, sequence)");
     await this.pool.query("DROP INDEX IF EXISTS event_store_stream_channel_sequence_idx");
     await this.pool.query("CREATE INDEX IF NOT EXISTS event_store_correlation_idx ON event_store (correlation_id, stored_at)");
+    await this.pool.query("CREATE INDEX IF NOT EXISTS event_store_stored_at_idx ON event_store (stored_at)");
     await this.pool.query(`CREATE TABLE IF NOT EXISTS event_stream_sequence (
       stream_id text PRIMARY KEY, last_sequence bigint NOT NULL)`);
     await this.pool.query(`INSERT INTO event_stream_sequence (stream_id, last_sequence)

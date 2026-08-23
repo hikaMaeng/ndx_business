@@ -35,16 +35,29 @@ const executions = new ExecutionStore(database, env.executionLeaseSeconds);
 const deliveries = new DeliveryStore(database, env.executionLeaseSeconds);
 const gatewayQueue = (): string => `${env.gatewayQueuePrefix}${env.gatewayId.replace(/[^a-zA-Z0-9_]/g, "_")}`;
 
-await eventStore.ensureSchema();
 await subscriptions.ensureSchema();
+const gatewayInstanceId = env.role === "gateway" ? randomUUID() : undefined;
+if (gatewayInstanceId) {
+  for (;;) {
+    const claim = await subscriptions.claimGateway(env.gatewayId, gatewayInstanceId);
+    if (claim.owned) break;
+    console.warn(JSON.stringify({ event: "gateway.identity.waiting", gatewayId: env.gatewayId, retryAfterMs: claim.retryAfterMs }));
+    await new Promise<void>((resolve) => setTimeout(resolve, claim.retryAfterMs));
+  }
+}
+await eventStore.ensureSchema();
 await executions.ensureSchema();
 await deliveries.ensureSchema();
 await queue.ensure(env.queue);
 await queue.ensure(env.resultQueue);
 if (env.role === "gateway") await queue.ensure(gatewayQueue());
-if (env.role === "gateway") {
+const observeExpiredExecutions = async (): Promise<void> => {
   const expired = await executions.expiredRunningCount();
+  metrics.setGauge("expiredExecutionLeases", expired);
   if (expired) console.warn(JSON.stringify({ event: "execution.lease.expired", rows: expired }));
+};
+if (env.role === "gateway") {
+  await observeExpiredExecutions();
   await Promise.all([subscriptions.pruneExpired(), eventStore.pruneChannelCursors(env.retentionDays), eventStore.prune(env.retentionDays), executions.prune(env.retentionDays), deliveries.prune(env.retentionDays)]);
 }
 
@@ -75,8 +88,7 @@ if (env.role === "worker") {
   process.once("SIGTERM", () => { void shutdown().then(() => process.exit(0)); });
   process.once("SIGINT", () => { void shutdown().then(() => process.exit(0)); });
 } else {
-  const gatewayInstanceId = randomUUID();
-  if (!await subscriptions.claimGateway(env.gatewayId, gatewayInstanceId)) throw new Error(`AGENT_GATEWAY_ID '${env.gatewayId}' is already owned by another live Gateway`);
+  if (!gatewayInstanceId) throw new Error("Gateway identity was not initialised");
   const hub = new EventStreamHub();
   const delivery = startGatewayDelivery({ queue, queueName: gatewayQueue(), hub, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds });
   const server = createApp(env, queue, hub, metrics, async () => { await Promise.all([queue.check(), database.query("SELECT 1")]); }).listen(env.port, () => console.log(JSON.stringify({ event: "agent.gateway.listening", port: env.port, gatewayId: env.gatewayId, commandQueue: env.queue })));
@@ -85,15 +97,17 @@ if (env.role === "worker") {
     if (!owned) { console.error(JSON.stringify({ event: "gateway.identity.lost", gatewayId: env.gatewayId })); process.exit(1); }
   }).catch((error) => console.error(JSON.stringify({ event: "gateway.subscription.renew.failed", error: error instanceof Error ? error.message : String(error) }))); }, Math.max(1_000, Math.floor(env.subscriptionLeaseSeconds * 500)));
   const retentionTimer = setInterval(() => { void (async () => {
-    const expired = await executions.expiredRunningCount();
-    if (expired) console.warn(JSON.stringify({ event: "execution.lease.expired", rows: expired }));
+    await observeExpiredExecutions();
     await Promise.all([subscriptions.pruneExpired(), eventStore.pruneChannelCursors(env.retentionDays), eventStore.prune(env.retentionDays), executions.prune(env.retentionDays), deliveries.prune(env.retentionDays)]);
   })().catch((error) => console.error(JSON.stringify({ event: "agent.retention.failed", error: error instanceof Error ? error.message : String(error) }))); }, 60 * 60 * 1_000);
   const shutdown = async (): Promise<void> => {
     delivery.stop(); clearInterval(metricsTimer); clearInterval(renewTimer); clearInterval(retentionTimer);
+    // Stop the queue reader before releasing identity. This bounds normal handoff by one
+    // PGMQ poll, instead of waiting for long-lived WebSocket connections to close.
+    await delivery.done; await subscriptions.releaseGateway(env.gatewayId, gatewayInstanceId);
     for (const client of websocket.clients) client.close(1001, "gateway shutdown"); websocket.close();
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-    await delivery.done; await subscriptions.releaseGateway(env.gatewayId, gatewayInstanceId); await queueDatabase.end(); await database.end();
+    await queueDatabase.end(); await database.end();
   };
   process.once("SIGTERM", () => { void shutdown().then(() => process.exit(0)); });
   process.once("SIGINT", () => { void shutdown().then(() => process.exit(0)); });

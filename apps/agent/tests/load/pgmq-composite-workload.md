@@ -15,6 +15,8 @@ node apps/agent/tests/load/pgmq-composite-workload.mjs
 
 Harness는 Docker의 `admin` PostgreSQL 컨테이너를 읽어 event store, execution, PGMQ queue를 검증한다. 따라서 실제 Compose stack에서만 실행한다.
 
+성공한 run은 종료 시 자신의 timestamp prefix에 속한 event, execution, recipient, cursor, outbox, watermark를 하나의 PostgreSQL transaction으로 제거하고 각 잔여 수가 0인지 다시 확인한다. 실패한 run은 원인 분석을 위해 자동 정리하지 않는다.
+
 ## 기본 workload
 
 | 항목 | 값 |
@@ -49,7 +51,7 @@ delay 실행의 worker-only 하한은 `ceil(2048 / 96) × 5,000 = 110,000ms`다.
 }
 ```
 
-이는 기존 순수 2,048 delay baseline(112,769ms)과 같은 worker 하한 안에서, join·conflict·다중 subscriber·긴 visibility lease까지 함께 검증한 결과다. `AGENT_TERMINAL_PERSISTENCE_ALERT_ATTEMPTS=10`도 컨테이너 env와 `/metrics.configuration`의 교차검증 대상이다. 기본 Gateway ID는 `agent`이며, 같은 ID의 두 번째 process는 queue 경쟁 소비 대신 DB identity lease에서 기동 실패한다.
+이는 기존 순수 2,048 delay baseline(112,769ms)과 같은 worker 하한 안에서, join·conflict·다중 subscriber·긴 visibility lease까지 함께 검증한 결과다. 부하 outbox delivery ledger는 avg 237.7ms, p95 554.4ms, max 900.8ms, max attempt 1이었다. `AGENT_TERMINAL_PERSISTENCE_ALERT_ATTEMPTS=10`도 컨테이너 env와 `/metrics.configuration`의 교차검증 대상이다. 기본 Gateway ID는 `agent`이며, 같은 ID의 두 번째 process는 queue 경쟁 소비 대신 lease 만료까지 passive standby로 대기한다.
 
 ## 통과 조건
 

@@ -119,3 +119,18 @@ test("a completed execution retains its broker message when terminal persistence
   assert.deepEqual(deleted, []);
   assert.deepEqual(metrics, ["queueReads", "queueMessages", "terminalPersistenceRetries", "terminalPersistenceAlerts"]);
 });
+
+test("terminal persistence failure alerts when a prior non-terminal redelivery already crossed the threshold", async () => {
+  let read = false; const metrics: string[] = [];
+  const loop = startWorkerConsumer({
+    queue: { read: async () => read ? await new Promise<never>(() => undefined) : (read = true, [{ id: "terminal-late", event: command, headers: null, readCount: 11 }]) } as never,
+    commandQueue: "agent_commands", resultQueue: "agent_results", eventStore: {
+      append: async (draft: EventDraft): Promise<EventEnvelope> => { if (draft.kind === "result") throw new Error("database unavailable"); return { ...command, kind: "command", eventVersion: 1, streamId: "channel:agent.requests", sequence: "1", correlationId: "tx-1", source: "client" }; },
+    } as never, deliveries: { enqueue: async () => undefined } as never,
+    executions: { claim: async () => ({ kind: "joined", requestEventId: command.eventId, completed: true, result: { ok: true, value: "done" } }), recipients: async () => [{ ...command, kind: "command", eventVersion: 1, streamId: "channel:agent.requests", sequence: "1", correlationId: "tx-1", source: "client" }], renew: async () => true } as never,
+    pool: { run: async () => ({ value: "unexpected", workerId: "worker-a" }) } as never,
+    metrics: { increment: (name: string) => { metrics.push(name); } } as never, visibilitySeconds: 60, pollSeconds: 1, batchSize: 1, maxInFlight: 2, maxExecutionAttempts: 1, terminalPersistenceAlertAttempts: 10,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20)); loop.stop();
+  assert.ok(metrics.includes("terminalPersistenceAlerts"));
+});

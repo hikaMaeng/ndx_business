@@ -150,11 +150,31 @@ function queuePrefixCount(queue) {
   return Number(sql(`SELECT count(*) FROM pgmq.q_${queue} WHERE message->>'transactionKey' LIKE ${sqlLiteral(`${prefix}%`)}`));
 }
 
+function cleanupSuccessfulRun() {
+  sql(`BEGIN;
+    DELETE FROM event_subscription_cursor WHERE channels::text LIKE ${sqlLiteral(`%${prefix}%`)};
+    DELETE FROM agent_result_delivery WHERE event_id IN (SELECT event_id FROM event_store WHERE transaction_key LIKE ${sqlLiteral(`${prefix}%`)});
+    DELETE FROM agent_execution_recipient WHERE transaction_key LIKE ${sqlLiteral(`${prefix}%`)};
+    DELETE FROM agent_execution WHERE transaction_key LIKE ${sqlLiteral(`${prefix}%`)};
+    DELETE FROM event_store WHERE transaction_key LIKE ${sqlLiteral(`${prefix}%`)};
+    DELETE FROM event_stream_sequence AS sequence WHERE stream_id LIKE ${sqlLiteral(`session:${prefix}%`)}
+      AND NOT EXISTS (SELECT 1 FROM event_store AS event WHERE event.stream_id = sequence.stream_id)
+      AND NOT EXISTS (SELECT 1 FROM event_subscription_cursor AS cursor WHERE cursor.positions ? sequence.stream_id);
+    COMMIT;`);
+  for (const [table, query] of Object.entries({
+    events: `SELECT count(*) FROM event_store WHERE transaction_key LIKE ${sqlLiteral(`${prefix}%`)}`,
+    executions: `SELECT count(*) FROM agent_execution WHERE transaction_key LIKE ${sqlLiteral(`${prefix}%`)}`,
+    cursors: `SELECT count(*) FROM event_subscription_cursor WHERE channels::text LIKE ${sqlLiteral(`%${prefix}%`)}`,
+    watermarks: `SELECT count(*) FROM event_stream_sequence WHERE stream_id LIKE ${sqlLiteral(`session:${prefix}%`)}`,
+  })) assert.equal(Number(sql(query)), 0, `${table} must be prefix-clean after a successful workload`);
+}
+
 const expectedTerminalCount = total + joinTotal + conflictTotal * 2 + 1;
 const expectedCommandCount = total + joinTotal + conflictTotal * 2 + 1;
 const expectedExecutionCount = total + conflictTotal + 1;
 const lowerBoundMs = Math.ceil(total / workers) * delayMs;
 let workloadStartedAt = 0;
+let verified = false;
 
 for (let index = 0; index < total; index += 1) {
   const transactionKey = `${prefix}-delay-${index}`;
@@ -245,7 +265,9 @@ try {
   }
 
   console.log(JSON.stringify({ test: "pgmq-composite-workload", prefix, total, joinTotal, conflictTotal, leaseDelayMs, visibilitySeconds, executionLeaseSeconds, workers, streams, channels: channels.length, subscribers: subscribers.length, ingressP50Ms: percentile(ingressLatencies, 0.50), ingressP95Ms: percentile(ingressLatencies, 0.95), terminalP50Ms: percentile(allSubscribers, 0.50), terminalP95Ms: percentile(allSubscribers, 0.95), terminalP99Ms: percentile(allSubscribers, 0.99), lowerBoundMs, overheadMs, elapsedMs, expectedTerminalCount, eventRows, completedExecutions, leaseAttempts, leaseRedeliveries, gatewayMetrics, queues }));
+  verified = true;
 } finally {
   await Promise.all(subscribers.map((subscriber) => new Promise((resolve) => { subscriber.socket.once("close", resolve); subscriber.socket.close(); })));
   ingressAgent.destroy();
+  if (verified) cleanupSuccessfulRun();
 }

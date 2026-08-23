@@ -6,7 +6,7 @@ Gateway만 host port `18081`을 공개한다. Worker는 command queue를 읽는 
 
 | PostgreSQL 데이터 | 책임 | 코드 |
 | --- | --- | --- |
-| `event_store`, `event_stream_sequence` | canonical event와 stream별 sequence | [`EventStore`](../src/server/event-store/store.ts) |
+| `event_store`, `event_stream_sequence` | canonical event·retention index와 stream별 sequence watermark | [`EventStore`](../src/server/event-store/store.ts) |
 | `event_subscription_cursor` | channel별 cursor position | [`EventStore`](../src/server/event-store/store.ts) |
 | `agent_execution`, `agent_execution_recipient` | transaction claim, 실행 결과, reply channel 집합 | [`ExecutionStore`](../src/server/idempotency/store.ts) |
 | `agent_gateway_instance`, `agent_gateway_subscription` | Gateway queue identity의 단일 owner와 channel 구독 lease | [`GatewaySubscriptionStore`](../src/server/subscription/store.ts) |
