@@ -4,7 +4,7 @@ import type { EventEnvelope } from "agent_domain/common";
 
 export type ExecutionClaim =
   | { kind: "claimed"; attemptId: string }
-  | { kind: "joined"; completed: boolean; result?: ResultPayload }
+  | { kind: "joined"; requestEventId: string; completed: boolean; result?: ResultPayload }
   | { kind: "conflict"; reason: string };
 
 export type ResultPayload = { ok: boolean; value?: unknown; error?: { code: string; message: string } };
@@ -48,8 +48,8 @@ export class ExecutionStore {
       VALUES ($1, $2, $3, 'running', $4, now() + make_interval(secs => $5), now(), 1)
       ON CONFLICT (transaction_key) DO NOTHING RETURNING transaction_key`, [event.transactionKey, event.eventId, hash, attemptId, this.leaseSeconds]);
     if (inserted.rowCount) { await addRecipient(this.pool, event); return { kind: "claimed", attemptId }; }
-    const existing = await this.pool.query<{ status: string; result: ResultPayload | null; payload_hash: string; reclaimed: boolean }>(`WITH locked AS (
-        SELECT transaction_key, status, result, payload_hash FROM agent_execution WHERE transaction_key = $1 FOR UPDATE
+    const existing = await this.pool.query<{ request_event_id: string; status: string; result: ResultPayload | null; payload_hash: string; reclaimed: boolean }>(`WITH locked AS (
+        SELECT transaction_key, request_event_id, status, result, payload_hash FROM agent_execution WHERE transaction_key = $1 FOR UPDATE
       ), recipient AS (
         INSERT INTO agent_execution_recipient (transaction_key, reply_channel, request_event)
         SELECT $1, $5, $6::jsonb FROM locked WHERE payload_hash = $2
@@ -59,13 +59,13 @@ export class ExecutionStore {
           attempts = attempts + 1, updated_at = now()
         WHERE transaction_key = $1 AND status = 'running' AND (lease_until IS NULL OR lease_until < now()) AND payload_hash = $2
         RETURNING transaction_key
-      ) SELECT locked.status, locked.result, locked.payload_hash, EXISTS(SELECT 1 FROM reclaimed) AS reclaimed FROM locked`,
+      ) SELECT locked.request_event_id, locked.status, locked.result, locked.payload_hash, EXISTS(SELECT 1 FROM reclaimed) AS reclaimed FROM locked`,
     [event.transactionKey, hash, attemptId, this.leaseSeconds, recipientEvent(event).replyChannel, JSON.stringify(recipientEvent(event))]);
     const row = existing.rows[0];
     if (!row) return { kind: "conflict", reason: "transaction claim disappeared" };
     if (row.payload_hash !== hash) return { kind: "conflict", reason: "transactionKey reused with a different action or payload" };
     if (row.reclaimed) return { kind: "claimed", attemptId };
-    return { kind: "joined", completed: row.status !== "running", ...(row.result ? { result: row.result } : {}) };
+    return { kind: "joined", requestEventId: row.request_event_id, completed: row.status !== "running", ...(row.result ? { result: row.result } : {}) };
   }
 
   async renew(transactionKey: string, attemptId: string): Promise<boolean> {

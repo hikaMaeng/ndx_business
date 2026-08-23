@@ -27,8 +27,13 @@ export function startWorkerConsumer(input: { queue: EventQueueTransport; command
     }
     if (claim.kind === "joined" && !claim.completed) {
       input.metrics.increment("processingJoined");
-      await input.queue.delete(input.commandQueue, message.id);
-      input.metrics.increment("queueDeletes");
+      // See docs/constraints.md#내구성-경계: this can be a visibility redelivery of
+      // the still-running source command. Keeping it lets a later lease expiry
+      // reclaim the execution instead of orphaning the transaction.
+      if (claim.requestEventId !== command.eventId) {
+        await input.queue.delete(input.commandQueue, message.id);
+        input.metrics.increment("queueDeletes");
+      }
       return;
     }
     let payload: ResultPayload;
@@ -37,7 +42,7 @@ export function startWorkerConsumer(input: { queue: EventQueueTransport; command
         input.metrics.increment("workerStarted");
         const controller = new AbortController();
         let leaseLost = false;
-        const heartbeat = setInterval(() => { void input.executions.renew(command.transactionKey, claim.attemptId).then((owned) => {
+        const heartbeat = setInterval(() => { void Promise.all([input.executions.renew(command.transactionKey, claim.attemptId), input.queue.extendVisibility(input.commandQueue, message.id, input.visibilitySeconds)]).then(([owned]) => {
           if (!owned) { leaseLost = true; controller.abort(); }
         }).catch(() => { leaseLost = true; controller.abort(); }); }, Math.max(1_000, Math.floor(input.visibilitySeconds * 1_000 / 3)));
         try {

@@ -1,31 +1,34 @@
-# API
+# agent_domain API
 
-The public entrypoint exports ingress and canonical shapes from `protocol/event`.
+## common export
 
-- `IngressCommand` is what a client may send: action, transaction key, channel,
-  optional session/run/turn context, and payload. It carries no event ID,
-  stream, or sequence, because the server issues those.
-- `EventDraft` adds server-issued identity minus `sequence`.
-- `IngressEvent` is the server-issued PGMQ handoff record. It has an event ID
-  for redelivery convergence but no stream or sequence until append.
-- `EventEnvelope` is the stored and delivered shape: draft plus the per-stream
-  decimal-string `sequence` assigned at append time, with `causationEventId` linking a derived
-  event to its cause.
+[`agent_domain/common`](../src/common/index.ts)은 `IngressEvent`, `EventDraft`, `EventEnvelope`, `createIngressEvent`, `createDerivedDraft`, `streamIdOf`, channel frame parser를 export한다.
 
-`createIngressEvent` creates the durable handoff record. `createEventDraft`
-builds a command into a draft. `createDerivedDraft`
-builds a follow-up event that inherits stream, session, run, turn, and
-correlation identity from its cause. `streamIdOf` is the single stream-identity rule: `session:<sessionId>` when a
-session exists, otherwise `channel:<channel>`.
+```ts
+interface EventEnvelope {
+  eventId: string;
+  eventVersion: 1;
+  kind: "command" | "fact" | "result" | "progress" | "failure" | "control";
+  streamId: string;
+  sequence: string; // PostgreSQL bigint의 10진 표현
+  action: string;
+  transactionKey: string;
+  channel: string;
+  replyChannel?: string;
+  causationEventId?: string;
+  correlationId: string;
+  source: "client" | "server" | "worker" | "scheduler";
+  createdAt: string;
+  payload: Record<string, unknown>;
+}
+```
 
-The server-only `./server` export supplies `deterministicEventId(name)`, the
-stable UUID-shaped identity used for outcomes that may be derived more than once.
+`ChannelClientFrame`은 `{ type: "subscribe", channels, cursor? }` 또는 `{ type: "event", ...IngressCommand }`다. `ChannelServerFrame`은 `ready`, `subscribed`, `event`, `replay` 네 종류다.
 
-`protocol/channel` has the browser subscription frames. `subscribed` carries
-`replayComplete`; a false value means the server sent one bounded replay page.
-After all page events have durably advanced the cursor it emits `replay` with
-that same opaque cursor. The client must subscribe again until the frame says
-`replayComplete: true`; only a complete replay joins live routing.
+## server export
 
-`protocol/stream` holds the browser stream model. There is no legacy `protocol/vibe`
-alias or public legacy stub subpath.
+[`agent_domain/server`](../src/server/index.ts)은 handler registry와 `deterministicEventId`를 export한다. `deterministicEventId`는 `common` export가 아니며 server에서 파생 result/failure ID를 만들 때만 사용한다.
+
+## front export
+
+[`agent_domain/front`](../src/front/index.ts)은 화면의 stream event model을 export한다. frontend는 raw socket object 대신 `ChannelServerFrame`을 parse한 뒤 이 모델에 반영한다.

@@ -1,13 +1,14 @@
-# Architecture
+# agent_domain 아키텍처
 
-The package owns framework-independent event shapes. PostgreSQL access, polling, worker-thread orchestration, and external process adapters remain in `apps/agent`.
-
-The planned replacement contract and its migration boundaries are in the [Agent Renewal plan](../../../agentRenewal.md). `protocol/event` owns the server-issued ingress-queue record and the canonical stored/egress contract. Removed legacy protocol folders have no public subpath or runtime consumer.
-
-| Edge | Status | Owner |
+| 경로 | 책임 | 대표 코드 |
 | --- | --- | --- |
-| `src/common/protocol/event` → HTTP/WebSocket ingress, event store, egress | current exported contract | `IngressCommand`, `IngressEvent`, `EventDraft`, `EventEnvelope`, stream and identity rules |
-| `src/server/handlers` → Agent worker bundle | exported `./server` contract | ordered static domain handler registry |
-| `src/common/protocol/stream` → browser stream model | current exported contract | stream event and snapshot wire shapes |
-| Removed `protocol/{agent,envelope,session,turn,iteration,tool,process,hook,model,state,approval,artifact,vibe}` | no public contract | deleted after consumer search confirmed no imports |
-| `src/front/model` → browser stream console | current exported front contract | in-memory view model and subscription signal |
+| `src/common/protocol/event/` | ingress·canonical event 타입과 draft 생성 | [`createIngressEvent`](../src/common/protocol/event/index.ts) |
+| `src/common/protocol/channel/` | WebSocket client/server frame과 cursor parser | [`parseChannelClientFrame`](../src/common/protocol/channel/index.ts) |
+| `src/common/protocol/stream/` | 화면용 stream snapshot 타입 | [`StreamSnapshot`](../src/common/protocol/stream/index.ts) |
+| `src/server/handlers/` | Worker handler 계약과 registry | [`executeHandler`](../src/server/handlers/index.ts) |
+| `src/server/id/` | server-derived event의 deterministic ID | [`deterministicEventId`](../src/server/id/index.ts) |
+| `src/front/model/` | frontend event stream model | [`EventStreamModel`](../src/front/model/event-stream.ts) |
+
+`streamIdOf`는 `protocol/stream`이 아니라 [`protocol/event`](../src/common/protocol/event/index.ts)에 있다. `protocol/stream`은 현재 순서 계산이 아닌 화면 snapshot 모델만 소유한다.
+
+Gateway·Router는 `agent_domain/common`을, Worker는 `agent_domain/common`과 `agent_domain/server`를 사용한다. package 내부 상대 경로가 아니라 이 export 경계를 사용해야 한다.

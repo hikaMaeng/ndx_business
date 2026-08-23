@@ -1,17 +1,27 @@
-# Internals
+# Agent 내부 동작
 
-## Decisions
+## Worker consume
 
-* PGMQ is the only inter-participant path — Gateway, Worker, and Router can scale or restart without direct addresses to one another.
-* `agent-worker` has no published port — it reads `AGENT_QUEUE`, executes the handler, writes `AGENT_RESULT_QUEUE`, then acknowledges the command message.
-* A Router is required for multi-Gateway delivery — a shared PGMQ queue load-balances; it does not fan out by channel on its own.
-* Each Gateway receives an event only through `AGENT_GATEWAY_QUEUE_PREFIX + gatewayId` — its in-memory hub then filters to locally subscribed WebSocket connections.
-* PostgreSQL owns immutable history, cursor replay, idempotency, and subscription registry — it never schedules Worker execution.
+[`startWorkerConsumer`](../src/server/broker/worker-consumer.ts)는 PGMQ command를 읽고 [`toEventDraft`](../src/server/ingress/event-draft.ts)로 canonical command를 만든다. [`ExecutionStore.claim`](../src/server/idempotency/store.ts)이 세 상태 중 하나를 반환한다.
 
-## Broker topology
+- `claimed`: Worker Thread handler를 실행하고 result를 만든다.
+- `joined`: 같은 transaction이 실행 중이거나 완료됐다. 실행 중인 최초 request의 visibility 재전달만 source message를 남겨 lease reclaim을 보존하고, 다른 event ID의 새 duplicate는 delete한다.
+- `conflict`: 같은 transactionKey에 다른 action/payload가 들어왔다. 요청자 channel에 conflict result를 보낸다.
 
-`src/server/broker/worker-consumer.ts#startWorkerConsumer` consumes `AGENT_QUEUE` and publishes a derived terminal event to `AGENT_RESULT_QUEUE`. `src/server/broker/result-router.ts#startResultRouter` reads that shared result queue, queries `agent_gateway_subscription`, and writes one copy to each live Gateway queue. `src/server/broker/gateway-delivery.ts#startGatewayDelivery` reads only one Gateway queue and calls the local `EventStreamHub`.
+claimed attempt는 `QUEUE_VISIBILITY_TIMEOUT_SECONDS / 3` 주기로 PGMQ visibility와 DB execution lease를 함께 갱신한다. 둘 중 하나라도 실패하면 handler를 abort하고 source message를 delete하지 않는다.
 
-The Worker consumer bounds local durable work at `AGENT_MAX_THREADS + AGENT_MAX_QUEUE`, but it does not wait for an entire PGMQ read batch to finish. When one Worker Thread completes, the next already-read command can enter the pool immediately; this preserves pool saturation for long-running actions. The result router applies the same pattern with `AGENT_ROUTER_CONCURRENCY`: independent results fan out concurrently, while each individual result is deleted from the shared result queue only after every subscribed Gateway copy was durably written. Gateway queue creation is memoized, so a sustained result stream does not repeatedly issue the same PGMQ create call.
+## fan-out
 
-`PgmqClient.send` also coalesces arrivals for at most 10 ms into `pgmq.send_batch`. Each caller still waits for the corresponding returned message ID before its ingress acknowledgement is sent; batching reduces queue-lock contention without weakening durable acceptance.
+같은 transaction에 다른 `replyChannel`이 합류하면 [`agent_execution_recipient`](../src/server/idempotency/store.ts) row가 추가된다. terminal result를 만들 때 Worker는 recipient마다 `channel`을 바꾼 canonical result를 result queue에 쓴다. Router는 `agent_gateway_subscription`을 조회해 해당 Gateway 전용 queue로 복제한다.
+
+이 과정은 전달을 한 번만 보장하지 않는다. 동일 event가 result queue·Gateway queue·WebSocket에서 다시 보일 수 있다. event store append는 같은 `eventId`를 하나의 저장 행으로 수렴시키지만, 최종 client는 `eventId` dedupe가 필요하다.
+
+## cursor와 느린 소켓
+
+WebSocket은 구독 직후 high-water mark를 잡고 과거 event replay와 이후 live event를 합친다. connection mailbox와 replay buffer는 각각 상한을 넘는 느린 consumer를 닫아 다른 소켓의 진행을 막지 않는다. cursor position은 event를 socket에 성공적으로 보낸 뒤 DB에 갱신된다.
+
+## 결정 사항
+
+- PGMQ는 일감 인계, PostgreSQL은 순서·상태·구독의 사실 원천이다. 이유: Gateway와 Worker를 독립 배치한다.
+- Worker는 command를 직접 Gateway로 되돌리지 않고 result queue에 쓴다. 이유: Router가 다수 Gateway의 fan-out 위치를 한 곳으로 만든다.
+- 미완료 join의 최초 request만 delete하지 않는다. 이유: visibility 재전달된 원본을 지우면 실행 lease 만료 뒤 재처리할 trigger가 사라진다.
