@@ -12,6 +12,8 @@ import { startGatewayDelivery } from "./broker/gateway-delivery.js";
 import { startResultRouter } from "./broker/result-router.js";
 import { startWorkerConsumer } from "./broker/worker-consumer.js";
 import { ExecutionStore } from "./idempotency/store.js";
+import { DeliveryStore } from "./delivery/store.js";
+import { startDeliveryPublisher } from "./delivery/publisher.js";
 import { createServer } from "node:http";
 
 const env = readEnv();
@@ -28,11 +30,13 @@ const metrics = new MetricsRegistry();
 const eventStore = new EventStore(database, metrics);
 const subscriptions = new GatewaySubscriptionStore(database, env.subscriptionLeaseSeconds);
 const executions = new ExecutionStore(database, env.executionLeaseSeconds);
+const deliveries = new DeliveryStore(database, env.executionLeaseSeconds);
 const gatewayQueue = (): string => `${env.gatewayQueuePrefix}${env.gatewayId.replace(/[^a-zA-Z0-9_]/g, "_")}`;
 
 await eventStore.ensureSchema();
 await subscriptions.ensureSchema();
 await executions.ensureSchema();
+await deliveries.ensureSchema();
 await queue.ensure(env.queue);
 await queue.ensure(env.resultQueue);
 if (env.role === "gateway") await queue.ensure(gatewayQueue());
@@ -50,10 +54,11 @@ const metricsTimer = setInterval(refreshMetrics, 1000);
 
 if (env.role === "worker") {
   const pool = createWorkerPool({ minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, maxQueue: env.maxQueue });
-  const consumer = startWorkerConsumer({ queue, commandQueue: env.queue, resultQueue: env.resultQueue, eventStore, executions, pool, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, batchSize: env.pollBatchSize, maxInFlight: env.maxWorkerThreads + env.maxQueue, maxDeliveryReads: env.maxDeliveryReads });
+  const consumer = startWorkerConsumer({ queue, commandQueue: env.queue, resultQueue: env.resultQueue, eventStore, deliveries, executions, pool, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, batchSize: env.pollBatchSize, maxInFlight: env.maxWorkerThreads + env.maxQueue, maxDeliveryReads: env.maxDeliveryReads });
+  const publisher = startDeliveryPublisher({ queue, store: deliveries });
   const server = createServer((request, response) => { response.writeHead(request.url === "/health" ? 200 : 404); response.end(); }).listen(env.port);
   console.log(JSON.stringify({ event: "agent.worker.started", commandQueue: env.queue, resultQueue: env.resultQueue }));
-  const shutdown = async (): Promise<void> => { consumer.stop(); server.close(); await consumer.done; await pool.destroy(); clearInterval(metricsTimer); await queueDatabase.end(); await database.end(); };
+  const shutdown = async (): Promise<void> => { consumer.stop(); publisher.stop(); server.close(); await Promise.all([consumer.done, publisher.done]); await pool.destroy(); clearInterval(metricsTimer); await queueDatabase.end(); await database.end(); };
   process.once("SIGTERM", () => { void shutdown().then(() => process.exit(0)); });
   process.once("SIGINT", () => { void shutdown().then(() => process.exit(0)); });
 } else if (env.role === "router") {

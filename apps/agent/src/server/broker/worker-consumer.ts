@@ -10,19 +10,20 @@ import type { MetricsRegistry } from "../metrics/registry.js";
 import type { BrokerLoop } from "./gateway-delivery.js";
 import { ExecutionStore, type ResultPayload } from "../idempotency/store.js";
 import { nextReadBackoff, wait } from "./backoff.js";
+import { DeliveryStore } from "../delivery/store.js";
 
 function resultId(event: EventEnvelope): string { return deterministicEventId(`result:${event.transactionKey}:${event.streamId}:${event.replyChannel ?? event.channel}`); }
 function conflictId(event: EventEnvelope): string { return deterministicEventId(`conflict:${event.eventId}`); }
 
 /** A Worker server is only a PGMQ command consumer and PGMQ result producer. */
-export function startWorkerConsumer(input: { queue: EventQueueTransport; commandQueue: string; resultQueue: string; eventStore: EventStore; executions: ExecutionStore; pool: WorkerPool; metrics: MetricsRegistry; visibilitySeconds: number; pollSeconds: number; batchSize: number; maxInFlight: number; maxDeliveryReads: number }): BrokerLoop {
+export function startWorkerConsumer(input: { queue: EventQueueTransport; commandQueue: string; resultQueue: string; eventStore: EventStore; deliveries: DeliveryStore; executions: ExecutionStore; pool: WorkerPool; metrics: MetricsRegistry; visibilitySeconds: number; pollSeconds: number; batchSize: number; maxInFlight: number; maxDeliveryReads: number }): BrokerLoop {
   let stopped = false;
+  const persistResult = (draft: Parameters<EventStore["append"]>[0]): Promise<EventEnvelope> => input.eventStore.append(draft, (client, event) => input.deliveries.enqueue(client, input.resultQueue, event));
   const process = async (message: { id: string; event: IngressEvent }): Promise<void> => {
     const command = await input.eventStore.append(toEventDraft(message.event));
     const claim = await input.executions.claim(command, randomUUID());
     if (claim.kind === "conflict") {
-      const conflict = await input.eventStore.append(toResultDraft(command, { eventId: conflictId(command), action: `${command.action}.conflict`, channel: command.replyChannel ?? command.channel, createdAt: new Date().toISOString(), source: "worker", payload: { ok: false, error: { code: "idempotency_conflict", message: claim.reason } } }));
-      await input.queue.send(input.resultQueue, conflict);
+      await persistResult(toResultDraft(command, { eventId: conflictId(command), action: `${command.action}.conflict`, channel: command.replyChannel ?? command.channel, createdAt: new Date().toISOString(), source: "worker", payload: { ok: false, error: { code: "idempotency_conflict", message: claim.reason } } }));
       await input.queue.delete(input.commandQueue, message.id);
       input.metrics.increment("queueDeletes");
       return;
@@ -74,8 +75,7 @@ export function startWorkerConsumer(input: { queue: EventQueueTransport; command
     }
     const recipients = await input.executions.recipients(command.transactionKey);
     for (const recipient of recipients) {
-      const result = await input.eventStore.append(toResultDraft(recipient, { eventId: resultId(recipient), action: `${recipient.action}.result`, channel: recipient.replyChannel ?? recipient.channel, createdAt: new Date().toISOString(), source: "worker", payload }));
-      await input.queue.send(input.resultQueue, result);
+      await persistResult(toResultDraft(recipient, { eventId: resultId(recipient), action: `${recipient.action}.result`, channel: recipient.replyChannel ?? recipient.channel, createdAt: new Date().toISOString(), source: "worker", payload }));
     }
     await input.queue.delete(input.commandQueue, message.id);
     input.metrics.increment("queueDeletes");
@@ -93,8 +93,7 @@ export function startWorkerConsumer(input: { queue: EventQueueTransport; command
         const command = await input.eventStore.append(toEventDraft(message.event));
         const payload: ResultPayload = { ok: false, error: { code: "processing_permanent_failure", message: error instanceof Error ? error.message : String(error) } };
         for (const recipient of await input.executions.recipients(command.transactionKey)) {
-          const failure = await input.eventStore.append(toProcessingFailureDraft(recipient, deterministicEventId(`processing-failed:${command.eventId}:${recipient.streamId}:${recipient.replyChannel ?? recipient.channel}`), payload.error!.message));
-          await input.queue.send(input.resultQueue, failure);
+          await persistResult(toProcessingFailureDraft(recipient, deterministicEventId(`processing-failed:${command.eventId}:${recipient.streamId}:${recipient.replyChannel ?? recipient.channel}`), payload.error!.message));
         }
         // An active execution is not ours to terminate. Only after terminal events were durable
         // may an already abandoned attempt become failed and be archived.
