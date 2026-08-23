@@ -4,15 +4,17 @@
 
 [`startWorkerConsumer`](../src/server/broker/worker-consumer.ts)는 PGMQ command를 읽고 [`toEventDraft`](../src/server/ingress/event-draft.ts)로 canonical command를 만든다. [`ExecutionStore.claim`](../src/server/idempotency/store.ts)이 세 상태 중 하나를 반환한다.
 
-- `claimed`: Worker Thread handler를 실행하고 result를 만든다.
+- `claimed`: Worker Thread handler를 실행하고 result를 만든다. `attempts`는 PGMQ read count가 아니라 fenced execution owner가 된 횟수다.
 - `joined`: 같은 transaction이 실행 중이거나 완료됐다. 실행 중인 최초 request의 visibility 재전달만 source message를 남겨 lease reclaim을 보존하고, 다른 event ID의 새 duplicate는 delete한다.
 - `conflict`: 같은 transactionKey에 다른 action/payload가 들어왔다. 요청자 channel에 conflict result를 보낸다.
 
 claimed attempt는 visibility timeout의 1/3 주기로 PGMQ visibility와 DB execution lease를 각각 갱신한다. DB execution lease 갱신이 실패하면 다른 attempt가 소유권을 얻은 것이므로 handler를 abort한다. PGMQ `set_vt`의 일시 실패는 abort하지 않는다. 이때 재노출된 source message는 미완료 join으로 보존되어, owner가 죽을 때만 안전하게 reclaim된다.
 
+Worker 소실은 handler 오류와 다르다. 소실된 attempt가 execution 상한보다 낮으면 Worker는 자기 execution lease만 즉시 만료시키고 source message는 남긴다. 다음 PGMQ delivery가 같은 transaction을 reclaim한다. 마지막 소실 attempt는 execution을 terminal failure로 fence 완료하고, recipient별 `*.processing.failure` event와 outbox row를 먼저 transaction으로 기록한 뒤 source message를 archive한다. 따라서 archive가 관측 가능한 terminal event보다 앞설 수 없다.
+
 ## fan-out
 
-같은 transaction에 다른 `replyChannel`이 합류하면 [`agent_execution_recipient`](../src/server/idempotency/store.ts) row가 추가된다. terminal result를 만들 때 Worker는 recipient마다 `channel`을 바꾼 canonical result를 result queue에 쓴다. Router는 `agent_gateway_subscription`을 조회해 해당 Gateway 전용 queue로 복제한다.
+같은 transaction에 다른 `replyChannel`이 합류하면 [`agent_execution_recipient`](../src/server/idempotency/store.ts) row가 추가된다. terminal result를 만들 때 Worker는 recipient마다 `channel`을 바꾼 canonical event와 [`agent_result_delivery`](../src/server/delivery/store.ts) outbox row를 같은 transaction으로 만든다. publisher는 outbox row를 lease claim하여 result queue로 전송한 뒤 같은 attempt id로 완료 fence를 건다. Router는 `agent_gateway_subscription`을 조회해 해당 Gateway 전용 queue로 복제한다.
 
 이 과정은 전달을 한 번만 보장하지 않는다. 동일 event가 result queue·Gateway queue·WebSocket에서 다시 보일 수 있다. event store append는 같은 `eventId`를 하나의 저장 행으로 수렴시키지만, 최종 client는 `eventId` dedupe가 필요하다.
 

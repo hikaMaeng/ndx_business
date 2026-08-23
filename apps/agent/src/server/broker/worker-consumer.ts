@@ -16,7 +16,7 @@ function resultId(event: EventEnvelope): string { return deterministicEventId(`r
 function conflictId(event: EventEnvelope): string { return deterministicEventId(`conflict:${event.eventId}`); }
 
 /** A Worker server is only a PGMQ command consumer and PGMQ result producer. */
-export function startWorkerConsumer(input: { queue: EventQueueTransport; commandQueue: string; resultQueue: string; eventStore: EventStore; deliveries: DeliveryStore; executions: ExecutionStore; pool: WorkerPool; metrics: MetricsRegistry; visibilitySeconds: number; pollSeconds: number; batchSize: number; maxInFlight: number; maxDeliveryReads: number }): BrokerLoop {
+export function startWorkerConsumer(input: { queue: EventQueueTransport; commandQueue: string; resultQueue: string; eventStore: EventStore; deliveries: DeliveryStore; executions: ExecutionStore; pool: WorkerPool; metrics: MetricsRegistry; visibilitySeconds: number; pollSeconds: number; batchSize: number; maxInFlight: number; maxExecutionAttempts: number }): BrokerLoop {
   let stopped = false;
   const persistResult = (draft: Parameters<EventStore["append"]>[0]): Promise<EventEnvelope> => input.eventStore.append(draft, (client, event) => input.deliveries.enqueue(client, input.resultQueue, event));
   const process = async (message: { id: string; event: IngressEvent }): Promise<void> => {
@@ -68,17 +68,36 @@ export function startWorkerConsumer(input: { queue: EventQueueTransport; command
         payload = claim.result ?? { ok: false, error: { code: "missing_terminal_result", message: "completed execution had no result" } };
       }
     } catch (error) {
-      if (error instanceof WorkerLostError) throw error;
+      if (error instanceof WorkerLostError) {
+        if (claim.kind !== "claimed") throw error;
+        if (claim.attempts < input.maxExecutionAttempts) {
+          if (!await input.executions.release(command.transactionKey, claim.attemptId)) throw error;
+          throw error;
+        }
+        payload = { ok: false, error: { code: "processing_permanent_failure", message: error.message } };
+        if (!await input.executions.complete(command.transactionKey, claim.attemptId, payload)) throw error;
+      } else {
       payload = { ok: false, error: { code: "worker_failed", message: error instanceof Error ? error.message : String(error) } };
       input.metrics.increment("workerFailed");
       if (claim.kind === "claimed" && !await input.executions.complete(command.transactionKey, claim.attemptId, payload)) throw new WorkerLostError("worker lost the execution lease");
+      }
     }
     const recipients = await input.executions.recipients(command.transactionKey);
+    const permanentFailure = payload.error?.code === "processing_permanent_failure";
     for (const recipient of recipients) {
-      await persistResult(toResultDraft(recipient, { eventId: resultId(recipient), action: `${recipient.action}.result`, channel: recipient.replyChannel ?? recipient.channel, createdAt: new Date().toISOString(), source: "worker", payload }));
+      if (permanentFailure) {
+        await persistResult(toProcessingFailureDraft(recipient, deterministicEventId(`processing-failed:${recipient.transactionKey}:${recipient.streamId}:${recipient.replyChannel ?? recipient.channel}`), payload.error?.message ?? "processing failed"));
+      } else {
+        await persistResult(toResultDraft(recipient, { eventId: resultId(recipient), action: `${recipient.action}.result`, channel: recipient.replyChannel ?? recipient.channel, createdAt: new Date().toISOString(), source: "worker", payload }));
+      }
     }
-    await input.queue.delete(input.commandQueue, message.id);
-    input.metrics.increment("queueDeletes");
+    if (permanentFailure) {
+      await input.queue.archive(input.commandQueue, message.id);
+      input.metrics.increment("processingDlqTotal");
+    } else {
+      await input.queue.delete(input.commandQueue, message.id);
+      input.metrics.increment("queueDeletes");
+    }
   };
   const inFlight = new Set<Promise<void>>();
   const schedule = (message: { id: string; event: IngressEvent; readCount: number }): void => {
@@ -86,25 +105,6 @@ export function startWorkerConsumer(input: { queue: EventQueueTransport; command
     task = process(message).catch(async (error) => {
       input.metrics.increment("processingFailures");
       console.error(JSON.stringify({ event: "worker.command.retry", messageId: message.id, error: error instanceof Error ? error.message : String(error) }));
-      if (message.readCount < input.maxDeliveryReads) return;
-      try {
-        // Persist and fan out the terminal failure first. If any step fails we intentionally leave
-        // the source message visible for retry; archive-before-notify is a silent-loss bug.
-        const command = await input.eventStore.append(toEventDraft(message.event));
-        const payload: ResultPayload = { ok: false, error: { code: "processing_permanent_failure", message: error instanceof Error ? error.message : String(error) } };
-        for (const recipient of await input.executions.recipients(command.transactionKey)) {
-          await persistResult(toProcessingFailureDraft(recipient, deterministicEventId(`processing-failed:${command.eventId}:${recipient.streamId}:${recipient.replyChannel ?? recipient.channel}`), payload.error!.message));
-        }
-        // An active execution is not ours to terminate. Only after terminal events were durable
-        // may an already abandoned attempt become failed and be archived.
-        if (!await input.executions.failExpired(command.transactionKey, payload)) return;
-        await input.queue.archive(input.commandQueue, message.id);
-        input.metrics.increment("processingDlqTotal");
-      } catch (dlqError) {
-        // The loop owns every rejection. A failed DLQ side effect must not terminate Node.
-        input.metrics.increment("processingFailures");
-        console.error(JSON.stringify({ event: "worker.command.dlq.retry", messageId: message.id, error: dlqError instanceof Error ? dlqError.message : String(dlqError) }));
-      }
     }).finally(() => inFlight.delete(task));
     inFlight.add(task);
   };

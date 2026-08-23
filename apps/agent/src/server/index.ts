@@ -40,7 +40,7 @@ await deliveries.ensureSchema();
 await queue.ensure(env.queue);
 await queue.ensure(env.resultQueue);
 if (env.role === "gateway") await queue.ensure(gatewayQueue());
-if (env.role === "gateway") await Promise.all([subscriptions.pruneExpired(), eventStore.pruneChannelCursors(env.retentionDays), eventStore.prune(env.retentionDays), executions.prune(env.retentionDays)]);
+if (env.role === "gateway") await Promise.all([subscriptions.pruneExpired(), eventStore.pruneChannelCursors(env.retentionDays), eventStore.prune(env.retentionDays), executions.prune(env.retentionDays), deliveries.prune(env.retentionDays)]);
 
 const refreshMetrics = (): void => {
   for (const [name, pool] of [["databasePool", snapshotDatabasePool(database)], ["queuePool", snapshotDatabasePool(queueDatabase)]] as const) {
@@ -54,7 +54,7 @@ const metricsTimer = setInterval(refreshMetrics, 1000);
 
 if (env.role === "worker") {
   const pool = createWorkerPool({ minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, maxQueue: env.maxQueue });
-  const consumer = startWorkerConsumer({ queue, commandQueue: env.queue, resultQueue: env.resultQueue, eventStore, deliveries, executions, pool, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, batchSize: env.pollBatchSize, maxInFlight: env.maxWorkerThreads + env.maxQueue, maxDeliveryReads: env.maxDeliveryReads });
+  const consumer = startWorkerConsumer({ queue, commandQueue: env.queue, resultQueue: env.resultQueue, eventStore, deliveries, executions, pool, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, batchSize: env.pollBatchSize, maxInFlight: env.maxWorkerThreads + env.maxQueue, maxExecutionAttempts: env.maxExecutionAttempts });
   const publisher = startDeliveryPublisher({ queue, store: deliveries });
   const server = createServer((request, response) => { response.writeHead(request.url === "/health" ? 200 : 404); response.end(); }).listen(env.port);
   console.log(JSON.stringify({ event: "agent.worker.started", commandQueue: env.queue, resultQueue: env.resultQueue }));
@@ -74,7 +74,7 @@ if (env.role === "worker") {
   const server = createApp(env, queue, hub, metrics, async () => { await Promise.all([queue.check(), database.query("SELECT 1")]); }).listen(env.port, () => console.log(JSON.stringify({ event: "agent.gateway.listening", port: env.port, gatewayId: env.gatewayId, commandQueue: env.queue })));
   const websocket = attachWebSocketTransport(server, env, queue, hub, eventStore, metrics, { replace: (connectionId, channels) => subscriptions.replaceConnection(env.gatewayId, connectionId, channels), remove: (connectionId) => subscriptions.removeConnection(env.gatewayId, connectionId) });
   const renewTimer = setInterval(() => { void subscriptions.renewGateway(env.gatewayId).catch((error) => console.error(JSON.stringify({ event: "gateway.subscription.renew.failed", error: error instanceof Error ? error.message : String(error) }))); }, Math.max(1_000, Math.floor(env.subscriptionLeaseSeconds * 500)));
-  const retentionTimer = setInterval(() => { void Promise.all([subscriptions.pruneExpired(), eventStore.pruneChannelCursors(env.retentionDays), eventStore.prune(env.retentionDays), executions.prune(env.retentionDays)]).catch((error) => console.error(JSON.stringify({ event: "agent.retention.failed", error: error instanceof Error ? error.message : String(error) }))); }, 60 * 60 * 1_000);
+  const retentionTimer = setInterval(() => { void Promise.all([subscriptions.pruneExpired(), eventStore.pruneChannelCursors(env.retentionDays), eventStore.prune(env.retentionDays), executions.prune(env.retentionDays), deliveries.prune(env.retentionDays)]).catch((error) => console.error(JSON.stringify({ event: "agent.retention.failed", error: error instanceof Error ? error.message : String(error) }))); }, 60 * 60 * 1_000);
   const shutdown = async (): Promise<void> => {
     delivery.stop(); clearInterval(metricsTimer); clearInterval(renewTimer); clearInterval(retentionTimer);
     for (const client of websocket.clients) client.close(1001, "gateway shutdown"); websocket.close();

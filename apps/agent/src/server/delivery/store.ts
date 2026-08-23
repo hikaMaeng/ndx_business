@@ -17,19 +17,41 @@ export class DeliveryStore {
     await client.query("INSERT INTO agent_result_delivery (event_id, queue_name, event) VALUES ($1,$2,$3::jsonb) ON CONFLICT (event_id) DO NOTHING", [event.eventId, queue, JSON.stringify(event)]);
   }
   async claim(): Promise<DeliveryClaim> {
+    return (await this.claimMany(1))[0];
+  }
+  async claimMany(limit: number): Promise<Array<Exclude<DeliveryClaim, undefined>>> {
     const result = await this.pool.query<{ event: EventEnvelope; queue_name: string; attempt_id: string }>(`WITH next AS (
       SELECT event_id FROM agent_result_delivery WHERE (status='ready' AND retry_at <= now()) OR (status='running' AND lease_until < now())
-      ORDER BY retry_at, created_at FOR UPDATE SKIP LOCKED LIMIT 1
+      ORDER BY retry_at, created_at FOR UPDATE SKIP LOCKED LIMIT $2
     ) UPDATE agent_result_delivery SET status='running', attempt_id=gen_random_uuid()::text, attempts=attempts+1,
       lease_until=now()+make_interval(secs=>$1) WHERE event_id IN (SELECT event_id FROM next)
-      RETURNING event, queue_name, attempt_id`, [this.leaseSeconds]);
-    const row = result.rows[0]; return row && { event: row.event, queueName: row.queue_name, attemptId: row.attempt_id };
+      RETURNING event, queue_name, attempt_id`, [this.leaseSeconds, limit]);
+    return result.rows.map((row) => ({ event: row.event, queueName: row.queue_name, attemptId: row.attempt_id }));
   }
   async complete(eventId: string, attemptId: string): Promise<boolean> {
-    const result = await this.pool.query("UPDATE agent_result_delivery SET status='delivered', delivered_at=now(), lease_until=NULL WHERE event_id=$1 AND status='running' AND attempt_id=$2", [eventId, attemptId]);
-    return Boolean(result.rowCount);
+    return (await this.completeMany([{ eventId, attemptId }])) === 1;
   }
   async retry(eventId: string, attemptId: string): Promise<void> {
-    await this.pool.query("UPDATE agent_result_delivery SET status='ready', retry_at=now()+make_interval(secs=>LEAST(60, attempts)), lease_until=NULL WHERE event_id=$1 AND status='running' AND attempt_id=$2", [eventId, attemptId]);
+    await this.retryMany([{ eventId, attemptId }]);
+  }
+  async completeMany(claims: ReadonlyArray<{ eventId: string; attemptId: string }>): Promise<number> {
+    if (!claims.length) return 0;
+    const result = await this.pool.query(`UPDATE agent_result_delivery AS delivery SET status='delivered', delivered_at=now(), lease_until=NULL
+      FROM unnest($1::text[], $2::text[]) AS claimed(event_id, attempt_id)
+      WHERE delivery.event_id=claimed.event_id AND delivery.status='running' AND delivery.attempt_id=claimed.attempt_id`,
+    [claims.map((claim) => claim.eventId), claims.map((claim) => claim.attemptId)]);
+    return result.rowCount ?? 0;
+  }
+  async retryMany(claims: ReadonlyArray<{ eventId: string; attemptId: string }>): Promise<void> {
+    if (!claims.length) return;
+    await this.pool.query(`UPDATE agent_result_delivery AS delivery SET status='ready', retry_at=now()+make_interval(secs=>LEAST(60, attempts)), lease_until=NULL
+      FROM unnest($1::text[], $2::text[]) AS claimed(event_id, attempt_id)
+      WHERE delivery.event_id=claimed.event_id AND delivery.status='running' AND delivery.attempt_id=claimed.attempt_id`,
+    [claims.map((claim) => claim.eventId), claims.map((claim) => claim.attemptId)]);
+  }
+  /** Delivered rows are operational ledger entries; pending rows are never retention-pruned. */
+  async prune(retentionDays: number): Promise<number> {
+    const result = await this.pool.query("DELETE FROM agent_result_delivery WHERE status='delivered' AND delivered_at < now() - make_interval(days => $1)", [retentionDays]);
+    return result.rowCount ?? 0;
   }
 }

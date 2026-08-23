@@ -21,9 +21,10 @@ const timeoutMs = Number(process.env.AGENT_COMPOSITE_TIMEOUT_MS ?? 180_000);
 const overheadMs = Number(process.env.AGENT_COMPOSITE_SLO_OVERHEAD_MS ?? 20_000);
 const databaseContainer = process.env.AGENT_PGMQ_DB_CONTAINER ?? "admin";
 const workerContainer = process.env.AGENT_WORKER_CONTAINER ?? "ndx-business-agent-worker-1";
+const gatewayContainer = process.env.AGENT_GATEWAY_CONTAINER ?? "agent";
 const commandQueue = process.env.AGENT_QUEUE ?? "agent_requests";
 const resultQueue = process.env.AGENT_RESULT_QUEUE ?? "agent_results";
-const gatewayQueue = `${process.env.AGENT_GATEWAY_QUEUE_PREFIX ?? "agent_gateway_"}${process.env.AGENT_GATEWAY_ID ?? "agent"}`;
+let gatewayQueue = `${process.env.AGENT_GATEWAY_QUEUE_PREFIX ?? "agent_gateway_"}${process.env.AGENT_GATEWAY_ID ?? "agent"}`;
 const metricsToken = process.env.AGENT_METRICS_TOKEN;
 
 for (const [name, value, minimum] of [["total", total, 1], ["workers", workers, 1], ["delayMs", delayMs, 1_000], ["streams", streams, 1], ["joinTotal", joinTotal, 0], ["conflictTotal", conflictTotal, 1], ["leaseDelayMs", leaseDelayMs, 1_000], ["subscribersPerChannel", subscribersPerChannel, 1], ["concurrency", concurrency, 1]]) assert.ok(Number.isInteger(value) && value >= minimum, `${name} must be an integer >= ${minimum}`);
@@ -125,6 +126,15 @@ function deployedWorkerSettings() {
   return { deployedVisibilitySeconds, deployedExecutionLeaseSeconds };
 }
 
+function deployedGatewayQueue() {
+  const [container] = JSON.parse(execFileSync("docker", ["inspect", gatewayContainer], { encoding: "utf8" }));
+  const values = new Map(container.Config.Env.map((entry) => entry.split("=", 2)));
+  const prefix = values.get("AGENT_GATEWAY_QUEUE_PREFIX") ?? process.env.AGENT_GATEWAY_QUEUE_PREFIX ?? "agent_gateway_";
+  const gatewayId = values.get("AGENT_GATEWAY_ID") ?? container.Config.Hostname;
+  assert.match(gatewayId, /^[a-z0-9][a-z0-9_-]*$/, "deployed Gateway id must produce a safe PGMQ queue name");
+  return `${prefix}${gatewayId}`;
+}
+
 function sqlLiteral(value) { return `'${value.replaceAll("'", "''")}'`; }
 
 function queuePrefixCount(queue) {
@@ -156,6 +166,7 @@ try {
   const deployed = deployedWorkerSettings();
   assert.equal(visibilitySeconds, deployed.deployedVisibilitySeconds, "harness visibility setting must match the deployed Worker");
   assert.equal(executionLeaseSeconds, deployed.deployedExecutionLeaseSeconds, "harness execution lease setting must match the deployed Worker");
+  gatewayQueue = deployedGatewayQueue();
   const baselineMetrics = (await metrics()).metrics;
   await Promise.all(channels.flatMap((channel) => Array.from({ length: subscribersPerChannel }, (_, ordinal) => subscribe(channel, ordinal))));
 

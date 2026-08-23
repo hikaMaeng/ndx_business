@@ -20,6 +20,9 @@ npm run lint --workspace agent
 | 같은 transaction·다른 channel | 실행은 한 번이고 recipient마다 result가 생성됨 |
 | 다른 payload | 기존 lease를 바꾸지 않고 conflict result만 생성됨 |
 | Worker 실패 | `worker_failed` result와 source message 재전달을 관측 |
+| Worker 소실 | source message는 남고 execution attempt만 release된 뒤 다음 delivery가 reclaim함 |
+| 실행 시도 소진 | recipient별 `*.processing.failure` outbox 행이 먼저 생기고 source message가 archive됨 |
+| result queue 전송 실패 | terminal event와 outbox row가 남고 publisher retry 뒤 queue 전송·fence 완료됨 |
 | WebSocket replay | `ready`·`subscribed`·`event`·`replay` 및 cursor advance 확인 |
 
 ## 부하 검증
