@@ -34,4 +34,4 @@ WebSocket은 구독 직후 high-water mark를 잡고 과거 event replay와 이�
 - Gateway queue identity는 `agent_gateway_instance` lease로 단일 process만 소유한다. 이유: 동일 ID의 replica가 queue를 경쟁 소비하면 다른 replica의 WebSocket event를 삭제할 수 있다.
 - 만료 execution lease는 observer가 terminalise하지 않는다. 이유: PGMQ 재전달이 fenced reclaim을 수행할 권리를 갖고, terminal result는 Worker transaction만 기록할 수 있다.
 - Gateway는 `agent_gateway_instance` lease를 먼저 확보한 뒤에만 다른 schema 초기화, queue 보장, retention, socket delivery를 시작한다. 이유: 대기·중복 Gateway가 운영 데이터를 정리하거나 queue를 경쟁 소비하면 안 된다.
-- 정상 Gateway handoff는 queue reader 종료 뒤 instance lease를 해제한다. 이유: 기존 reader가 더 이상 message를 consume하지 않는 것을 확인한 뒤 새 Gateway를 허용하면서, 오래 열린 WebSocket이 lease 해제를 막지 않게 한다.
+- 정상 Gateway handoff는 queue reader 종료 뒤 socket·HTTP 연결을 닫고 subscription row 삭제까지 기다린 뒤 instance lease를 해제한다. 이유: 새 Gateway가 같은 queue를 소비하는 순간에는 Router가 이전 Gateway의 연결을 대상으로 fan-out하지 않아야 한다. HTTP keep-alive는 `closeAllConnections()`로 강제 종료해 ownership 반납을 지연시키지 않는다.

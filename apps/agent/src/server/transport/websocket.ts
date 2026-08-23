@@ -9,8 +9,13 @@ import { ConnectionMailbox } from "../stream/mailbox/index.js";
 import { ReplayBuffer } from "../stream/replay-buffer/index.js";
 import type { MetricsRegistry } from "../metrics/registry.js";
 
-export function attachWebSocketTransport(server: Server, env: AgentEnv, queue: EventQueueTransport, hub: EventStreamHub, eventStore: EventStore, metrics: MetricsRegistry, subscriptions?: { replace(connectionId: string, channels: readonly string[]): Promise<void>; remove(connectionId: string): Promise<void> }): WebSocketServer {
+export interface GatewayWebSocketTransport {
+  closeClientsAndRemoveSubscriptions(): Promise<void>;
+}
+
+export function attachWebSocketTransport(server: Server, env: AgentEnv, queue: EventQueueTransport, hub: EventStreamHub, eventStore: EventStore, metrics: MetricsRegistry, subscriptions?: { replace(connectionId: string, channels: readonly string[]): Promise<void>; remove(connectionId: string): Promise<void> }): GatewayWebSocketTransport {
   const websocket = new WebSocketServer({ server, path: "/ws" });
+  const removals = new Set<Promise<void>>();
   websocket.on("connection", (socket) => {
     const connectionId = globalThis.crypto.randomUUID();
     let positions: Record<string, string> = {};
@@ -118,11 +123,25 @@ export function attachWebSocketTransport(server: Server, env: AgentEnv, queue: E
       subscriptionGeneration += 1;
       unsubscribe();
       mailbox.dispose();
-      void subscriptions?.remove(connectionId).catch((error) => console.error(JSON.stringify({ event: "gateway.subscription.remove.failed", error: error instanceof Error ? error.message : String(error) })));
+      const removal = subscriptions ? subscriptions.remove(connectionId) : Promise.resolve();
+      removals.add(removal);
+      void removal.catch((error) => console.error(JSON.stringify({ event: "gateway.subscription.remove.failed", error: error instanceof Error ? error.message : String(error) }))).finally(() => removals.delete(removal));
       metrics.increment("websocketConnections", -1);
       console.log(JSON.stringify({ event: "websocket.disconnected" }));
     });
     socket.on("error", (error) => console.error(JSON.stringify({ event: "websocket.error", error: error.message })));
   });
-  return websocket;
+  return {
+    async closeClientsAndRemoveSubscriptions(): Promise<void> {
+      websocket.close();
+      const clients = [...websocket.clients];
+      const closed = clients.map((client) => new Promise<void>((resolve) => {
+        if (client.readyState === WebSocket.CLOSED) { resolve(); return; }
+        client.once("close", () => resolve());
+        client.close(1001, "gateway shutdown");
+      }));
+      await Promise.all(closed);
+      await Promise.all([...removals]);
+    },
+  };
 }

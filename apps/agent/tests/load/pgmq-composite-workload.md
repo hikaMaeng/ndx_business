@@ -15,7 +15,7 @@ node apps/agent/tests/load/pgmq-composite-workload.mjs
 
 Harness는 Docker의 `admin` PostgreSQL 컨테이너를 읽어 event store, execution, PGMQ queue를 검증한다. 따라서 실제 Compose stack에서만 실행한다.
 
-성공한 run은 종료 시 자신의 timestamp prefix에 속한 event, execution, recipient, cursor, outbox, watermark를 하나의 PostgreSQL transaction으로 제거하고 각 잔여 수가 0인지 다시 확인한다. 실패한 run은 원인 분석을 위해 자동 정리하지 않는다.
+성공한 run은 종료 시 자신의 timestamp prefix에 속한 event, execution, recipient, cursor, outbox, watermark를 하나의 PostgreSQL transaction으로 제거하고 각 잔여 수가 0인지 다시 확인한다. watermark 대상은 `session:<prefix>%`와 `channel:<prefix>%` 모두이며, harness는 sessionKey 없는 command 한 건으로 channel watermark 정리도 실제 검증한다. 실패한 run은 원인 분석을 위해 자동 정리하지 않는다.
 
 ## 기본 workload
 
@@ -23,7 +23,7 @@ Harness는 Docker의 `admin` PostgreSQL 컨테이너를 읽어 event store, exec
 | --- | ---: |
 | 독립 delay 실행 | 2,048 × 5,000ms |
 | Worker Thread | 96 |
-| stream | 512 |
+| stream | 512 session stream + sessionKey 없는 channel stream 1개 |
 | transaction join | 128건, 다른 reply channel 추가 |
 | payload conflict | 32건 |
 | visibility probe | 배포 Worker의 visibility보다 긴 delay 1건, execution lease는 그보다 길어야 함 |

@@ -37,7 +37,9 @@ const delayChannels = Array.from({ length: 4 }, (_, index) => `${prefix}.delay.$
 const conflictOkChannel = `${prefix}.conflict.ok`;
 const conflictErrorChannel = `${prefix}.conflict.error`;
 const leaseChannel = `${prefix}.lease`;
-const channels = [...delayChannels, conflictOkChannel, conflictErrorChannel, leaseChannel];
+const channelStreamInput = `${prefix}.channel-input`;
+const channelStreamResult = `${prefix}.channel-result`;
+const channels = [...delayChannels, conflictOkChannel, conflictErrorChannel, leaseChannel, channelStreamResult];
 const expectedByChannel = new Map(channels.map((channel) => [channel, new Map()]));
 const ingressAgent = new Agent({ keepAlive: true, maxSockets: concurrency });
 const subscribers = [];
@@ -157,7 +159,7 @@ function cleanupSuccessfulRun() {
     DELETE FROM agent_execution_recipient WHERE transaction_key LIKE ${sqlLiteral(`${prefix}%`)};
     DELETE FROM agent_execution WHERE transaction_key LIKE ${sqlLiteral(`${prefix}%`)};
     DELETE FROM event_store WHERE transaction_key LIKE ${sqlLiteral(`${prefix}%`)};
-    DELETE FROM event_stream_sequence AS sequence WHERE stream_id LIKE ${sqlLiteral(`session:${prefix}%`)}
+    DELETE FROM event_stream_sequence AS sequence WHERE (stream_id LIKE ${sqlLiteral(`session:${prefix}%`)} OR stream_id LIKE ${sqlLiteral(`channel:${prefix}%`)})
       AND NOT EXISTS (SELECT 1 FROM event_store AS event WHERE event.stream_id = sequence.stream_id)
       AND NOT EXISTS (SELECT 1 FROM event_subscription_cursor AS cursor WHERE cursor.positions ? sequence.stream_id);
     COMMIT;`);
@@ -165,13 +167,13 @@ function cleanupSuccessfulRun() {
     events: `SELECT count(*) FROM event_store WHERE transaction_key LIKE ${sqlLiteral(`${prefix}%`)}`,
     executions: `SELECT count(*) FROM agent_execution WHERE transaction_key LIKE ${sqlLiteral(`${prefix}%`)}`,
     cursors: `SELECT count(*) FROM event_subscription_cursor WHERE channels::text LIKE ${sqlLiteral(`%${prefix}%`)}`,
-    watermarks: `SELECT count(*) FROM event_stream_sequence WHERE stream_id LIKE ${sqlLiteral(`session:${prefix}%`)}`,
+    watermarks: `SELECT count(*) FROM event_stream_sequence WHERE stream_id LIKE ${sqlLiteral(`session:${prefix}%`)} OR stream_id LIKE ${sqlLiteral(`channel:${prefix}%`)}`,
   })) assert.equal(Number(sql(query)), 0, `${table} must be prefix-clean after a successful workload`);
 }
 
-const expectedTerminalCount = total + joinTotal + conflictTotal * 2 + 1;
-const expectedCommandCount = total + joinTotal + conflictTotal * 2 + 1;
-const expectedExecutionCount = total + conflictTotal + 1;
+const expectedTerminalCount = total + joinTotal + conflictTotal * 2 + 2;
+const expectedCommandCount = total + joinTotal + conflictTotal * 2 + 2;
+const expectedExecutionCount = total + conflictTotal + 2;
 const lowerBoundMs = Math.ceil(total / workers) * delayMs;
 let workloadStartedAt = 0;
 let verified = false;
@@ -189,6 +191,8 @@ for (let index = 0; index < conflictTotal; index += 1) {
 }
 const leaseTransaction = `${prefix}-lease`;
 expected(leaseTransaction, leaseChannel, "test.delay.result", true);
+const channelStreamTransaction = `${prefix}-channel-stream`;
+expected(channelStreamTransaction, channelStreamResult, "test.delay.result", true);
 
 try {
   const deployed = deployedWorkerSettings();
@@ -215,6 +219,8 @@ try {
 
   markExpected(leaseTransaction, leaseChannel);
   assert.equal(await submit({ action: "test.delay", transactionKey: leaseTransaction, channel: "composite.requests", replyChannel: leaseChannel, payload: { simulateDelayMs: leaseDelayMs, sessionKey: `${prefix}-lease-session` } }), 202);
+  markExpected(channelStreamTransaction, channelStreamResult);
+  assert.equal(await submit({ action: "test.delay", transactionKey: channelStreamTransaction, channel: channelStreamInput, replyChannel: channelStreamResult, payload: { simulateDelayMs: 1_000 } }), 202);
   // Start the visibility probe before the throughput workload. Its purpose is
   // lease renewal, not adding a serial 65-second tail to the worker benchmark.
   await new Promise((resolve) => setTimeout(resolve, 1_000));
@@ -244,7 +250,8 @@ try {
   const elapsedMs = Math.round(performance.now() - workloadStartedAt);
   const allSubscribers = subscribers.flatMap((subscriber) => [...subscriber.seen.values()]);
   assert.ok(elapsedMs <= lowerBoundMs + overheadMs, `elapsed=${elapsedMs} exceeds ${lowerBoundMs + overheadMs}`);
-  assert.equal(subscribers.reduce((sum, subscriber) => sum + subscriber.failures.length, 0), 0, "terminal payload, action, and channel must match");
+  const failures = subscribers.flatMap((subscriber) => subscriber.failures.map((failure) => ({ channel: subscriber.channel, ordinal: subscriber.ordinal, failure })));
+  assert.equal(failures.length, 0, `terminal payload, action, and channel must match: ${JSON.stringify(failures.slice(0, 10))}`);
   assert.equal(subscribers.reduce((sum, subscriber) => sum + subscriber.duplicates, 0), 0, "healthy run must not redeliver a terminal event to a live subscriber");
 
   const eventRows = Number(sql(`SELECT count(*) FROM event_store WHERE transaction_key LIKE ${sqlLiteral(`${prefix}%`)}`));

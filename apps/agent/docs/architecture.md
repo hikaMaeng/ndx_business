@@ -20,6 +20,7 @@ Gateway만 host port `18081`을 공개한다. Worker는 command queue를 읽는 
 | `src/server/app.ts` | HTTP ingress, health, ready, metrics | [`createApp`](../src/server/app.ts) |
 | `src/server/broker/` | Worker consume, result routing, Gateway delivery | [`startWorkerConsumer`](../src/server/broker/worker-consumer.ts) |
 | `src/server/event-store/` | append, replay, cursor | [`EventStore`](../src/server/event-store/store.ts) |
+| `src/server/gateway/` | standby liveness와 ownership-safe shutdown | [`shutdownGateway`](../src/server/gateway/lifecycle/index.ts) |
 | `src/server/idempotency/` | transaction claim·lease·recipient | [`ExecutionStore`](../src/server/idempotency/store.ts) |
 | `src/server/ingress/` | ingress를 canonical draft로 변환 | [`toEventDraft`](../src/server/ingress/event-draft.ts) |
 | `src/server/metrics/` | process·pool 계수 | [`MetricsRegistry`](../src/server/metrics/registry.ts) |

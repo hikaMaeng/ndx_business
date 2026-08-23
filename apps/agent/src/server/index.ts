@@ -17,6 +17,15 @@ import { startDeliveryPublisher } from "./delivery/publisher.js";
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { writeMetrics } from "./metrics/endpoint.js";
+import { closeHttpServer, shutdownGateway } from "./gateway/lifecycle/index.js";
+import { createGatewayStandby } from "./gateway/standby/index.js";
+
+function listen(server: ReturnType<typeof createServer>, port: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, () => { server.off("error", reject); resolve(); });
+  });
+}
 
 const env = readEnv();
 // These three roles share one PostgreSQL instance. Their combined connection
@@ -37,13 +46,28 @@ const gatewayQueue = (): string => `${env.gatewayQueuePrefix}${env.gatewayId.rep
 
 await subscriptions.ensureSchema();
 const gatewayInstanceId = env.role === "gateway" ? randomUUID() : undefined;
+let gatewayShutdown: (() => Promise<void>) | undefined;
+const signalGateway = () => { void gatewayShutdown?.().then(() => process.exit(0)).catch((error) => { console.error(JSON.stringify({ event: "gateway.shutdown.failed", error: error instanceof Error ? error.message : String(error) })); process.exit(1); }); };
 if (gatewayInstanceId) {
+  const standby = createGatewayStandby();
+  await listen(standby, env.port);
+  let standbyClosed = false;
+  const closeStandby = async (): Promise<void> => {
+    if (standbyClosed) return;
+    standbyClosed = true;
+    await closeHttpServer(standby);
+  };
+  gatewayShutdown = closeStandby;
+  process.once("SIGTERM", signalGateway);
+  process.once("SIGINT", signalGateway);
   for (;;) {
     const claim = await subscriptions.claimGateway(env.gatewayId, gatewayInstanceId);
     if (claim.owned) break;
     console.warn(JSON.stringify({ event: "gateway.identity.waiting", gatewayId: env.gatewayId, retryAfterMs: claim.retryAfterMs }));
     await new Promise<void>((resolve) => setTimeout(resolve, claim.retryAfterMs));
   }
+  gatewayShutdown = async () => { await closeStandby(); await subscriptions.releaseGateway(env.gatewayId, gatewayInstanceId); };
+  await closeStandby();
 }
 await eventStore.ensureSchema();
 await executions.ensureSchema();
@@ -101,14 +125,15 @@ if (env.role === "worker") {
     await Promise.all([subscriptions.pruneExpired(), eventStore.pruneChannelCursors(env.retentionDays), eventStore.prune(env.retentionDays), executions.prune(env.retentionDays), deliveries.prune(env.retentionDays)]);
   })().catch((error) => console.error(JSON.stringify({ event: "agent.retention.failed", error: error instanceof Error ? error.message : String(error) }))); }, 60 * 60 * 1_000);
   const shutdown = async (): Promise<void> => {
-    delivery.stop(); clearInterval(metricsTimer); clearInterval(renewTimer); clearInterval(retentionTimer);
-    // Stop the queue reader before releasing identity. This bounds normal handoff by one
-    // PGMQ poll, instead of waiting for long-lived WebSocket connections to close.
-    await delivery.done; await subscriptions.releaseGateway(env.gatewayId, gatewayInstanceId);
-    for (const client of websocket.clients) client.close(1001, "gateway shutdown"); websocket.close();
-    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    clearInterval(metricsTimer); clearInterval(renewTimer); clearInterval(retentionTimer);
+    await shutdownGateway({
+      stopReader: delivery.stop,
+      waitForReader: async () => delivery.done,
+      closeSocketsAndRemoveSubscriptions: websocket.closeClientsAndRemoveSubscriptions,
+      closeHttp: async () => closeHttpServer(server),
+      releaseOwnership: async () => subscriptions.releaseGateway(env.gatewayId, gatewayInstanceId),
+    });
     await queueDatabase.end(); await database.end();
   };
-  process.once("SIGTERM", () => { void shutdown().then(() => process.exit(0)); });
-  process.once("SIGINT", () => { void shutdown().then(() => process.exit(0)); });
+  gatewayShutdown = shutdown;
 }
