@@ -64,6 +64,18 @@ channel probe는 `sessionKey` 없이 `channel:<prefix>.channel-input` watermark�
 않는다.
 
 초기 channel probe run `pgmq-composite-1787501543370`은 harness 기대값 등록 누락으로
-실패했고, 실패 증거 보존 계약에 따라 자동 정리하지 않았다. DB 대조로 서비스
-result가 정상임을 확인한 뒤 기대값 등록과 failure payload 출력을 보강해 위 run으로
-재검증했다.
+실패했다. DB 대조로 서비스 result가 정상임을 확인한 뒤 기대값 등록과 failure payload
+출력을 보강해 위 run으로 재검증했다. 분석 종료 후 그 prefix의 event 4,484건,
+execution 2,082건, recipient 2,210건, outbox 2,242건, cursor 16건, session/channel
+watermark 546건을 정확한 prefix transaction으로 정리했고 잔여 0건을 확인했다.
+
+## Port continuity
+
+standby listener는 ownership 획득 뒤 닫지 않는다. 같은 bound HTTP server의 request
+handler를 active Gateway handler로 교체한다. 따라서 schema·queue·retention 초기화가
+끝나는 동안에도 `/health`는 계속 응답하고, active 전환에서 port rebind 공백이 없다.
+
+공식 Gateway·Worker·Router deploy 중 health probe는 `{"status":"ok","service":"agent",
+"ready":false}`를 받았고, ownership 획득 뒤 최종 `/health`는
+`{"status":"ok","service":"agent"}`로 전환됐다. 즉 replace 구간은 연결 거부가 아닌
+명시적 standby liveness로 관측됐다.

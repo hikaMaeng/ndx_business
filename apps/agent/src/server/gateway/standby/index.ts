@@ -1,4 +1,4 @@
-import { createServer, type Server } from "node:http";
+import { createServer, type RequestListener, type Server } from "node:http";
 
 export function createGatewayStandby(): Server {
   return createServer((request, response) => {
@@ -7,4 +7,10 @@ export function createGatewayStandby(): Server {
     if (request.url === "/ready") { response.writeHead(503); response.end(JSON.stringify({ status: "unavailable" })); return; }
     response.writeHead(503); response.end(JSON.stringify({ status: "standby" }));
   });
+}
+
+/** Reuses the bound standby listener so ownership promotion never creates a port gap. */
+export function activateGatewayStandby(server: Server, listener: RequestListener): void {
+  server.removeAllListeners("request");
+  server.on("request", listener);
 }

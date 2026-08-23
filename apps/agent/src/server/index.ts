@@ -18,7 +18,7 @@ import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { writeMetrics } from "./metrics/endpoint.js";
 import { closeHttpServer, shutdownGateway } from "./gateway/lifecycle/index.js";
-import { createGatewayStandby } from "./gateway/standby/index.js";
+import { activateGatewayStandby, createGatewayStandby } from "./gateway/standby/index.js";
 
 function listen(server: ReturnType<typeof createServer>, port: number): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -47,9 +47,11 @@ const gatewayQueue = (): string => `${env.gatewayQueuePrefix}${env.gatewayId.rep
 await subscriptions.ensureSchema();
 const gatewayInstanceId = env.role === "gateway" ? randomUUID() : undefined;
 let gatewayShutdown: (() => Promise<void>) | undefined;
+let gatewayStandby: ReturnType<typeof createGatewayStandby> | undefined;
 const signalGateway = () => { void gatewayShutdown?.().then(() => process.exit(0)).catch((error) => { console.error(JSON.stringify({ event: "gateway.shutdown.failed", error: error instanceof Error ? error.message : String(error) })); process.exit(1); }); };
 if (gatewayInstanceId) {
   const standby = createGatewayStandby();
+  gatewayStandby = standby;
   await listen(standby, env.port);
   let standbyClosed = false;
   const closeStandby = async (): Promise<void> => {
@@ -67,7 +69,6 @@ if (gatewayInstanceId) {
     await new Promise<void>((resolve) => setTimeout(resolve, claim.retryAfterMs));
   }
   gatewayShutdown = async () => { await closeStandby(); await subscriptions.releaseGateway(env.gatewayId, gatewayInstanceId); };
-  await closeStandby();
 }
 await eventStore.ensureSchema();
 await executions.ensureSchema();
@@ -112,10 +113,12 @@ if (env.role === "worker") {
   process.once("SIGTERM", () => { void shutdown().then(() => process.exit(0)); });
   process.once("SIGINT", () => { void shutdown().then(() => process.exit(0)); });
 } else {
-  if (!gatewayInstanceId) throw new Error("Gateway identity was not initialised");
+  if (!gatewayInstanceId || !gatewayStandby) throw new Error("Gateway identity was not initialised");
   const hub = new EventStreamHub();
   const delivery = startGatewayDelivery({ queue, queueName: gatewayQueue(), hub, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds });
-  const server = createApp(env, queue, hub, metrics, async () => { await Promise.all([queue.check(), database.query("SELECT 1")]); }).listen(env.port, () => console.log(JSON.stringify({ event: "agent.gateway.listening", port: env.port, gatewayId: env.gatewayId, commandQueue: env.queue })));
+  const server = gatewayStandby;
+  activateGatewayStandby(server, createApp(env, queue, hub, metrics, async () => { await Promise.all([queue.check(), database.query("SELECT 1")]); }));
+  console.log(JSON.stringify({ event: "agent.gateway.listening", port: env.port, gatewayId: env.gatewayId, commandQueue: env.queue }));
   const websocket = attachWebSocketTransport(server, env, queue, hub, eventStore, metrics, { replace: (connectionId, channels) => subscriptions.replaceConnection(env.gatewayId, connectionId, channels), remove: (connectionId) => subscriptions.removeConnection(env.gatewayId, connectionId) });
   const renewTimer = setInterval(() => { void subscriptions.renewGateway(env.gatewayId, gatewayInstanceId).then((owned) => {
     if (!owned) { console.error(JSON.stringify({ event: "gateway.identity.lost", gatewayId: env.gatewayId })); process.exit(1); }

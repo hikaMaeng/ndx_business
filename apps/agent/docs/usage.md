@@ -28,4 +28,4 @@ client 순서는 다음과 같다.
 
 현재 Compose 파일은 `container_name: agent`와 단일 port publish를 사용하므로 `docker compose --scale agent=N`을 지원하지 않는다. 다중 Gateway가 필요하면 먼저 Compose/ingress를 replica 가능하도록 바꾸고 각 replica에 고유 Gateway ID를 공급해야 한다.
 
-SIGTERM 배포는 Gateway가 PGMQ reader를 멈춘 뒤 WebSocket 연결과 HTTP keep-alive를 닫고, 그 연결의 durable subscription 삭제까지 확인한 뒤 lease를 명시 해제한다. 따라서 새 Gateway가 같은 queue를 소비할 때 Router에 남은 이전 구독은 없다. SIGKILL·host 장애처럼 해제가 불가능한 종료에서는 새 process가 기본 30초 이내에 기존 lease 만료를 기다린 뒤 takeover한다. 기다리는 process는 retention·PGMQ 소비·사용자 요청 endpoint·WebSocket을 열지 않는다.
+standby는 ownership 획득 뒤 같은 HTTP server의 handler만 active Gateway로 교체한다. 따라서 schema·queue·retention 초기화가 길어도 포트를 닫았다 다시 여는 공백은 없다. SIGTERM 배포는 Gateway가 PGMQ reader를 멈춘 뒤 WebSocket 연결과 HTTP keep-alive를 닫고, 그 연결의 durable subscription 삭제까지 확인한 뒤 lease를 명시 해제한다. WebSocket close code `1001`은 best-effort이며, keep-alive 강제 종료와 경합하면 client는 `1006`을 볼 수 있다. 어느 경우에도 구독 행 삭제가 ownership release보다 먼저 끝난다. SIGKILL·host 장애처럼 해제가 불가능한 종료에서는 새 process가 기본 30초 이내에 기존 lease 만료를 기다린 뒤 takeover한다. 기다리는 process는 retention·PGMQ 소비·사용자 요청 endpoint·WebSocket을 열지 않는다.
