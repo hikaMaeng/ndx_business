@@ -11,7 +11,7 @@ export interface AgentEnv {
   subscriptionLeaseSeconds: number;
   visibilityTimeoutSeconds: number;
   executionLeaseSeconds: number;
-  maxAttempts: number;
+  maxDeliveryReads: number;
   retentionDays: number;
   pollSeconds: number;
   pollBatchSize: number;
@@ -55,7 +55,7 @@ export function readEnv(source = process.env): AgentEnv {
     // The execution fence must outlive a single PGMQ visibility lease so a visibility probe
     // can distinguish queue redelivery from a database ownership reclaim.
     executionLeaseSeconds: positive(source, "AGENT_EXECUTION_LEASE_SECONDS", visibilityTimeoutSeconds * 2),
-    maxAttempts: positive(source, "AGENT_MAX_ATTEMPTS", 5),
+    maxDeliveryReads: positive(source, "AGENT_MAX_DELIVERY_READS", 5),
     retentionDays: positive(source, "AGENT_RETENTION_DAYS", 30),
     pollSeconds: positive(source, "QUEUE_POLL_SECONDS", 5),
     pollBatchSize: positive(source, "QUEUE_POLL_BATCH_SIZE", 8),

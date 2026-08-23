@@ -6,7 +6,7 @@ Worker는 command를 canonical event로 append하고 terminal result를 `AGENT_R
 
 이미 실행 중인 transaction으로 판정된 message 중 최초 `requestEventId`와 같은 것은 delete하지 않는다. 이 message가 visibility 재전달된 원본일 수 있기 때문이다. 새 client 재제출처럼 event ID가 다른 duplicate는 안전하게 delete한다. 실행이 완료되면 원 Worker 또는 재전달 consumer가 terminal result를 만들고 delete한다.
 
-PGMQ와 Gateway delivery는 at-least-once다. 따라서 consumer는 `eventId`로 중복을 제거해야 한다. Worker가 command를 terminal 상태로 만들기 전 지속 실패하면 `AGENT_MAX_ATTEMPTS`번째 read에서 PGMQ archive로 옮기고, canonical command를 만들 수 있는 경우 `*.processing.failure` event를 result queue에 보낸다. 정상 handler 오류는 `worker_failed` terminal result다.
+PGMQ와 Gateway delivery는 at-least-once다. 따라서 consumer는 `eventId`로 중복을 제거해야 한다. `AGENT_MAX_DELIVERY_READS`는 실행 attempt가 아니라 같은 PGMQ message를 읽은 횟수의 상한이다. Worker가 command를 terminal 상태로 만들기 전 지속 실패하면 이 상한에서 archive로 옮기고, canonical command를 만들 수 있는 경우 `*.processing.failure` event를 모든 recipient result channel에 보낸다. 정상 handler 오류는 `worker_failed` terminal result다.
 
 ## 식별성과 소비자
 

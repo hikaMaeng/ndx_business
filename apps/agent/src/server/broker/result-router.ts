@@ -8,7 +8,7 @@ import { nextReadBackoff, wait } from "./backoff.js";
 function gatewayQueue(prefix: string, gatewayId: string): string { return `${prefix}${gatewayId.replace(/[^a-zA-Z0-9_]/g, "_")}`; }
 
 /** Fans one result event to every Gateway that currently owns a matching channel subscription. */
-export function startResultRouter(input: { queue: EventQueueTransport; resultQueue: string; gatewayQueuePrefix: string; subscriptions: GatewaySubscriptionStore; metrics: MetricsRegistry; visibilitySeconds: number; pollSeconds: number; maxInFlight: number }): BrokerLoop {
+export function startResultRouter(input: { queue: EventQueueTransport; resultQueue: string; gatewayQueuePrefix: string; subscriptions: GatewaySubscriptionStore; metrics: MetricsRegistry; visibilitySeconds: number; pollSeconds: number; maxInFlight: number; maxDeliveryReads: number }): BrokerLoop {
   let stopped = false;
   const readyQueues = new Set<string>();
   const ensuringQueues = new Map<string, Promise<void>>();
@@ -22,12 +22,18 @@ export function startResultRouter(input: { queue: EventQueueTransport; resultQue
     try { await pending; }
     finally { ensuringQueues.delete(queue); }
   };
-  const route = async (message: { id: string; event: EventEnvelope }): Promise<void> => {
+  const route = async (message: { id: string; event: EventEnvelope; readCount: number }): Promise<void> => {
     const gateways = await input.subscriptions.gatewaysFor(message.event.channel);
     // Do not turn a short subscription outage or submit-before-subscribe race into data loss.
     // Leaving the PGMQ message leased makes the router retry after its visibility timeout.
     if (gateways.length === 0) {
       input.metrics.increment("routerUnmatchedResults");
+      // The immutable event store remains the replay source. Archive only after a bounded
+      // delivery-read budget so a permanently absent subscription cannot starve the result queue.
+      if (message.readCount >= input.maxDeliveryReads) {
+        await input.queue.archive(input.resultQueue, message.id);
+        input.metrics.increment("routerArchivedUnmatchedResults");
+      }
       return;
     }
     await Promise.all(gateways.map(async (gatewayId) => {
@@ -39,7 +45,7 @@ export function startResultRouter(input: { queue: EventQueueTransport; resultQue
     input.metrics.increment("queueDeletes");
   };
   const inFlight = new Set<Promise<void>>();
-  const schedule = (message: { id: string; event: EventEnvelope }): void => {
+  const schedule = (message: { id: string; event: EventEnvelope; readCount: number }): void => {
     let task: Promise<void>;
     task = route(message).catch((error) => {
       input.metrics.increment("processingFailures");
@@ -54,7 +60,7 @@ export function startResultRouter(input: { queue: EventQueueTransport; resultQue
       for (const message of messages) {
         while (!stopped && inFlight.size >= input.maxInFlight) await Promise.race(inFlight);
         if (stopped) break;
-        schedule({ id: message.id, event: message.event as EventEnvelope });
+        schedule({ id: message.id, event: message.event as EventEnvelope, readCount: message.readCount });
       }
     } catch (error) { input.metrics.increment("brokerReadFailures"); console.error(JSON.stringify({ event: "router.result.retry", backoffMs, error: error instanceof Error ? error.message : String(error) })); await wait(backoffMs); backoffMs = nextReadBackoff(backoffMs); }
   } await Promise.allSettled(inFlight); };

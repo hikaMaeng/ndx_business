@@ -156,6 +156,7 @@ try {
   const deployed = deployedWorkerSettings();
   assert.equal(visibilitySeconds, deployed.deployedVisibilitySeconds, "harness visibility setting must match the deployed Worker");
   assert.equal(executionLeaseSeconds, deployed.deployedExecutionLeaseSeconds, "harness execution lease setting must match the deployed Worker");
+  const baselineMetrics = (await metrics()).metrics;
   await Promise.all(channels.flatMap((channel) => Array.from({ length: subscribersPerChannel }, (_, ordinal) => subscribe(channel, ordinal))));
 
   const conflictOriginals = await Promise.all(Array.from({ length: conflictTotal }, (_, index) => {
@@ -218,6 +219,9 @@ try {
   assert.equal(leaseRedeliveries, 0, "visibility heartbeat must prevent PGMQ redelivery while the independent execution lease stays valid");
   assert.deepEqual(queues, Object.fromEntries(Object.keys(queues).map((queue) => [queue, 0])), "all PGMQ paths must drain this workload");
   const gatewayMetrics = await metrics();
+  for (const name of ["brokerReadFailures", "routerUnmatchedResults", "routerArchivedUnmatchedResults", "processingDlqTotal", "queueVisibilityRenewFailures"]) {
+    assert.equal(gatewayMetrics.metrics[name] - baselineMetrics[name], 0, `healthy workload must not increment ${name}`);
+  }
 
   console.log(JSON.stringify({ test: "pgmq-composite-workload", prefix, total, joinTotal, conflictTotal, leaseDelayMs, visibilitySeconds, executionLeaseSeconds, workers, streams, channels: channels.length, subscribers: subscribers.length, ingressP50Ms: percentile(ingressLatencies, 0.50), ingressP95Ms: percentile(ingressLatencies, 0.95), terminalP50Ms: percentile(allSubscribers, 0.50), terminalP95Ms: percentile(allSubscribers, 0.95), terminalP99Ms: percentile(allSubscribers, 0.99), lowerBoundMs, overheadMs, elapsedMs, expectedTerminalCount, eventRows, completedExecutions, leaseAttempts, leaseRedeliveries, gatewayMetrics, queues }));
 } finally {

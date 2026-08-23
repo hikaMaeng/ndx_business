@@ -9,7 +9,7 @@ Compose에서는 `AGENT_ROLE=gateway|worker|router`로 같은 이미지를 세 �
 | `AGENT_GATEWAY_ID` | Gateway별 구독·결과 queue 식별자. 미설정 시 `HOSTNAME`, 그다음 UUID |
 | `QUEUE_VISIBILITY_TIMEOUT_SECONDS` | PGMQ read visibility lease 기간 |
 | `AGENT_EXECUTION_LEASE_SECONDS` | PostgreSQL execution ownership lease 기간. 미설정 시 visibility의 2배 |
-| `AGENT_MAX_ATTEMPTS` | 영구 처리 실패를 archive로 전환하기 전 허용하는 PGMQ delivery read 수 |
+| `AGENT_MAX_DELIVERY_READS` | 영구 처리 실패를 archive로 전환하기 전 허용하는 PGMQ delivery read 수 |
 | `AGENT_RETENTION_DAYS` | event·완료 execution·recipient·cursor 보존 일수(기본 30일) |
 | `AGENT_MAX_THREADS`, `AGENT_MAX_QUEUE` | Worker Thread 실행·대기 상한 |
 | `AGENT_ROUTER_CONCURRENCY` | 동시에 fan-out하는 result 수 |

@@ -15,7 +15,7 @@ function resultId(event: EventEnvelope): string { return deterministicEventId(`r
 function conflictId(event: EventEnvelope): string { return deterministicEventId(`conflict:${event.eventId}`); }
 
 /** A Worker server is only a PGMQ command consumer and PGMQ result producer. */
-export function startWorkerConsumer(input: { queue: EventQueueTransport; commandQueue: string; resultQueue: string; eventStore: EventStore; executions: ExecutionStore; pool: WorkerPool; metrics: MetricsRegistry; visibilitySeconds: number; pollSeconds: number; batchSize: number; maxInFlight: number; maxAttempts: number }): BrokerLoop {
+export function startWorkerConsumer(input: { queue: EventQueueTransport; commandQueue: string; resultQueue: string; eventStore: EventStore; executions: ExecutionStore; pool: WorkerPool; metrics: MetricsRegistry; visibilitySeconds: number; pollSeconds: number; batchSize: number; maxInFlight: number; maxDeliveryReads: number }): BrokerLoop {
   let stopped = false;
   const process = async (message: { id: string; event: IngressEvent }): Promise<void> => {
     const command = await input.eventStore.append(toEventDraft(message.event));
@@ -86,19 +86,19 @@ export function startWorkerConsumer(input: { queue: EventQueueTransport; command
     task = process(message).catch(async (error) => {
       input.metrics.increment("processingFailures");
       console.error(JSON.stringify({ event: "worker.command.retry", messageId: message.id, error: error instanceof Error ? error.message : String(error) }));
-      if (message.readCount < input.maxAttempts) return;
+      if (message.readCount < input.maxDeliveryReads) return;
       try {
         // Persist and fan out the terminal failure first. If any step fails we intentionally leave
         // the source message visible for retry; archive-before-notify is a silent-loss bug.
         const command = await input.eventStore.append(toEventDraft(message.event));
         const payload: ResultPayload = { ok: false, error: { code: "processing_permanent_failure", message: error instanceof Error ? error.message : String(error) } };
-        // An active execution is not ours to terminate. It will either finish or lose its DB lease
-        // before this redelivered message can provide the terminal failure.
-        if (!await input.executions.failExpired(command.transactionKey, payload)) return;
         for (const recipient of await input.executions.recipients(command.transactionKey)) {
           const failure = await input.eventStore.append(toProcessingFailureDraft(recipient, deterministicEventId(`processing-failed:${command.eventId}:${recipient.streamId}:${recipient.replyChannel ?? recipient.channel}`), payload.error!.message));
           await input.queue.send(input.resultQueue, failure);
         }
+        // An active execution is not ours to terminate. Only after terminal events were durable
+        // may an already abandoned attempt become failed and be archived.
+        if (!await input.executions.failExpired(command.transactionKey, payload)) return;
         await input.queue.archive(input.commandQueue, message.id);
         input.metrics.increment("processingDlqTotal");
       } catch (dlqError) {
