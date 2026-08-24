@@ -29,6 +29,9 @@ npm run lint --workspace agent
 | Gateway identity 충돌 | 같은 `AGENT_GATEWAY_ID`의 두 번째 process는 queue consume 전에 passive standby가 되고 `/health=200`, `/ready=503`, ingress·WebSocket upgrade=`503`을 반환하며 Docker HEALTHCHECK가 `/ready` 실패로 unhealthy를 표시함 |
 | Gateway graceful handoff | reader 종료 → WebSocket close/subscription row 삭제 → HTTP keep-alive 강제 종료 → ownership release 순서를 확인하고, takeover 직후 이전 channel subscription이 0행 |
 | terminal persistence 장기 실패 | source는 남고 execution attempt는 증가하지 않으며 read-count 임계에서 `terminalPersistenceAlerts`가 증가함 |
+| terminal persistence backoff | source를 delete/archive하지 않고 read count에 따라 visibility가 증가하며 configured cap을 넘지 않음 |
+| Gateway handoff ledger | Router가 Gateway별 row를 기록하고 queue handoff 완료 뒤에만 result source를 delete함 |
+| watermark 수명 | retained event 또는 cursor가 있으면 보존하고, 둘 다 없는 오래된 stream만 정리함 |
 | WebSocket replay | `ready`·`subscribed`·`event`·`replay` 및 cursor advance 확인 |
 
 ## 부하 검증

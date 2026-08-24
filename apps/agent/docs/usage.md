@@ -8,6 +8,7 @@ Compose에서는 `AGENT_ROLE=gateway|worker|router`로 같은 이미지를 세 �
 | `AGENT_GATEWAY_QUEUE_PREFIX` | Gateway별 결과 queue 접두사 |
 | `AGENT_GATEWAY_ID` | Gateway별 구독·결과 queue 식별자. 미설정 시 `HOSTNAME`, 그다음 UUID. 같은 ID의 두 번째 Gateway는 queue를 소비하지 않고 live lease가 끝날 때까지 standby로 대기한다. standby는 `/health` 200(프로세스 생존), `/ready` 503(소유권 미획득)을 반환하고 WebSocket upgrade도 HTTP 503으로 거절한다. |
 | `AGENT_TERMINAL_PERSISTENCE_ALERT_ATTEMPTS` | terminal event 저장 실패가 PGMQ read count 몇 회에 도달하면 운영 경보를 남길지 정하는 임계값 |
+| `AGENT_TERMINAL_PERSISTENCE_BACKOFF_MAX_SECONDS` | terminal 저장 실패 때 source visibility를 지수 backoff하는 상한(기본 300초) |
 | `QUEUE_VISIBILITY_TIMEOUT_SECONDS` | PGMQ read visibility lease 기간 |
 | `AGENT_EXECUTION_LEASE_SECONDS` | PostgreSQL execution ownership lease 기간. 미설정 시 visibility의 2배 |
 | `AGENT_MAX_DELIVERY_READS` | Router가 구독 Gateway 없는 result를 archive하기 전 허용하는 PGMQ delivery read 수 |

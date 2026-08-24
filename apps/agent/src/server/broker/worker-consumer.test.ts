@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { EventDraft, EventEnvelope, IngressEvent } from "agent_domain/common";
-import { startWorkerConsumer } from "./worker-consumer.js";
+import { startWorkerConsumer, terminalPersistenceVisibilitySeconds } from "./worker-consumer.js";
 import { WorkerLostError } from "../worker/pool.js";
 
 const command: IngressEvent = { eventId: "command-1", action: "hash.sha256", transactionKey: "tx-1", channel: "agent.requests", replyChannel: "orders", createdAt: "2026-08-22T00:00:00.000Z", payload: { input: "abc" } };
+
+test("terminal persistence retries back off without abandoning the source command", () => {
+  assert.equal(terminalPersistenceVisibilitySeconds(1, 60, 300), 60);
+  assert.equal(terminalPersistenceVisibilitySeconds(2, 60, 300), 120);
+  assert.equal(terminalPersistenceVisibilitySeconds(99, 60, 300), 300);
+});
 
 test("worker consumes a PGMQ command, emits a result event, then acknowledges the command", async () => {
   let read = false; const sent: EventEnvelope[] = []; const deleted: string[] = [];
@@ -102,9 +108,9 @@ test("an exhausted execution attempt records a processing failure before archivi
 });
 
 test("a completed execution retains its broker message when terminal persistence fails without consuming another execution attempt", async () => {
-  let read = false; const deleted: string[] = []; const metrics: string[] = [];
+  let read = false; const deleted: string[] = []; const retryVisibility: number[] = []; const metrics: string[] = [];
   const loop = startWorkerConsumer({
-    queue: { read: async () => read ? await new Promise<never>(() => undefined) : (read = true, [{ id: "terminal-1", event: command, headers: null, readCount: 2 }]), delete: async (_queue: string, id: string) => { deleted.push(id); } } as never,
+    queue: { read: async () => read ? await new Promise<never>(() => undefined) : (read = true, [{ id: "terminal-1", event: command, headers: null, readCount: 2 }]), delete: async (_queue: string, id: string) => { deleted.push(id); }, extendVisibility: async (_queue: string, _id: string, seconds: number) => { retryVisibility.push(seconds); } } as never,
     commandQueue: "agent_commands", resultQueue: "agent_results", eventStore: {
       append: async (draft: EventDraft): Promise<EventEnvelope> => {
         if (draft.kind === "result") throw new Error("database unavailable");
@@ -117,13 +123,14 @@ test("a completed execution retains its broker message when terminal persistence
   });
   await new Promise((resolve) => setTimeout(resolve, 20)); loop.stop();
   assert.deepEqual(deleted, []);
+  assert.deepEqual(retryVisibility, [120]);
   assert.deepEqual(metrics, ["queueReads", "queueMessages", "terminalPersistenceRetries", "terminalPersistenceAlerts"]);
 });
 
 test("terminal persistence failure alerts when a prior non-terminal redelivery already crossed the threshold", async () => {
-  let read = false; const metrics: string[] = [];
+  let read = false; const retryVisibility: number[] = []; const metrics: string[] = [];
   const loop = startWorkerConsumer({
-    queue: { read: async () => read ? await new Promise<never>(() => undefined) : (read = true, [{ id: "terminal-late", event: command, headers: null, readCount: 11 }]) } as never,
+    queue: { read: async () => read ? await new Promise<never>(() => undefined) : (read = true, [{ id: "terminal-late", event: command, headers: null, readCount: 11 }]), extendVisibility: async (_queue: string, _id: string, seconds: number) => { retryVisibility.push(seconds); } } as never,
     commandQueue: "agent_commands", resultQueue: "agent_results", eventStore: {
       append: async (draft: EventDraft): Promise<EventEnvelope> => { if (draft.kind === "result") throw new Error("database unavailable"); return { ...command, kind: "command", eventVersion: 1, streamId: "channel:agent.requests", sequence: "1", correlationId: "tx-1", source: "client" }; },
     } as never, deliveries: { enqueue: async () => undefined } as never,
@@ -133,4 +140,5 @@ test("terminal persistence failure alerts when a prior non-terminal redelivery a
   });
   await new Promise((resolve) => setTimeout(resolve, 20)); loop.stop();
   assert.ok(metrics.includes("terminalPersistenceAlerts"));
+  assert.deepEqual(retryVisibility, [300]);
 });

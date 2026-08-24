@@ -16,8 +16,12 @@ function resultId(event: EventEnvelope): string { return deterministicEventId(`r
 function conflictId(event: EventEnvelope): string { return deterministicEventId(`conflict:${event.eventId}`); }
 class TerminalPersistenceError extends Error {}
 
+export function terminalPersistenceVisibilitySeconds(readCount: number, visibilitySeconds: number, maxSeconds: number): number {
+  return Math.min(maxSeconds, visibilitySeconds * 2 ** Math.min(6, Math.max(0, readCount - 1)));
+}
+
 /** A Worker server is only a PGMQ command consumer and PGMQ result producer. */
-export function startWorkerConsumer(input: { queue: EventQueueTransport; commandQueue: string; resultQueue: string; eventStore: EventStore; deliveries: DeliveryStore; executions: ExecutionStore; pool: WorkerPool; metrics: MetricsRegistry; visibilitySeconds: number; pollSeconds: number; batchSize: number; maxInFlight: number; maxExecutionAttempts: number; terminalPersistenceAlertAttempts?: number; onTerminalPersisted?: () => void }): BrokerLoop {
+export function startWorkerConsumer(input: { queue: EventQueueTransport; commandQueue: string; resultQueue: string; eventStore: EventStore; deliveries: DeliveryStore; executions: ExecutionStore; pool: WorkerPool; metrics: MetricsRegistry; visibilitySeconds: number; pollSeconds: number; batchSize: number; maxInFlight: number; maxExecutionAttempts: number; terminalPersistenceAlertAttempts?: number; terminalPersistenceBackoffMaxSeconds?: number; onTerminalPersisted?: () => void }): BrokerLoop {
   let stopped = false;
   const persistResult = async (draft: Parameters<EventStore["append"]>[0]): Promise<EventEnvelope> => {
     const persisted = await input.eventStore.append(draft, (client, event) => input.deliveries.enqueue(client, input.resultQueue, event));
@@ -112,6 +116,8 @@ export function startWorkerConsumer(input: { queue: EventQueueTransport; command
     task = process(message).catch(async (error) => {
       if (error instanceof TerminalPersistenceError) {
         input.metrics.increment("terminalPersistenceRetries");
+        const retryAfterSeconds = terminalPersistenceVisibilitySeconds(message.readCount, input.visibilitySeconds, input.terminalPersistenceBackoffMaxSeconds ?? 300);
+        await input.queue.extendVisibility(input.commandQueue, message.id, retryAfterSeconds).catch((visibilityError) => console.error(JSON.stringify({ event: "worker.terminal.retry.backoff.failed", messageId: message.id, error: visibilityError instanceof Error ? visibilityError.message : String(visibilityError) })));
         console.error(JSON.stringify({ event: "worker.terminal.retry", messageId: message.id, error: error.message }));
         if (message.readCount >= (input.terminalPersistenceAlertAttempts ?? 10)) {
           input.metrics.increment("terminalPersistenceAlerts");

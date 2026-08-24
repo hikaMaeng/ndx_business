@@ -19,6 +19,7 @@ import { randomUUID } from "node:crypto";
 import { writeMetrics } from "./metrics/endpoint.js";
 import { closeHttpServer, shutdownGateway } from "./gateway/lifecycle/index.js";
 import { createGatewayStandby, type GatewayStandby } from "./gateway/standby/index.js";
+import { GatewayOutboxStore } from "./gateway-outbox/store.js";
 
 function listen(server: ReturnType<typeof createServer>, port: number): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -42,6 +43,7 @@ const eventStore = new EventStore(database, metrics);
 const subscriptions = new GatewaySubscriptionStore(database, env.subscriptionLeaseSeconds);
 const executions = new ExecutionStore(database, env.executionLeaseSeconds);
 const deliveries = new DeliveryStore(database, env.executionLeaseSeconds);
+const gatewayOutbox = new GatewayOutboxStore(database);
 const gatewayQueue = (): string => `${env.gatewayQueuePrefix}${env.gatewayId.replace(/[^a-zA-Z0-9_]/g, "_")}`;
 
 await subscriptions.ensureSchema();
@@ -73,6 +75,7 @@ if (gatewayInstanceId) {
 await eventStore.ensureSchema();
 await executions.ensureSchema();
 await deliveries.ensureSchema();
+await gatewayOutbox.ensureSchema();
 await queue.ensure(env.queue);
 await queue.ensure(env.resultQueue);
 if (env.role === "gateway") await queue.ensure(gatewayQueue());
@@ -83,7 +86,7 @@ const observeExpiredExecutions = async (): Promise<void> => {
 };
 if (env.role === "gateway") {
   await observeExpiredExecutions();
-  await Promise.all([subscriptions.pruneExpired(), eventStore.pruneChannelCursors(env.retentionDays), eventStore.prune(env.retentionDays), executions.prune(env.retentionDays), deliveries.prune(env.retentionDays)]);
+  await subscriptions.pruneExpired(); await eventStore.pruneChannelCursors(env.retentionDays); await eventStore.prune(env.retentionDays); await eventStore.pruneStreamWatermarks(env.retentionDays); await Promise.all([executions.prune(env.retentionDays), deliveries.prune(env.retentionDays), gatewayOutbox.prune(env.retentionDays)]);
 }
 
 const refreshMetrics = (): void => {
@@ -99,14 +102,14 @@ const metricsTimer = setInterval(refreshMetrics, 1000);
 if (env.role === "worker") {
   const pool = createWorkerPool({ minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, maxQueue: env.maxQueue });
   const publisher = startDeliveryPublisher({ queue, store: deliveries, maxAttempts: env.maxOutboxAttempts, metrics });
-  const consumer = startWorkerConsumer({ queue, commandQueue: env.queue, resultQueue: env.resultQueue, eventStore, deliveries, executions, pool, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, batchSize: env.pollBatchSize, maxInFlight: env.maxWorkerThreads + env.maxQueue, maxExecutionAttempts: env.maxExecutionAttempts, terminalPersistenceAlertAttempts: env.terminalPersistenceAlertAttempts, onTerminalPersisted: publisher.wake });
+  const consumer = startWorkerConsumer({ queue, commandQueue: env.queue, resultQueue: env.resultQueue, eventStore, deliveries, executions, pool, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, batchSize: env.pollBatchSize, maxInFlight: env.maxWorkerThreads + env.maxQueue, maxExecutionAttempts: env.maxExecutionAttempts, terminalPersistenceAlertAttempts: env.terminalPersistenceAlertAttempts, terminalPersistenceBackoffMaxSeconds: env.terminalPersistenceBackoffMaxSeconds, onTerminalPersisted: publisher.wake });
   const server = createServer((request, response) => { if (writeMetrics(request, response, env, metrics)) return; response.writeHead(request.url === "/health" || request.url === "/ready" ? 200 : 404); response.end(); }).listen(env.port);
   console.log(JSON.stringify({ event: "agent.worker.started", commandQueue: env.queue, resultQueue: env.resultQueue }));
   const shutdown = async (): Promise<void> => { consumer.stop(); publisher.stop(); server.close(); await Promise.all([consumer.done, publisher.done]); await pool.destroy(); clearInterval(metricsTimer); await queueDatabase.end(); await database.end(); };
   process.once("SIGTERM", () => { void shutdown().then(() => process.exit(0)); });
   process.once("SIGINT", () => { void shutdown().then(() => process.exit(0)); });
 } else if (env.role === "router") {
-  const router = startResultRouter({ queue, resultQueue: env.resultQueue, gatewayQueuePrefix: env.gatewayQueuePrefix, subscriptions, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, maxInFlight: env.routerConcurrency, maxDeliveryReads: env.maxDeliveryReads });
+  const router = startResultRouter({ queue, resultQueue: env.resultQueue, gatewayQueuePrefix: env.gatewayQueuePrefix, subscriptions, outbox: gatewayOutbox, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, maxInFlight: env.routerConcurrency, maxDeliveryReads: env.maxDeliveryReads });
   const server = createServer((request, response) => { if (writeMetrics(request, response, env, metrics)) return; response.writeHead(request.url === "/health" || request.url === "/ready" ? 200 : 404); response.end(); }).listen(env.port);
   console.log(JSON.stringify({ event: "agent.router.started", resultQueue: env.resultQueue }));
   const shutdown = async (): Promise<void> => { router.stop(); server.close(); await router.done; clearInterval(metricsTimer); await queueDatabase.end(); await database.end(); };
@@ -125,7 +128,7 @@ if (env.role === "worker") {
   }).catch((error) => console.error(JSON.stringify({ event: "gateway.subscription.renew.failed", error: error instanceof Error ? error.message : String(error) }))); }, Math.max(1_000, Math.floor(env.subscriptionLeaseSeconds * 500)));
   const retentionTimer = setInterval(() => { void (async () => {
     await observeExpiredExecutions();
-    await Promise.all([subscriptions.pruneExpired(), eventStore.pruneChannelCursors(env.retentionDays), eventStore.prune(env.retentionDays), executions.prune(env.retentionDays), deliveries.prune(env.retentionDays)]);
+    await subscriptions.pruneExpired(); await eventStore.pruneChannelCursors(env.retentionDays); await eventStore.prune(env.retentionDays); await eventStore.pruneStreamWatermarks(env.retentionDays); await Promise.all([executions.prune(env.retentionDays), deliveries.prune(env.retentionDays), gatewayOutbox.prune(env.retentionDays)]);
   })().catch((error) => console.error(JSON.stringify({ event: "agent.retention.failed", error: error instanceof Error ? error.message : String(error) }))); }, 60 * 60 * 1_000);
   const shutdown = async (): Promise<void> => {
     clearInterval(metricsTimer); clearInterval(renewTimer); clearInterval(retentionTimer);

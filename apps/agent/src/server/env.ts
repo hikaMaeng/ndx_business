@@ -15,6 +15,7 @@ export interface AgentEnv {
   maxExecutionAttempts: number;
   maxOutboxAttempts: number;
   terminalPersistenceAlertAttempts: number;
+  terminalPersistenceBackoffMaxSeconds: number;
   retentionDays: number;
   pollSeconds: number;
   pollBatchSize: number;
@@ -62,6 +63,7 @@ export function readEnv(source = process.env): AgentEnv {
     maxExecutionAttempts: positive(source, "AGENT_MAX_EXECUTION_ATTEMPTS", 5),
     maxOutboxAttempts: positive(source, "AGENT_MAX_OUTBOX_ATTEMPTS", 10),
     terminalPersistenceAlertAttempts: positive(source, "AGENT_TERMINAL_PERSISTENCE_ALERT_ATTEMPTS", 10),
+    terminalPersistenceBackoffMaxSeconds: positive(source, "AGENT_TERMINAL_PERSISTENCE_BACKOFF_MAX_SECONDS", 300),
     retentionDays: positive(source, "AGENT_RETENTION_DAYS", 30),
     pollSeconds: positive(source, "QUEUE_POLL_SECONDS", 5),
     pollBatchSize: positive(source, "QUEUE_POLL_BATCH_SIZE", 8),

@@ -10,8 +10,9 @@ Gateway만 host port `18081`을 공개한다. Worker는 command queue를 읽는 
 | `event_subscription_cursor` | channel별 cursor position | [`EventStore`](../src/server/event-store/store.ts) |
 | `agent_execution`, `agent_execution_recipient` | transaction claim, 실행 결과, reply channel 집합 | [`ExecutionStore`](../src/server/idempotency/store.ts) |
 | `agent_gateway_instance`, `agent_gateway_subscription` | Gateway queue identity의 단일 owner와 channel 구독 lease | [`GatewaySubscriptionStore`](../src/server/subscription/store.ts) |
+| `agent_gateway_delivery` | Router→Gateway queue handoff ledger | [`GatewayOutboxStore`](../src/server/gateway-outbox/store.ts) |
 
-현재 `event_delivery` 같은 recipient별 전달 ledger는 없다. 동일 result가 PGMQ를 통해 다시 전달될 수 있으므로 최종 consumer는 `eventId`를 중복 제거 키로 사용해야 한다.
+Gateway handoff는 ledger 기록 뒤에만 result source를 삭제한다. WebSocket receipt는 ephemeral이므로 최종 consumer는 `eventId` dedupe와 cursor replay를 사용한다.
 
 ## 소스 경계
 
@@ -21,6 +22,7 @@ Gateway만 host port `18081`을 공개한다. Worker는 command queue를 읽는 
 | `src/server/broker/` | Worker consume, result routing, Gateway delivery | [`startWorkerConsumer`](../src/server/broker/worker-consumer.ts) |
 | `src/server/event-store/` | append, replay, cursor | [`EventStore`](../src/server/event-store/store.ts) |
 | `src/server/gateway/` | standby liveness와 ownership-safe shutdown | [`shutdownGateway`](../src/server/gateway/lifecycle/index.ts) |
+| `src/server/gateway-outbox/` | Gateway별 result handoff ledger | [`GatewayOutboxStore`](../src/server/gateway-outbox/store.ts) |
 | `src/server/idempotency/` | transaction claim·lease·recipient | [`ExecutionStore`](../src/server/idempotency/store.ts) |
 | `src/server/ingress/` | ingress를 canonical draft로 변환 | [`toEventDraft`](../src/server/ingress/event-draft.ts) |
 | `src/server/metrics/` | process·pool 계수 | [`MetricsRegistry`](../src/server/metrics/registry.ts) |

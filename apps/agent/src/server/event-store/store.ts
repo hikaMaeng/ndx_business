@@ -51,7 +51,8 @@ export class EventStore {
     await this.pool.query("CREATE INDEX IF NOT EXISTS event_store_correlation_idx ON event_store (correlation_id, stored_at)");
     await this.pool.query("CREATE INDEX IF NOT EXISTS event_store_stored_at_idx ON event_store (stored_at)");
     await this.pool.query(`CREATE TABLE IF NOT EXISTS event_stream_sequence (
-      stream_id text PRIMARY KEY, last_sequence bigint NOT NULL)`);
+      stream_id text PRIMARY KEY, last_sequence bigint NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())`);
+    await this.pool.query("ALTER TABLE event_stream_sequence ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now()");
     await this.pool.query(`INSERT INTO event_stream_sequence (stream_id, last_sequence)
       SELECT stream_id, max(sequence) FROM event_store GROUP BY stream_id
       ON CONFLICT (stream_id) DO UPDATE SET last_sequence = GREATEST(event_stream_sequence.last_sequence, EXCLUDED.last_sequence)`);
@@ -98,7 +99,7 @@ export class EventStore {
           continue;
         }
         const next = await client.query<{ sequence: string | number }>(`INSERT INTO event_stream_sequence (stream_id,last_sequence) VALUES ($1,1)
-          ON CONFLICT (stream_id) DO UPDATE SET last_sequence = event_stream_sequence.last_sequence + 1 RETURNING last_sequence AS sequence`, [event.streamId]);
+          ON CONFLICT (stream_id) DO UPDATE SET last_sequence = event_stream_sequence.last_sequence + 1, updated_at = now() RETURNING last_sequence AS sequence`, [event.streamId]);
         const sequence = String(next.rows[0].sequence);
         const inserted = await client.query<StoredEventRow>(`INSERT INTO event_store (${COLUMNS})
           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17)
@@ -160,6 +161,15 @@ export class EventStore {
 
   async prune(retentionDays: number): Promise<number> {
     const pruned = await this.pool.query("DELETE FROM event_store WHERE stored_at < now() - make_interval(days => $1)", [retentionDays]);
+    return pruned.rowCount ?? 0;
+  }
+
+  /** A watermark is retained while a retained event or an unexpired cursor can still require it. */
+  async pruneStreamWatermarks(retentionDays: number): Promise<number> {
+    const pruned = await this.pool.query(`DELETE FROM event_stream_sequence AS watermark
+      WHERE watermark.updated_at < now() - make_interval(days => $1)
+        AND NOT EXISTS (SELECT 1 FROM event_store WHERE stream_id = watermark.stream_id)
+        AND NOT EXISTS (SELECT 1 FROM event_subscription_cursor WHERE positions ? watermark.stream_id)`, [retentionDays]);
     return pruned.rowCount ?? 0;
   }
 

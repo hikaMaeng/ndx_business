@@ -125,11 +125,14 @@ test("channel replay reports a bounded page before live routing is allowed", asy
   assert.equal(page.events.at(-1)?.sequence, "256");
 });
 
-test("event retention never deletes the durable stream watermark", async () => {
+test("event retention and cursor retention keep their own boundaries before stale watermarks are pruned", async () => {
   const statements: string[] = [];
   const store = new EventStore({ query: async (sql: string) => { statements.push(sql); return { rowCount: 3, rows: [] }; } } as never);
   assert.equal(await store.prune(30), 3);
   assert.equal(statements.length, 1);
   assert.match(statements[0]!, /DELETE FROM event_store/);
   assert.doesNotMatch(statements[0]!, /event_stream_sequence/);
+  assert.equal(await store.pruneStreamWatermarks(30), 3);
+  assert.match(statements[1]!, /DELETE FROM event_stream_sequence/);
+  assert.match(statements[1]!, /event_subscription_cursor WHERE positions \? watermark\.stream_id/);
 });

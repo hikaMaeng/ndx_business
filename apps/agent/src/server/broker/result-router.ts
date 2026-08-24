@@ -4,11 +4,12 @@ import type { GatewaySubscriptionStore } from "../subscription/store.js";
 import type { MetricsRegistry } from "../metrics/registry.js";
 import type { BrokerLoop } from "./gateway-delivery.js";
 import { nextReadBackoff, wait } from "./backoff.js";
+import { GatewayOutboxStore } from "../gateway-outbox/store.js";
 
 function gatewayQueue(prefix: string, gatewayId: string): string { return `${prefix}${gatewayId.replace(/[^a-zA-Z0-9_]/g, "_")}`; }
 
 /** Fans one result event to every Gateway that currently owns a matching channel subscription. */
-export function startResultRouter(input: { queue: EventQueueTransport; resultQueue: string; gatewayQueuePrefix: string; subscriptions: GatewaySubscriptionStore; metrics: MetricsRegistry; visibilitySeconds: number; pollSeconds: number; maxInFlight: number; maxDeliveryReads: number }): BrokerLoop {
+export function startResultRouter(input: { queue: EventQueueTransport; resultQueue: string; gatewayQueuePrefix: string; subscriptions: GatewaySubscriptionStore; outbox: GatewayOutboxStore; metrics: MetricsRegistry; visibilitySeconds: number; pollSeconds: number; maxInFlight: number; maxDeliveryReads: number }): BrokerLoop {
   let stopped = false;
   const readyQueues = new Set<string>();
   const ensuringQueues = new Map<string, Promise<void>>();
@@ -36,10 +37,14 @@ export function startResultRouter(input: { queue: EventQueueTransport; resultQue
       }
       return;
     }
-    await Promise.all(gateways.map(async (gatewayId) => {
-      const target = gatewayQueue(input.gatewayQueuePrefix, gatewayId);
-      await ensureGatewayQueue(target);
-      await input.queue.send(target, message.event);
+    const targets = gateways.map((gatewayId) => ({ gatewayId, queueName: gatewayQueue(input.gatewayQueuePrefix, gatewayId) }));
+    await input.outbox.record(message.event, targets);
+    const pending = new Set(await input.outbox.pending(message.event.eventId, gateways));
+    await Promise.all(targets.filter((target) => pending.has(target.gatewayId)).map(async (target) => {
+      const { gatewayId, queueName: targetQueue } = target;
+      await ensureGatewayQueue(targetQueue);
+      try { await input.queue.send(targetQueue, message.event); await input.outbox.delivered(message.event.eventId, gatewayId); }
+      catch (error) { await input.outbox.failed(message.event.eventId, gatewayId, error instanceof Error ? error.message : String(error)); throw error; }
     }));
     await input.queue.delete(input.resultQueue, message.id);
     input.metrics.increment("queueDeletes");
