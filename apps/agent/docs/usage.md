@@ -2,7 +2,7 @@
 
 Compose에서는 `AGENT_ROLE=gateway|worker|router`로 같은 이미지를 세 역할로 실행한다. Gateway만 외부에 공개되고 Worker·Router는 `ndx-business_internal` 네트워크 안에서 PGMQ와 PostgreSQL에 연결한다.
 
-기본 compose는 `agent` Gateway 하나를 실행한다. 두 번째 Gateway endpoint가 필요하면 PowerShell에서 `$env:COMPOSE_PROFILES='gateway-ha'; npm run deploy -- agent-gateway-b`를 사용한다. `agent`와 `agent-gateway-b`는 각각 `agent`·`agent-b` identity와 18081·18082 host port를 사용하므로 같은 PGMQ queue를 경쟁 소비하지 않는다. 18082가 사용 중이면 `$env:AGENT_GATEWAY_B_HOST_PORT='18083'`처럼 override한다.
+기본 compose는 `agent` Gateway 하나를 실행한다. 두 번째 Gateway endpoint가 필요하면 PowerShell에서 `$env:COMPOSE_PROFILES='gateway-ha'; npm run deploy -- agent-gateway-b`를 사용한다. `agent`와 `agent-gateway-b`는 각각 `agent`·`agent-b` identity와 18081·18082 host port를 사용하므로 같은 PGMQ queue를 경쟁 소비하지 않는다. host port는 Compose가 읽는 **저장소 루트** `.env`에서 정한다. [`compose.env.example`](../../../compose.env.example)을 `.env`로 복사해 `AGENT_GATEWAY_B_HOST_PORT=18083`처럼 이 머신의 충돌을 해소한다. `.env`는 gitignored이므로 다른 환경에는 값이 전파되지 않는다. `$env:AGENT_GATEWAY_B_HOST_PORT='18083'`는 한 번의 임시 override일 뿐이다.
 
 | 환경값 | 의미 |
 | --- | --- |

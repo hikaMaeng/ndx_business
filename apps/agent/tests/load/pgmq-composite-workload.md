@@ -1,15 +1,11 @@
 # PGMQ 복합 부하 검증
 
-실행: 2026-08-23, 배포 대상: Gateway·Worker·Router 컨테이너, Worker Thread 96개.
+실행 환경: Gateway·Worker·Router 컨테이너, Worker Thread 96개. 이 문서는 절대값을 현재 상태의 보장으로 제시하지 않으며, 각 실행일·commit·출력은 operations report에 별도로 남긴다.
 
 ## 실행 명령
 
 ```powershell
-$env:AGENT_GATEWAY_ID = "<docker inspect agent hostname>"
 $env:AGENT_METRICS_TOKEN = "<AGENT_METRICS_TOKEN>"
-$env:QUEUE_VISIBILITY_TIMEOUT_SECONDS = "3"
-$env:AGENT_EXECUTION_LEASE_SECONDS = "30"
-$env:AGENT_COMPOSITE_LEASE_DELAY_MS = "8000"
 node apps/agent/tests/load/pgmq-composite-workload.mjs
 ```
 
@@ -30,26 +26,6 @@ Harness는 Docker의 `admin` PostgreSQL 컨테이너를 읽어 event store, exec
 | 논리 channel / WebSocket subscriber | 7 / 14 |
 
 delay 실행의 worker-only 하한은 `ceil(2048 / 96) × 5,000 = 110,000ms`다. 기본 허용 시간은 하한 + 20,000ms다. visibility probe는 throughput command보다 먼저 보내므로 65초가 benchmark의 직렬 tail이 되지 않는다.
-
-## 2026-08-23 최신 결과
-
-```json
-{
-  "elapsedMs": 112210,
-  "terminalP50Ms": 54206,
-  "terminalP95Ms": 105679,
-  "terminalP99Ms": 110311,
-  "expectedTerminalCount": 2241,
-  "eventRows": 4482,
-  "completedExecutions": 2081,
-  "leaseAttempts": 1,
-  "queues": {
-    "agent_requests": 0,
-    "agent_results": 0,
-    "agent_gateway_agent": 0
-  }
-}
-```
 
 하네스는 terminal result마다 `agent_gateway_delivery`의 delivered row가 정확히 하나 생성되고, 미완료·재시도·dead handoff가 0인지도 검사한다. 성공 run 정리는 이 ledger까지 삭제한 뒤 0건을 단언한다. `AGENT_TERMINAL_PERSISTENCE_ALERT_ATTEMPTS=10`, `AGENT_TERMINAL_PERSISTENCE_BACKOFF_MAX_SECONDS=300`, `AGENT_MAX_GATEWAY_DELIVERY_ATTEMPTS=10`도 컨테이너 env와 `/metrics.configuration`의 교차검증 대상이다. 기본 Gateway ID는 `agent`이며, 같은 ID의 두 번째 process는 queue 경쟁 소비 대신 lease 만료까지 passive standby로 대기한다.
 

@@ -34,4 +34,12 @@ Router가 결과 PGMQ source를 ACK하기 전에 Gateway별 durable handoff ledg
 
 측정 시간은 worker-only 하한보다 2,550ms 높고 허용 상한(130,000ms) 안이다. Router ledger retry/dead-letter, unmatched result, broker read failure, visibility renew failure는 모두 0 증가였다. 하네스는 성공 뒤 `agent_gateway_delivery`까지 삭제하고 prefix 행 0건을 확인했다.
 
-별도로 실 DB에서 격리한 handoff row에 실패 전이 SQL을 실행해 `dead|1|probe queue unavailable`을 확인한 뒤 해당 probe row를 즉시 삭제했다. 이는 Gateway queue가 지속 실패할 때 `AGENT_MAX_GATEWAY_DELIVERY_ATTEMPTS` 예산 후 source의 무한 재전달 대신 `dead`·`last_error`가 남는 경로의 SQL 유효성 증적이다.
+## 실제 재시도 예산 경계
+
+`apps/agent/tests/integration/gateway-outbox-budget.mts`를 Compose network 내부의 일회성 Node container에서 실행했다. 이 검증은 SQL 문자열 복제가 아니라 source의 `GatewayOutboxStore.failed()`를 실제 PostgreSQL pool에 연결한다.
+
+```json
+{"test":"gateway-outbox-budget","attempts":10,"status":"dead","lastError":"failure-10"}
+```
+
+각 1~9회는 `retry`와 `status=ready`, 10회째는 `dead`와 `last_error=failure-10`, 마지막 `pending()`은 빈 배열을 단언했다. finally cleanup 뒤 `gateway-outbox-budget-%` ledger 행도 0건이었다. 따라서 기본 예산 10의 경계는 mock이 아니라 source method·실 PostgreSQL 조합으로 검증됐다.
