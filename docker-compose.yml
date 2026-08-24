@@ -38,6 +38,8 @@ services:
       # Stable in the default single-Gateway deployment. A second Gateway with this
       # identity fails closed; a scaled deployment must assign each replica an ID.
       AGENT_GATEWAY_ID: agent
+    labels:
+      ndx.business.deploy-health-path: /ready
     depends_on:
       admin:
         condition: service_healthy

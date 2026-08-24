@@ -18,7 +18,7 @@ import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { writeMetrics } from "./metrics/endpoint.js";
 import { closeHttpServer, shutdownGateway } from "./gateway/lifecycle/index.js";
-import { activateGatewayStandby, createGatewayStandby } from "./gateway/standby/index.js";
+import { createGatewayStandby, type GatewayStandby } from "./gateway/standby/index.js";
 
 function listen(server: ReturnType<typeof createServer>, port: number): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -47,17 +47,17 @@ const gatewayQueue = (): string => `${env.gatewayQueuePrefix}${env.gatewayId.rep
 await subscriptions.ensureSchema();
 const gatewayInstanceId = env.role === "gateway" ? randomUUID() : undefined;
 let gatewayShutdown: (() => Promise<void>) | undefined;
-let gatewayStandby: ReturnType<typeof createGatewayStandby> | undefined;
+let gatewayStandby: GatewayStandby | undefined;
 const signalGateway = () => { void gatewayShutdown?.().then(() => process.exit(0)).catch((error) => { console.error(JSON.stringify({ event: "gateway.shutdown.failed", error: error instanceof Error ? error.message : String(error) })); process.exit(1); }); };
 if (gatewayInstanceId) {
   const standby = createGatewayStandby();
   gatewayStandby = standby;
-  await listen(standby, env.port);
+  await listen(standby.server, env.port);
   let standbyClosed = false;
   const closeStandby = async (): Promise<void> => {
     if (standbyClosed) return;
     standbyClosed = true;
-    await closeHttpServer(standby);
+    await closeHttpServer(standby.server);
   };
   gatewayShutdown = closeStandby;
   process.once("SIGTERM", signalGateway);
@@ -100,14 +100,14 @@ if (env.role === "worker") {
   const pool = createWorkerPool({ minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, maxQueue: env.maxQueue });
   const publisher = startDeliveryPublisher({ queue, store: deliveries, maxAttempts: env.maxOutboxAttempts, metrics });
   const consumer = startWorkerConsumer({ queue, commandQueue: env.queue, resultQueue: env.resultQueue, eventStore, deliveries, executions, pool, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, batchSize: env.pollBatchSize, maxInFlight: env.maxWorkerThreads + env.maxQueue, maxExecutionAttempts: env.maxExecutionAttempts, terminalPersistenceAlertAttempts: env.terminalPersistenceAlertAttempts, onTerminalPersisted: publisher.wake });
-  const server = createServer((request, response) => { if (writeMetrics(request, response, env, metrics)) return; response.writeHead(request.url === "/health" ? 200 : 404); response.end(); }).listen(env.port);
+  const server = createServer((request, response) => { if (writeMetrics(request, response, env, metrics)) return; response.writeHead(request.url === "/health" || request.url === "/ready" ? 200 : 404); response.end(); }).listen(env.port);
   console.log(JSON.stringify({ event: "agent.worker.started", commandQueue: env.queue, resultQueue: env.resultQueue }));
   const shutdown = async (): Promise<void> => { consumer.stop(); publisher.stop(); server.close(); await Promise.all([consumer.done, publisher.done]); await pool.destroy(); clearInterval(metricsTimer); await queueDatabase.end(); await database.end(); };
   process.once("SIGTERM", () => { void shutdown().then(() => process.exit(0)); });
   process.once("SIGINT", () => { void shutdown().then(() => process.exit(0)); });
 } else if (env.role === "router") {
   const router = startResultRouter({ queue, resultQueue: env.resultQueue, gatewayQueuePrefix: env.gatewayQueuePrefix, subscriptions, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, maxInFlight: env.routerConcurrency, maxDeliveryReads: env.maxDeliveryReads });
-  const server = createServer((request, response) => { if (writeMetrics(request, response, env, metrics)) return; response.writeHead(request.url === "/health" ? 200 : 404); response.end(); }).listen(env.port);
+  const server = createServer((request, response) => { if (writeMetrics(request, response, env, metrics)) return; response.writeHead(request.url === "/health" || request.url === "/ready" ? 200 : 404); response.end(); }).listen(env.port);
   console.log(JSON.stringify({ event: "agent.router.started", resultQueue: env.resultQueue }));
   const shutdown = async (): Promise<void> => { router.stop(); server.close(); await router.done; clearInterval(metricsTimer); await queueDatabase.end(); await database.end(); };
   process.once("SIGTERM", () => { void shutdown().then(() => process.exit(0)); });
@@ -116,8 +116,8 @@ if (env.role === "worker") {
   if (!gatewayInstanceId || !gatewayStandby) throw new Error("Gateway identity was not initialised");
   const hub = new EventStreamHub();
   const delivery = startGatewayDelivery({ queue, queueName: gatewayQueue(), hub, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds });
-  const server = gatewayStandby;
-  activateGatewayStandby(server, createApp(env, queue, hub, metrics, async () => { await Promise.all([queue.check(), database.query("SELECT 1")]); }));
+  const server = gatewayStandby.server;
+  gatewayStandby.activate(createApp(env, queue, hub, metrics, async () => { await Promise.all([queue.check(), database.query("SELECT 1")]); }));
   console.log(JSON.stringify({ event: "agent.gateway.listening", port: env.port, gatewayId: env.gatewayId, commandQueue: env.queue }));
   const websocket = attachWebSocketTransport(server, env, queue, hub, eventStore, metrics, { replace: (connectionId, channels) => subscriptions.replaceConnection(env.gatewayId, connectionId, channels), remove: (connectionId) => subscriptions.removeConnection(env.gatewayId, connectionId) });
   const renewTimer = setInterval(() => { void subscriptions.renewGateway(env.gatewayId, gatewayInstanceId).then((owned) => {

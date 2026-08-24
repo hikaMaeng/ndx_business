@@ -119,7 +119,7 @@ if [[ ! -d apps ]]; then
   exit 2
 fi
 
-read -r -a health_paths <<< "${DEPLOY_HEALTH_PATHS:-/health}"
+deploy_health_paths_override="${DEPLOY_HEALTH_PATHS:-}"
 
 compose_json() {
   docker compose config --format json 2>/dev/null
@@ -567,6 +567,8 @@ for service in "${services[@]}"; do
     port_reason="published-port-invalid"
     verify_status="failed"
   else
+    service_health_paths="${deploy_health_paths_override:-$(compose_query "$service" "svc.labels?.['ndx.business.deploy-health-path']")}"
+    read -r -a health_paths <<< "${service_health_paths:-/health}"
     for health_path in "${health_paths[@]}"; do
       health_body=""
       health_url=""

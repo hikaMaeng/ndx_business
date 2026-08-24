@@ -26,7 +26,7 @@ npm run lint --workspace agent
 | outbox retry 소진 | 동일 row가 `dead`·`last_error`로 남고 `outboxDeadLetters`가 증가하며 자동 삭제되지 않음 |
 | retention 뒤 유휴 stream 재사용 | event 행을 prune해도 `event_stream_sequence` watermark가 남고 새 event의 sequence가 이전 cursor position보다 큼 |
 | 만료 execution lease | Gateway retention이 row를 terminalise하지 않고, source PGMQ 재전달이 fenced reclaim함 |
-| Gateway identity 충돌 | 같은 `AGENT_GATEWAY_ID`의 두 번째 process는 queue consume 전에 passive standby가 되고 `/health=200`, `/ready=503`, ingress=`503`을 반환함 |
+| Gateway identity 충돌 | 같은 `AGENT_GATEWAY_ID`의 두 번째 process는 queue consume 전에 passive standby가 되고 `/health=200`, `/ready=503`, ingress·WebSocket upgrade=`503`을 반환하며 Docker HEALTHCHECK가 `/ready` 실패로 unhealthy를 표시함 |
 | Gateway graceful handoff | reader 종료 → WebSocket close/subscription row 삭제 → HTTP keep-alive 강제 종료 → ownership release 순서를 확인하고, takeover 직후 이전 channel subscription이 0행 |
 | terminal persistence 장기 실패 | source는 남고 execution attempt는 증가하지 않으며 read-count 임계에서 `terminalPersistenceAlerts`가 증가함 |
 | WebSocket replay | `ready`·`subscribed`·`event`·`replay` 및 cursor advance 확인 |

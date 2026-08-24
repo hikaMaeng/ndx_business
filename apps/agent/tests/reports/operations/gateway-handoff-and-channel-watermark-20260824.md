@@ -33,9 +33,20 @@ WebSocket connection을 대상으로 결과를 fan-out하는 row는 남지 않�
 [["health",200],["ready",503],["api/events",503]]
 ```
 
-컨테이너는 실행 상태였고 `gateway.identity.waiting`만 기록했다. 따라서 Docker
-healthcheck는 liveness를 통과하고, `/ready`와 ingress는 ownership 미획득을 명확히
-표현한다.
+컨테이너는 실행 상태였고 `gateway.identity.waiting`만 기록했다. `/health`는 단지
+프로세스 생존을 뜻한다. Docker HEALTHCHECK와 공식 deploy 검증은 `/ready`를 사용하므로,
+ownership을 얻지 못한 standby는 실행 중이어도 unhealthy/배포 검증 실패로 드러난다.
+
+readiness 경로 변경 뒤 `verify-agent-standby-readiness`로 같은 `AGENT_GATEWAY_ID=agent`
+컨테이너를 추가 기동해 재확인했다.
+
+```text
+/health=200 /ready=503 /api/events=503 WebSocket upgrade=503
+state=running health=unhealthy failing=5
+```
+
+즉 passive process의 생존과 deploy 가능한 Gateway를 혼동하지 않는다. 검증 컨테이너는
+확인 직후 stop/remove했고 운영 compose 컨테이너나 데이터는 변경하지 않았다.
 
 ## 복합 부하와 channel watermark
 
@@ -75,7 +86,7 @@ standby listener는 ownership 획득 뒤 닫지 않는다. 같은 bound HTTP ser
 handler를 active Gateway handler로 교체한다. 따라서 schema·queue·retention 초기화가
 끝나는 동안에도 `/health`는 계속 응답하고, active 전환에서 port rebind 공백이 없다.
 
-공식 Gateway·Worker·Router deploy 중 health probe는 `{"status":"ok","service":"agent",
-"ready":false}`를 받았고, ownership 획득 뒤 최종 `/health`는
-`{"status":"ok","service":"agent"}`로 전환됐다. 즉 replace 구간은 연결 거부가 아닌
-명시적 standby liveness로 관측됐다.
+공식 Gateway·Worker·Router deploy는 Agent service label의 `/ready`를 probe한다. 따라서
+standby의 `/health=200`은 deploy 성공으로 해석되지 않고, ownership을 얻은 뒤의
+`/ready=200`만 통과한다. replace 구간은 port 재바인드가 아닌 명시적 readiness 전환으로
+관측된다.
