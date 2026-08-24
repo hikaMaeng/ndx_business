@@ -21,7 +21,8 @@ cd "$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd -P )" || exit 2
 #   scripts/deploy.sh                             deploy the only service, if one
 #
 # Optional overrides:
-#   DEPLOY_HEALTH_PATHS   space-separated paths to verify (default: /health)
+#   DEPLOY_HEALTH_PATHS      space-separated paths to verify (default: /health)
+#   DEPLOY_COMPOSE_PROFILES  comma-separated Compose profiles to activate
 
 now_ms() {
   if [[ -r /proc/uptime ]]; then
@@ -120,6 +121,7 @@ if [[ ! -d apps ]]; then
 fi
 
 deploy_health_paths_override="${DEPLOY_HEALTH_PATHS:-}"
+if [[ -n "${DEPLOY_COMPOSE_PROFILES:-}" ]]; then export COMPOSE_PROFILES="$DEPLOY_COMPOSE_PROFILES"; fi
 
 compose_json() {
   docker compose config --format json 2>/dev/null

@@ -65,6 +65,29 @@ services:
     # Internal only: workers never accept client traffic.
     networks:
       - ndx-business_internal
+  agent-gateway-b:
+    profiles: [gateway-ha]
+    build:
+      context: .
+      dockerfile: apps/agent/docker/Dockerfile
+    image: ndx-business-agent:latest
+    init: true
+    restart: unless-stopped
+    env_file:
+      - path: apps/agent/docker/.env
+        required: false
+    environment:
+      AGENT_ROLE: gateway
+      AGENT_GATEWAY_ID: agent-b
+    labels:
+      ndx.business.deploy-health-path: /ready
+    depends_on:
+      admin:
+        condition: service_healthy
+    ports:
+      - "${AGENT_GATEWAY_B_HOST_PORT:-18082}:18081"
+    networks:
+      - ndx-business_internal
   agent-router:
     build:
       context: .
