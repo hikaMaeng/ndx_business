@@ -31,6 +31,7 @@ npm run lint --workspace agent
 | terminal persistence 장기 실패 | source는 남고 execution attempt는 증가하지 않으며 read-count 임계에서 `terminalPersistenceAlerts`가 증가함 |
 | terminal persistence backoff | source를 delete/archive하지 않고 read count에 따라 visibility가 증가하며 configured cap을 넘지 않음 |
 | Gateway handoff ledger | Router가 Gateway별 row를 기록하고 queue handoff 완료 뒤에만 result source를 delete함 |
+| Gateway handoff retry 소진 | queue 전송 오류가 `AGENT_MAX_GATEWAY_DELIVERY_ATTEMPTS` 뒤 `dead`·`last_error` row로 종결되고 source가 무한 재전달되지 않음 |
 | watermark 수명 | retained event 또는 cursor가 있으면 보존하고, 둘 다 없는 오래된 stream만 정리함 |
 | WebSocket replay | `ready`·`subscribed`·`event`·`replay` 및 cursor advance 확인 |
 
@@ -38,6 +39,6 @@ npm run lint --workspace agent
 
 [`pgmq-composite-workload.mjs`](../tests/load/pgmq-composite-workload.mjs)는 기존의 순수 delay benchmark를 대체하는 배포 E2E harness다. 기본 workload는 2,048개의 5초 delay 실행, 128개의 다채널 transaction join, 실행 중인 32개의 payload conflict, visibility timeout보다 긴 lease probe, sessionKey 없는 channel stream probe, 8개 논리 channel과 channel당 2개 WebSocket subscriber를 함께 사용한다. 성공 run은 session·channel watermark를 포함한 자기 prefix 행을 transaction으로 정리하고 0행을 강제 확인한다. 최근 실측값과 재현 절차는 [복합 부하 증적](../tests/load/pgmq-composite-workload.md)에 남긴다.
 
-완료 기준은 단순 queue drain이 아니다. 모든 subscriber가 정확한 action·성공/실패 값을 받고 예상 밖 transactionKey를 하나도 받지 않아야 한다. event store의 command/result 행 수·완료 execution 수·긴 실행의 attempt와 `queue_redeliveries`·세 PGMQ queue의 prefix별 잔여가 모두 예상값과 일치해야 한다. lease probe는 `QUEUE_VISIBILITY_TIMEOUT_SECONDS`보다 긴 handler와 그보다 긴 `AGENT_EXECUTION_LEASE_SECONDS`를 반드시 사용한다. 결과에는 Worker 수, handler 지연, stream 수, channel·subscriber 수, ingress/terminal p50·p95·p99, lower bound, elapsed, queue 잔여와 인증된 `/metrics` 응답을 기록한다. harness는 컨테이너 env에 reliability key가 명시돼 있는지와 `/metrics.configuration`이 그 값과 같은지도 확인한다.
+완료 기준은 단순 queue drain이 아니다. 모든 subscriber가 정확한 action·성공/실패 값을 받고 예상 밖 transactionKey를 하나도 받지 않아야 한다. event store의 command/result 행 수·완료 execution 수·긴 실행의 attempt와 `queue_redeliveries`·세 PGMQ queue의 prefix별 잔여가 모두 예상값과 일치해야 한다. 또한 terminal result마다 `agent_gateway_delivery.delivered` row가 정확히 하나 있어야 하며 ready/dead row가 없어야 한다. lease probe는 `QUEUE_VISIBILITY_TIMEOUT_SECONDS`보다 긴 handler와 그보다 긴 `AGENT_EXECUTION_LEASE_SECONDS`를 반드시 사용한다. 결과에는 Worker 수, handler 지연, stream 수, channel·subscriber 수, ingress/terminal p50·p95·p99, lower bound, elapsed, queue 잔여와 인증된 `/metrics` 응답을 기록한다. harness는 컨테이너 env에 reliability key가 명시돼 있는지와 `/metrics.configuration`이 그 값과 같은지도 확인한다.
 
 archive 행과 `processingDlqTotal`도 실패 시나리오의 수용 기준이다.

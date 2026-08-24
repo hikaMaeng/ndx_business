@@ -16,6 +16,7 @@ Compose에서는 `AGENT_ROLE=gateway|worker|router`로 같은 이미지를 세 �
 | `AGENT_MAX_DELIVERY_READS` | Router가 구독 Gateway 없는 result를 archive하기 전 허용하는 PGMQ delivery read 수 |
 | `AGENT_MAX_EXECUTION_ATTEMPTS` | Worker 소실 뒤 reclaim 가능한 execution ownership 횟수 |
 | `AGENT_MAX_OUTBOX_ATTEMPTS` | result queue 전송 실패 뒤 `dead` outbox row로 전환하기 전 횟수 |
+| `AGENT_MAX_GATEWAY_DELIVERY_ATTEMPTS` | Router가 Gateway queue handoff를 재시도한 뒤 `agent_gateway_delivery.dead`로 종결하기 전 횟수 |
 | `AGENT_RETENTION_DAYS` | event·완료 execution·recipient·cursor 보존 일수(기본 30일) |
 | `AGENT_MAX_THREADS`, `AGENT_MAX_QUEUE` | Worker Thread 실행·대기 상한 |
 | `AGENT_ROUTER_CONCURRENCY` | 동시에 fan-out하는 result 수 |

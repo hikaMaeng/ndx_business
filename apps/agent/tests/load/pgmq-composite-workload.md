@@ -51,7 +51,7 @@ delay 실행의 worker-only 하한은 `ceil(2048 / 96) × 5,000 = 110,000ms`다.
 }
 ```
 
-이는 기존 순수 2,048 delay baseline(112,769ms)과 같은 worker 하한 안에서, join·conflict·다중 subscriber·긴 visibility lease까지 함께 검증한 결과다. 부하 outbox delivery ledger는 avg 237.7ms, p95 554.4ms, max 900.8ms, max attempt 1이었다. `AGENT_TERMINAL_PERSISTENCE_ALERT_ATTEMPTS=10`도 컨테이너 env와 `/metrics.configuration`의 교차검증 대상이다. 기본 Gateway ID는 `agent`이며, 같은 ID의 두 번째 process는 queue 경쟁 소비 대신 lease 만료까지 passive standby로 대기한다.
+하네스는 terminal result마다 `agent_gateway_delivery`의 delivered row가 정확히 하나 생성되고, 미완료·재시도·dead handoff가 0인지도 검사한다. 성공 run 정리는 이 ledger까지 삭제한 뒤 0건을 단언한다. `AGENT_TERMINAL_PERSISTENCE_ALERT_ATTEMPTS=10`, `AGENT_TERMINAL_PERSISTENCE_BACKOFF_MAX_SECONDS=300`, `AGENT_MAX_GATEWAY_DELIVERY_ATTEMPTS=10`도 컨테이너 env와 `/metrics.configuration`의 교차검증 대상이다. 기본 Gateway ID는 `agent`이며, 같은 ID의 두 번째 process는 queue 경쟁 소비 대신 lease 만료까지 passive standby로 대기한다.
 
 ## 통과 조건
 

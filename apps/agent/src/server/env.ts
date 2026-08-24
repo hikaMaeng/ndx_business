@@ -14,6 +14,7 @@ export interface AgentEnv {
   maxDeliveryReads: number;
   maxExecutionAttempts: number;
   maxOutboxAttempts: number;
+  maxGatewayDeliveryAttempts: number;
   terminalPersistenceAlertAttempts: number;
   terminalPersistenceBackoffMaxSeconds: number;
   retentionDays: number;
@@ -62,6 +63,7 @@ export function readEnv(source = process.env): AgentEnv {
     maxDeliveryReads: positive(source, "AGENT_MAX_DELIVERY_READS", 5),
     maxExecutionAttempts: positive(source, "AGENT_MAX_EXECUTION_ATTEMPTS", 5),
     maxOutboxAttempts: positive(source, "AGENT_MAX_OUTBOX_ATTEMPTS", 10),
+    maxGatewayDeliveryAttempts: positive(source, "AGENT_MAX_GATEWAY_DELIVERY_ATTEMPTS", 10),
     terminalPersistenceAlertAttempts: positive(source, "AGENT_TERMINAL_PERSISTENCE_ALERT_ATTEMPTS", 10),
     terminalPersistenceBackoffMaxSeconds: positive(source, "AGENT_TERMINAL_PERSISTENCE_BACKOFF_MAX_SECONDS", 300),
     retentionDays: positive(source, "AGENT_RETENTION_DAYS", 30),

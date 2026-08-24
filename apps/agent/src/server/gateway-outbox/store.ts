@@ -22,17 +22,24 @@ export class GatewayOutboxStore {
   }
 
   async pending(eventId: string, gatewayIds: readonly string[]): Promise<string[]> {
-    const result = await this.pool.query<{ gateway_id: string }>("SELECT gateway_id FROM agent_gateway_delivery WHERE event_id = $1 AND gateway_id = ANY($2::text[]) AND status <> 'delivered'", [eventId, gatewayIds]);
+    const result = await this.pool.query<{ gateway_id: string }>("SELECT gateway_id FROM agent_gateway_delivery WHERE event_id = $1 AND gateway_id = ANY($2::text[]) AND status = 'ready'", [eventId, gatewayIds]);
     return result.rows.map((row) => row.gateway_id);
   }
 
   async delivered(eventId: string, gatewayId: string): Promise<boolean> {
-    const result = await this.pool.query("UPDATE agent_gateway_delivery SET status='delivered', attempts=attempts+1, delivered_at=now(), updated_at=now(), last_error=NULL WHERE event_id=$1 AND gateway_id=$2 AND status <> 'delivered' RETURNING event_id", [eventId, gatewayId]);
+    const result = await this.pool.query("UPDATE agent_gateway_delivery SET status='delivered', attempts=attempts+1, delivered_at=now(), updated_at=now(), last_error=NULL WHERE event_id=$1 AND gateway_id=$2 AND status = 'ready' RETURNING event_id", [eventId, gatewayId]);
     return Boolean(result.rowCount);
   }
 
-  async failed(eventId: string, gatewayId: string, error: string): Promise<void> {
-    await this.pool.query("UPDATE agent_gateway_delivery SET attempts=attempts+1, updated_at=now(), last_error=$3 WHERE event_id=$1 AND gateway_id=$2 AND status <> 'delivered'", [eventId, gatewayId, error]);
+  /** Records a failed handoff. A dead row is terminal and deliberately retained for operators. */
+  async failed(eventId: string, gatewayId: string, maxAttempts: number, error: string): Promise<"retry" | "dead" | "unchanged"> {
+    const result = await this.pool.query<{ status: "ready" | "dead" }>(`UPDATE agent_gateway_delivery
+      SET attempts=attempts+1, status=CASE WHEN attempts+1 >= $3 THEN 'dead' ELSE 'ready' END,
+        updated_at=now(), last_error=$4
+      WHERE event_id=$1 AND gateway_id=$2 AND status = 'ready'
+      RETURNING status`, [eventId, gatewayId, maxAttempts, error]);
+    if (!result.rowCount) return "unchanged";
+    return result.rows[0]?.status === "dead" ? "dead" : "retry";
   }
 
   async prune(retentionDays: number): Promise<number> {

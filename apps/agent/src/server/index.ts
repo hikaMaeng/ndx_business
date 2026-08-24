@@ -109,7 +109,7 @@ if (env.role === "worker") {
   process.once("SIGTERM", () => { void shutdown().then(() => process.exit(0)); });
   process.once("SIGINT", () => { void shutdown().then(() => process.exit(0)); });
 } else if (env.role === "router") {
-  const router = startResultRouter({ queue, resultQueue: env.resultQueue, gatewayQueuePrefix: env.gatewayQueuePrefix, subscriptions, outbox: gatewayOutbox, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, maxInFlight: env.routerConcurrency, maxDeliveryReads: env.maxDeliveryReads });
+  const router = startResultRouter({ queue, resultQueue: env.resultQueue, gatewayQueuePrefix: env.gatewayQueuePrefix, subscriptions, outbox: gatewayOutbox, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, maxInFlight: env.routerConcurrency, maxDeliveryReads: env.maxDeliveryReads, maxGatewayDeliveryAttempts: env.maxGatewayDeliveryAttempts });
   const server = createServer((request, response) => { if (writeMetrics(request, response, env, metrics)) return; response.writeHead(request.url === "/health" || request.url === "/ready" ? 200 : 404); response.end(); }).listen(env.port);
   console.log(JSON.stringify({ event: "agent.router.started", resultQueue: env.resultQueue }));
   const shutdown = async (): Promise<void> => { router.stop(); server.close(); await router.done; clearInterval(metricsTimer); await queueDatabase.end(); await database.end(); };

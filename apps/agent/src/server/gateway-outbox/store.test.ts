@@ -13,3 +13,11 @@ test("Gateway outbox records every target before the result source is acknowledg
   assert.match(calls[0]!.sql, /agent_gateway_delivery/);
   assert.deepEqual(calls[0]!.values?.slice(2), [["gateway-a", "gateway-b"], ["agent_gateway_gateway_a", "agent_gateway_gateway_b"]]);
 });
+
+test("Gateway outbox turns a failed handoff into a retained dead row at its explicit budget", async () => {
+  const calls: Array<{ sql: string; values?: unknown[] }> = [];
+  const store = new GatewayOutboxStore({ query: async (sql: string, values?: unknown[]) => { calls.push({ sql, values }); return { rowCount: 1, rows: [{ status: "dead" }] }; } } as never);
+  assert.equal(await store.failed("event-1", "gateway-a", 3, "queue unavailable"), "dead");
+  assert.match(calls[0]!.sql, /attempts\+1 >= \$3/);
+  assert.deepEqual(calls[0]!.values, ["event-1", "gateway-a", 3, "queue unavailable"]);
+});

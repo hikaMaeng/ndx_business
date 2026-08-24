@@ -123,13 +123,15 @@ function sql(query) {
 function deployedWorkerSettings() {
   const [container] = JSON.parse(execFileSync("docker", ["inspect", workerContainer], { encoding: "utf8" }));
   const values = new Map(container.Config.Env.map((entry) => entry.split("=", 2)));
-  for (const name of ["QUEUE_VISIBILITY_TIMEOUT_SECONDS", "AGENT_EXECUTION_LEASE_SECONDS", "AGENT_MAX_EXECUTION_ATTEMPTS", "AGENT_MAX_OUTBOX_ATTEMPTS", "AGENT_TERMINAL_PERSISTENCE_ALERT_ATTEMPTS", "AGENT_MAX_DELIVERY_READS", "AGENT_RETENTION_DAYS", "AGENT_ROUTER_CONCURRENCY"]) assert.ok(values.has(name), `deployed Worker must explicitly define ${name}`);
+  for (const name of ["QUEUE_VISIBILITY_TIMEOUT_SECONDS", "AGENT_EXECUTION_LEASE_SECONDS", "AGENT_MAX_EXECUTION_ATTEMPTS", "AGENT_MAX_OUTBOX_ATTEMPTS", "AGENT_MAX_GATEWAY_DELIVERY_ATTEMPTS", "AGENT_TERMINAL_PERSISTENCE_ALERT_ATTEMPTS", "AGENT_TERMINAL_PERSISTENCE_BACKOFF_MAX_SECONDS", "AGENT_MAX_DELIVERY_READS", "AGENT_RETENTION_DAYS", "AGENT_ROUTER_CONCURRENCY"]) assert.ok(values.has(name), `deployed Worker must explicitly define ${name}`);
   return {
     visibilityTimeoutSeconds: Number(values.get("QUEUE_VISIBILITY_TIMEOUT_SECONDS")),
     executionLeaseSeconds: Number(values.get("AGENT_EXECUTION_LEASE_SECONDS")),
     maxExecutionAttempts: Number(values.get("AGENT_MAX_EXECUTION_ATTEMPTS")),
     maxOutboxAttempts: Number(values.get("AGENT_MAX_OUTBOX_ATTEMPTS")),
+    maxGatewayDeliveryAttempts: Number(values.get("AGENT_MAX_GATEWAY_DELIVERY_ATTEMPTS")),
     terminalPersistenceAlertAttempts: Number(values.get("AGENT_TERMINAL_PERSISTENCE_ALERT_ATTEMPTS")),
+    terminalPersistenceBackoffMaxSeconds: Number(values.get("AGENT_TERMINAL_PERSISTENCE_BACKOFF_MAX_SECONDS")),
     maxDeliveryReads: Number(values.get("AGENT_MAX_DELIVERY_READS")),
     retentionDays: Number(values.get("AGENT_RETENTION_DAYS")),
     routerConcurrency: Number(values.get("AGENT_ROUTER_CONCURRENCY")),
@@ -156,6 +158,7 @@ function cleanupSuccessfulRun() {
   sql(`BEGIN;
     DELETE FROM event_subscription_cursor WHERE channels::text LIKE ${sqlLiteral(`%${prefix}%`)};
     DELETE FROM agent_result_delivery WHERE event_id IN (SELECT event_id FROM event_store WHERE transaction_key LIKE ${sqlLiteral(`${prefix}%`)});
+    DELETE FROM agent_gateway_delivery WHERE event_id IN (SELECT event_id FROM event_store WHERE transaction_key LIKE ${sqlLiteral(`${prefix}%`)});
     DELETE FROM agent_execution_recipient WHERE transaction_key LIKE ${sqlLiteral(`${prefix}%`)};
     DELETE FROM agent_execution WHERE transaction_key LIKE ${sqlLiteral(`${prefix}%`)};
     DELETE FROM event_store WHERE transaction_key LIKE ${sqlLiteral(`${prefix}%`)};
@@ -168,6 +171,7 @@ function cleanupSuccessfulRun() {
     executions: `SELECT count(*) FROM agent_execution WHERE transaction_key LIKE ${sqlLiteral(`${prefix}%`)}`,
     cursors: `SELECT count(*) FROM event_subscription_cursor WHERE channels::text LIKE ${sqlLiteral(`%${prefix}%`)}`,
     watermarks: `SELECT count(*) FROM event_stream_sequence WHERE stream_id LIKE ${sqlLiteral(`session:${prefix}%`)} OR stream_id LIKE ${sqlLiteral(`channel:${prefix}%`)}`,
+    gatewayDeliveries: `SELECT count(*) FROM agent_gateway_delivery WHERE event_id IN (SELECT event_id FROM event_store WHERE transaction_key LIKE ${sqlLiteral(`${prefix}%`)})`,
   })) assert.equal(Number(sql(query)), 0, `${table} must be prefix-clean after a successful workload`);
 }
 
@@ -260,18 +264,22 @@ try {
   const leaseAttempts = Number(sql(`SELECT attempts FROM agent_execution WHERE transaction_key = ${sqlLiteral(leaseTransaction)}`));
   const leaseRedeliveries = Number(sql(`SELECT queue_redeliveries FROM agent_execution WHERE transaction_key = ${sqlLiteral(leaseTransaction)}`));
   const queues = Object.fromEntries([commandQueue, resultQueue, gatewayQueue].map((queue) => [queue, queuePrefixCount(queue)]));
+  const gatewayDeliveryRows = Number(sql(`SELECT count(*) FROM agent_gateway_delivery WHERE event_id IN (SELECT event_id FROM event_store WHERE transaction_key LIKE ${sqlLiteral(`${prefix}%`)})`));
+  const gatewayDeliveryUndelivered = Number(sql(`SELECT count(*) FROM agent_gateway_delivery WHERE event_id IN (SELECT event_id FROM event_store WHERE transaction_key LIKE ${sqlLiteral(`${prefix}%`)}) AND status <> 'delivered'`));
   assert.equal(eventRows, expectedCommandCount + expectedTerminalCount, "event store must contain every command and terminal event");
   assert.equal(completedExecutions, expectedExecutionCount, "every logical execution must complete");
   assert.equal(runningExecutions, 0, "no execution may remain running");
   assert.equal(leaseAttempts, 1, "visibility heartbeat must prevent long-handler reclaim");
   assert.equal(leaseRedeliveries, 0, "visibility heartbeat must prevent PGMQ redelivery while the independent execution lease stays valid");
+  assert.equal(gatewayDeliveryRows, expectedTerminalCount, "every terminal result must have one durable Router-to-Gateway handoff row");
+  assert.equal(gatewayDeliveryUndelivered, 0, "healthy Router handoffs must all be delivered before result-queue ACK");
   assert.deepEqual(queues, Object.fromEntries(Object.keys(queues).map((queue) => [queue, 0])), "all PGMQ paths must drain this workload");
   const gatewayMetrics = await metrics();
-  for (const name of ["brokerReadFailures", "routerUnmatchedResults", "routerArchivedUnmatchedResults", "processingDlqTotal", "queueVisibilityRenewFailures"]) {
+  for (const name of ["brokerReadFailures", "routerUnmatchedResults", "routerArchivedUnmatchedResults", "processingDlqTotal", "queueVisibilityRenewFailures", "gatewayDeliveryRetries", "gatewayDeliveryDeadLetters"]) {
     assert.equal(gatewayMetrics.metrics[name] - baselineMetrics[name], 0, `healthy workload must not increment ${name}`);
   }
 
-  console.log(JSON.stringify({ test: "pgmq-composite-workload", prefix, total, joinTotal, conflictTotal, leaseDelayMs, visibilitySeconds, executionLeaseSeconds, workers, streams, channels: channels.length, subscribers: subscribers.length, ingressP50Ms: percentile(ingressLatencies, 0.50), ingressP95Ms: percentile(ingressLatencies, 0.95), terminalP50Ms: percentile(allSubscribers, 0.50), terminalP95Ms: percentile(allSubscribers, 0.95), terminalP99Ms: percentile(allSubscribers, 0.99), lowerBoundMs, overheadMs, elapsedMs, expectedTerminalCount, eventRows, completedExecutions, leaseAttempts, leaseRedeliveries, gatewayMetrics, queues }));
+  console.log(JSON.stringify({ test: "pgmq-composite-workload", prefix, total, joinTotal, conflictTotal, leaseDelayMs, visibilitySeconds, executionLeaseSeconds, workers, streams, channels: channels.length, subscribers: subscribers.length, ingressP50Ms: percentile(ingressLatencies, 0.50), ingressP95Ms: percentile(ingressLatencies, 0.95), terminalP50Ms: percentile(allSubscribers, 0.50), terminalP95Ms: percentile(allSubscribers, 0.95), terminalP99Ms: percentile(allSubscribers, 0.99), lowerBoundMs, overheadMs, elapsedMs, expectedTerminalCount, eventRows, completedExecutions, leaseAttempts, leaseRedeliveries, gatewayDeliveryRows, gatewayDeliveryUndelivered, gatewayMetrics, queues }));
   verified = true;
 } finally {
   await Promise.all(subscribers.map((subscriber) => new Promise((resolve) => { subscriber.socket.once("close", resolve); subscriber.socket.close(); })));

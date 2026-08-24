@@ -9,7 +9,7 @@ import { GatewayOutboxStore } from "../gateway-outbox/store.js";
 function gatewayQueue(prefix: string, gatewayId: string): string { return `${prefix}${gatewayId.replace(/[^a-zA-Z0-9_]/g, "_")}`; }
 
 /** Fans one result event to every Gateway that currently owns a matching channel subscription. */
-export function startResultRouter(input: { queue: EventQueueTransport; resultQueue: string; gatewayQueuePrefix: string; subscriptions: GatewaySubscriptionStore; outbox: GatewayOutboxStore; metrics: MetricsRegistry; visibilitySeconds: number; pollSeconds: number; maxInFlight: number; maxDeliveryReads: number }): BrokerLoop {
+export function startResultRouter(input: { queue: EventQueueTransport; resultQueue: string; gatewayQueuePrefix: string; subscriptions: GatewaySubscriptionStore; outbox: GatewayOutboxStore; metrics: MetricsRegistry; visibilitySeconds: number; pollSeconds: number; maxInFlight: number; maxDeliveryReads: number; maxGatewayDeliveryAttempts: number }): BrokerLoop {
   let stopped = false;
   const readyQueues = new Set<string>();
   const ensuringQueues = new Map<string, Promise<void>>();
@@ -44,7 +44,14 @@ export function startResultRouter(input: { queue: EventQueueTransport; resultQue
       const { gatewayId, queueName: targetQueue } = target;
       await ensureGatewayQueue(targetQueue);
       try { await input.queue.send(targetQueue, message.event); await input.outbox.delivered(message.event.eventId, gatewayId); }
-      catch (error) { await input.outbox.failed(message.event.eventId, gatewayId, error instanceof Error ? error.message : String(error)); throw error; }
+      catch (error) {
+        const outcome = await input.outbox.failed(message.event.eventId, gatewayId, input.maxGatewayDeliveryAttempts, error instanceof Error ? error.message : String(error));
+        if (outcome === "dead") input.metrics.increment("gatewayDeliveryDeadLetters");
+        else if (outcome === "retry") input.metrics.increment("gatewayDeliveryRetries");
+        // The next PGMQ delivery observes either ready (retry) or dead (terminal), so only
+        // retry outcomes retain the source lease. A dead handoff is retained in the ledger.
+        if (outcome === "retry") throw error;
+      }
     }));
     await input.queue.delete(input.resultQueue, message.id);
     input.metrics.increment("queueDeletes");
