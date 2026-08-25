@@ -9,3 +9,4 @@ Agent는 PGMQ를 경계로 Gateway, Worker, Router를 분리해 다수의 요청
 | 반드시 지켜야 할 전달 규칙 | [제약](docs/constraints.md) |
 | 재시도·중복·구독 처리 원리 | [내부 동작](docs/internals.md) |
 | 테스트와 운영 검증 기준 | [테스트](docs/testing.md) |
+| 코딩 에이전트 도메인 이벤트 설계 (미구현) | [코딩 에이전트 이벤트](docs/coding-agent-events.md) |
