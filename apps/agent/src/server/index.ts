@@ -1,25 +1,29 @@
-import { createApp } from "./app.js";
-import { createDatabasePool, snapshotDatabasePool } from "./database.js";
-import { readEnv } from "./env.js";
-import { PgmqClient } from "./pgmq/client.js";
-import { createWorkerPool } from "./worker/pool.js";
-import { attachWebSocketTransport } from "./transport/websocket.js";
-import { EventStore } from "./event-store/store.js";
-import { MetricsRegistry } from "./metrics/registry.js";
-import { EventStreamHub } from "./stream/hub.js";
-import { GatewaySubscriptionStore } from "./subscription/store.js";
-import { startGatewayDelivery } from "./broker/gateway-delivery.js";
-import { startResultRouter } from "./broker/result-router.js";
-import { startWorkerConsumer } from "./broker/worker-consumer.js";
-import { ExecutionStore } from "./idempotency/store.js";
-import { DeliveryStore } from "./delivery/store.js";
-import { startDeliveryPublisher } from "./delivery/publisher.js";
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
-import { writeMetrics } from "./metrics/endpoint.js";
-import { closeHttpServer, shutdownGateway } from "./gateway/lifecycle/index.js";
-import { createGatewayStandby, type GatewayStandby } from "./gateway/standby/index.js";
-import { GatewayOutboxStore } from "./gateway-outbox/store.js";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  createApp,
+  createDatabasePool, snapshotDatabasePool,
+  readEnv,
+  PgmqClient,
+  createWorkerPool,
+  attachWebSocketTransport,
+  EventStore,
+  MetricsRegistry,
+  EventStreamHub,
+  GatewaySubscriptionStore,
+  startGatewayDelivery,
+  startResultRouter,
+  startWorkerConsumer,
+  ExecutionStore,
+  DeliveryStore,
+  startDeliveryPublisher,
+  writeMetrics,
+  closeHttpServer, shutdownGateway,
+  createGatewayStandby, type GatewayStandby,
+  GatewayOutboxStore,
+} from "agent_domain/broker";
 
 function listen(server: ReturnType<typeof createServer>, port: number): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -100,7 +104,9 @@ refreshMetrics();
 const metricsTimer = setInterval(refreshMetrics, 1000);
 
 if (env.role === "worker") {
-  const pool = createWorkerPool({ minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, maxQueue: env.maxQueue });
+  // Resolved from this composition root, which is the bundle esbuild emits next
+  // to worker.js. The broker never guesses this path.
+  const pool = createWorkerPool({ minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, maxQueue: env.maxQueue, workerUrl: new URL("./worker.js", import.meta.url) });
   const publisher = startDeliveryPublisher({ queue, store: deliveries, maxAttempts: env.maxOutboxAttempts, metrics });
   const consumer = startWorkerConsumer({ queue, commandQueue: env.queue, resultQueue: env.resultQueue, eventStore, deliveries, executions, pool, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, batchSize: env.pollBatchSize, maxInFlight: env.maxWorkerThreads + env.maxQueue, maxExecutionAttempts: env.maxExecutionAttempts, terminalPersistenceAlertAttempts: env.terminalPersistenceAlertAttempts, terminalPersistenceBackoffMaxSeconds: env.terminalPersistenceBackoffMaxSeconds, onTerminalPersisted: publisher.wake });
   const server = createServer((request, response) => { if (writeMetrics(request, response, env, metrics)) return; response.writeHead(request.url === "/health" || request.url === "/ready" ? 200 : 404); response.end(); }).listen(env.port);
@@ -120,7 +126,8 @@ if (env.role === "worker") {
   const hub = new EventStreamHub();
   const delivery = startGatewayDelivery({ queue, queueName: gatewayQueue(), hub, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds });
   const server = gatewayStandby.server;
-  gatewayStandby.activate(createApp(env, queue, hub, metrics, async () => { await Promise.all([queue.check(), database.query("SELECT 1")]); }));
+  const frontDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../front");
+  gatewayStandby.activate(createApp(env, queue, hub, metrics, async () => { await Promise.all([queue.check(), database.query("SELECT 1")]); }, frontDir));
   console.log(JSON.stringify({ event: "agent.gateway.listening", port: env.port, gatewayId: env.gatewayId, commandQueue: env.queue }));
   const websocket = attachWebSocketTransport(server, env, queue, hub, eventStore, metrics, { replace: (connectionId, channels) => subscriptions.replaceConnection(env.gatewayId, connectionId, channels), remove: (connectionId) => subscriptions.removeConnection(env.gatewayId, connectionId) });
   const renewTimer = setInterval(() => { void subscriptions.renewGateway(env.gatewayId, gatewayInstanceId).then((owned) => {

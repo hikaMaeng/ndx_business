@@ -48,3 +48,11 @@ docker run --rm --network ndx-business_ndx-business_internal -e AGENT_INTEGRATIO
 완료 기준은 단순 queue drain이 아니다. 모든 subscriber가 정확한 action·성공/실패 값을 받고 예상 밖 transactionKey를 하나도 받지 않아야 한다. event store의 command/result 행 수·완료 execution 수·긴 실행의 attempt와 `queue_redeliveries`·세 PGMQ queue의 prefix별 잔여가 모두 예상값과 일치해야 한다. 또한 terminal result마다 `agent_gateway_delivery.delivered` row가 정확히 하나 있어야 하며 ready/dead row가 없어야 한다. lease probe는 `QUEUE_VISIBILITY_TIMEOUT_SECONDS`보다 긴 handler와 그보다 긴 `AGENT_EXECUTION_LEASE_SECONDS`를 반드시 사용한다. 결과에는 Worker 수, handler 지연, stream 수, channel·subscriber 수, ingress/terminal p50·p95·p99, lower bound, elapsed, queue 잔여와 인증된 `/metrics` 응답을 기록한다. harness는 컨테이너 env에 reliability key가 명시돼 있는지와 `/metrics.configuration`이 그 값과 같은지도 확인한다.
 
 archive 행과 `processingDlqTotal`도 실패 시나리오의 수용 기준이다.
+
+## 단위 테스트의 위치
+
+이 app에는 서버 단위 테스트가 없다. broker 런타임이 [`agent_domain`](../../../packages/agent_domain/docs/testing.md)으로 옮겨가면서 51개가 함께 이동했고, 남은 것은 role 분기 조립 루트와 3줄짜리 worker 진입 모듈이다. 이 app은 lint·배포 검증·부하 하네스로 덮인다.
+
+## 리팩터 검증 기록
+
+전송 계층을 라이브러리로 옮긴 작업의 계획과 실행 기록은 [broker-library-extraction 계획](../tests/plans/broker-library-extraction-20260825.md)과 [실행 리포트](../tests/reports/broker-library-extraction/20260825_150500.md)에 있다. 동작 변경을 의도하지 않은 이동이므로 부하 실측이 이전 값과 같은지가 통과 기준이었다.

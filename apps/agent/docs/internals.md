@@ -2,7 +2,7 @@
 
 ## Worker consume
 
-[`startWorkerConsumer`](../src/server/broker/worker-consumer.ts)는 PGMQ command를 읽고 [`toEventDraft`](../src/server/ingress/event-draft.ts)로 canonical command를 만든다. [`ExecutionStore.claim`](../src/server/idempotency/store.ts)이 세 상태 중 하나를 반환한다.
+[`startWorkerConsumer`](../../packages/agent_domain/src/broker/loops/worker-consumer.ts)는 PGMQ command를 읽고 [`toEventDraft`](../../packages/agent_domain/src/broker/ingress/event-draft.ts)로 canonical command를 만든다. [`ExecutionStore.claim`](../../packages/agent_domain/src/broker/idempotency/store.ts)이 세 상태 중 하나를 반환한다.
 
 - `claimed`: Worker Thread handler를 실행하고 result를 만든다. `attempts`는 PGMQ read count가 아니라 fenced execution owner가 된 횟수다.
 - `joined`: 같은 transaction이 실행 중이거나 완료됐다. 실행 중인 최초 request의 visibility 재전달만 source message를 남겨 lease reclaim을 보존하고, 다른 event ID의 새 duplicate는 delete한다.
@@ -14,7 +14,7 @@ Worker 소실은 handler 오류와 다르다. 소실된 attempt가 execution 상
 
 ## fan-out
 
-같은 transaction에 다른 `replyChannel`이 합류하면 [`agent_execution_recipient`](../src/server/idempotency/store.ts) row가 추가된다. terminal result를 만들 때 Worker는 recipient마다 `channel`을 바꾼 canonical event와 [`agent_result_delivery`](../src/server/delivery/store.ts) outbox row를 같은 transaction으로 만든다. publisher는 outbox row를 lease claim하여 result queue로 전송한 뒤 같은 attempt id로 완료 fence를 건다. Router는 `agent_gateway_subscription`을 조회해 해당 Gateway 전용 queue로 복제한다.
+같은 transaction에 다른 `replyChannel`이 합류하면 [`agent_execution_recipient`](../../packages/agent_domain/src/broker/idempotency/store.ts) row가 추가된다. terminal result를 만들 때 Worker는 recipient마다 `channel`을 바꾼 canonical event와 [`agent_result_delivery`](../../packages/agent_domain/src/broker/delivery/store.ts) outbox row를 같은 transaction으로 만든다. publisher는 outbox row를 lease claim하여 result queue로 전송한 뒤 같은 attempt id로 완료 fence를 건다. Router는 `agent_gateway_subscription`을 조회해 해당 Gateway 전용 queue로 복제한다.
 
 outbox claim은 ready retry와 만료 running lease를 별도 partial-index CTE에서 가져온다. terminal outbox가 commit되면 같은 Worker process의 publisher를 coalesced wakeup으로 즉시 깨우고, wakeup 유실·재기동 뒤에는 50ms에서 최대 1초까지의 bounded poll이 복구한다. 따라서 wakeup은 latency 최적화일 뿐 durable 사실이 아니다. queue send 뒤 completion fence 일부만 잃으면 확인된 event는 재발행하지 않고 잃은 fence만 retry한다. retry 한도에 도달한 row는 `dead`와 오류 원인을 남긴다.
 
