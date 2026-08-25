@@ -6,7 +6,10 @@
  *
  * See docs/architecture.md#src-broker for the folder map.
  */
-export { createApp } from "./app.js";
+export { createWebBackend, type WebBackendInput } from "./http/app.js";
+export { createSessionVerifier, requireSession, readBearer, type AuthenticatedUser, type AuthedRequest } from "./auth/index.js";
+export { createSocketPolicy, type SocketPolicyInput } from "./policy/index.js";
+export { createEventBroker, createResultRouter, createWorkerServer, runService, type Service, type EventBrokerOptions, type ResultRouterOptions, type WorkerServerOptions } from "./service/index.js";
 export { createDatabasePool, snapshotDatabasePool, type DatabasePoolSnapshot } from "./database.js";
 export { readEnv, type AgentEnv } from "./env.js";
 

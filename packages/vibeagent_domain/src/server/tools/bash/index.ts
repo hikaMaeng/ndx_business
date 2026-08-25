@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
-import type { VibeToolResult } from "../../../common/index.js";
+/** Worker-internal result of one command. Not a wire event: the client sees vibe.tool.* instead. */
+export interface BashResult { toolCallKey: string; exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; durationMs: number }
 
 export interface BashToolOptions {
   workspace: string;
@@ -29,7 +30,7 @@ function appendBounded(buffer: string, chunk: string, maxBytes: number): string 
  * runs. `detached` is deliberately false so the child dies with the worker
  * rather than outliving it as an orphan.
  */
-export function runBash(command: string, options: BashToolOptions): Promise<VibeToolResult & { toolCallKey: string }> {
+export function runBash(command: string, options: BashToolOptions): Promise<BashResult> {
   const startedAt = Date.now();
   mkdirSync(options.workspace, { recursive: true });
   return new Promise((resolve) => {

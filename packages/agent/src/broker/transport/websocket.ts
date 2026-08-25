@@ -1,6 +1,6 @@
 import type { IncomingMessage, Server } from "node:http";
 import { WebSocket, WebSocketServer } from "ws";
-import { createIngressEvent, parseChannelClientFrame, parseChannelCursor, type ChannelServerFrame } from "../../common/index.js";
+import { createIngressEvent, parseChannelClientFrame, parseChannelCursor, type ChannelServerFrame, type IngressCommand } from "../../common/index.js";
 import type { AgentEnv } from "../env.js";
 import type { EventQueueTransport } from "../queue/transport.js";
 import { EventStreamHub } from "../stream/hub.js";
@@ -18,11 +18,12 @@ import type { MetricsRegistry } from "../metrics/registry.js";
 export interface GatewaySocketPolicy {
   /** Return a per-connection context, or null to refuse the upgrade. */
   verifyUpgrade?(request: IncomingMessage): Promise<Record<string, unknown> | null>;
-  /** Rewrite or reject a client-submitted ingress frame. Returning null drops the connection. */
-  guardIngress?(
-    input: { action: string; payload: Record<string, unknown>; transactionKey?: string; channel?: string; replyChannel?: string },
-    context: Record<string, unknown> | undefined,
-  ): { action: string; payload: Record<string, unknown>; transactionKey?: string; channel?: string; replyChannel?: string } | null;
+  /**
+   * Rewrite or reject a client-submitted ingress command. Returning null drops
+   * the connection. The guard sees the envelope, never a decoded payload: the
+   * envelope contract is fixed and independent of what an action carries.
+   */
+  guardIngress?(frame: IngressCommand, context: Record<string, unknown> | undefined): IngressCommand | null;
 }
 
 export interface GatewayWebSocketTransport {
@@ -140,10 +141,10 @@ export function attachWebSocketTransport(server: Server, env: AgentEnv, queue: E
         // The client proposes; the app disposes. Anything the server must be able
         // to trust — identity, ownership — is stamped by the guard rather than
         // taken from the wire.
-        const proposed = { action: frame.action, payload: frame.payload, transactionKey: frame.transactionKey, channel: frame.channel, replyChannel: frame.replyChannel };
+        const { type: _frameType, ...proposed } = frame;
         const allowed = policy?.guardIngress ? policy.guardIngress(proposed, connectionContext) : proposed;
         if (!allowed) { socket.close(1008, "ingress rejected"); return; }
-        const event = createIngressEvent({ action: allowed.action, payload: allowed.payload, transactionKey: allowed.transactionKey, channel: allowed.channel ?? frame.channel, replyChannel: allowed.replyChannel ?? frame.replyChannel });
+        const event = createIngressEvent(allowed);
         void queue.send(env.queue, event).then(async (messageId) => {
           console.log(JSON.stringify({ event: "event.enqueued", transport: "websocket", action: event.action, eventId: event.eventId, transactionKey: event.transactionKey, messageId }));
         }).catch((error) => console.error(JSON.stringify({ event: "websocket.enqueue.failed", action: event.action, transactionKey: event.transactionKey, error: error instanceof Error ? error.message : String(error) })));

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseVibeTurnRequest, isVibeProgressAction, VIBE_PROGRESS_ACTIONS } from "./index.js";
+import { parseVibeTurnRequest, isVibeAction, parseVibeProgressEvent, VIBE_ACTIONS } from "./index.js";
 
 test("a turn request needs every identity field the worker cannot invent", () => {
   const complete = { sessionKey: "s", turnKey: "t", userId: "u", prompt: "build it" };
@@ -15,7 +15,13 @@ test("a turn request needs every identity field the worker cannot invent", () =>
 });
 
 test("progress actions are recognised and unrelated actions are not", () => {
-  assert.ok(isVibeProgressAction(VIBE_PROGRESS_ACTIONS.toolStdout));
-  assert.ok(isVibeProgressAction(VIBE_PROGRESS_ACTIONS.turnFinal));
-  assert.equal(isVibeProgressAction("vibe.turn.run.result"), false);
+  assert.ok(isVibeAction(VIBE_ACTIONS.toolStdout));
+  assert.ok(isVibeAction(VIBE_ACTIONS.turnFinal));
+  assert.equal(isVibeAction("vibe.turn.run.result"), false);
+});
+
+test("a progress event without a turn key cannot be placed and is rejected", () => {
+  assert.ok(parseVibeProgressEvent(VIBE_ACTIONS.toolStdout, { turnKey: "t1", toolCallKey: "c", chunk: "x" }));
+  assert.equal(parseVibeProgressEvent(VIBE_ACTIONS.toolStdout, { toolCallKey: "c", chunk: "x" }), null);
+  assert.equal(parseVibeProgressEvent("some.other.action", { turnKey: "t1" }), null);
 });

@@ -28,9 +28,9 @@ async function execute(executeHandler: WorkerExecute, event: EventEnvelope, cont
   const payload = event.payload as Record<string, unknown>;
   const delayMs = typeof payload.simulateDelayMs === "number" ? payload.simulateDelayMs : 0;
   const timeoutMs = typeof payload.timeoutMs === "number" ? payload.timeoutMs : undefined;
-  // The benchmark handler owns its delay. Other handlers keep the existing
-  // payload-driven simulation delay used by timeout and failure tests.
-  const operation = event.action === "test.delay" ? executeHandler(event, signal, emit) : delay(delayMs, signal).then(() => executeHandler(event, signal, emit));
+  // A payload-driven pause, used by timeout and failure tests. The broker knows
+  // no action names, so this applies uniformly rather than to a named action.
+  const operation = delayMs > 0 ? delay(delayMs, signal).then(() => executeHandler(event, signal, emit)) : executeHandler(event, signal, emit);
   if (timeoutMs !== undefined) return withTimeout(operation, timeoutMs, controller);
   return operation;
 }

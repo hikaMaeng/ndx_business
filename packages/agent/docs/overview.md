@@ -1,11 +1,60 @@
-# agent 개요
+# 에이전트 라이브러리 개요
 
-`agent`은 두 층을 함께 담는 패키지다. `common`·`server`·`front`는 Gateway, Worker, Router가 같은 message shape를 쓰게 하는 계약이고, `broker`는 그 계약을 실제로 실어 나르는 도메인 중립 런타임(PGMQ 전송, event store, claim/lease, outbox, WebSocket 투영)이다.
+## 라이브러리가 무엇인가
 
-`common`·`server`·`front`는 PGMQ·PostgreSQL·WebSocket 호출을 포함하지 않는다. 그 호출은 전부 `broker`에 있다.
+`agent`는 [아키텍처](architecture.md)의 참가자 넷 중 **PGMQ를 제외한 셋을 만들 재료 전부**를 담은 라이브러리다. 이벤트 브로커와 추상층이 한 세트로 들어 있다.
 
-`broker`가 이 패키지에 있는 이유는 어느 app에도 속하지 않기 때문이다. `apps/agent`는 이제 role 분기와 wiring만 하는 조립 루트이며, 다른 app이 자기 action registry만 바꿔 같은 broker 위에서 돌 수 있다.
+애플리케이션은 이 라이브러리를 가져다 서비스를 **런칭**하거나, 라이브러리가 남겨 둔 자리에 **자기 구현을 끼운다.** 어느 쪽인지는 참가자마다 다르며, 그 비대칭이 이 라이브러리 설계의 핵심이다.
 
-`IngressEvent`는 Gateway가 PGMQ에 기록하는 저장 전 command이고, `EventEnvelope`는 Worker가 event store append 뒤 받은 stream position까지 포함한 canonical event다. 이 둘을 나누므로 client는 server-only sequence를 지정할 수 없다.
+## 세 참가자, 세 가지 제공 방식
 
-타입과 wire frame은 [API](api.md), ID와 draft 생성 원리는 [내부 동작](internals.md)을 참조한다.
+| 참가자 | 제공 형태 | 앱이 하는 일 |
+| --- | --- | --- |
+| **이벤트 브로커** | 완제품 | PGMQ에 연결하고 런칭. 구현할 것 없음 |
+| **워커 서버** | 틀(frame) | 실제 워커 모듈을 끼워 완성 |
+| **클라이언트** | 송수신 채널만 | 거의 전부 직접 구현 |
+
+### 이벤트 브로커 — 완제품
+
+`createEventBroker()`에 연결 정보와 "클라이언트가 올릴 수 있는 action 목록"만 주면 동작하는 브로커가 된다. 소켓, 인증, 구독, 커서 재생, 단일 소유권, 종료 순서가 모두 들어 있다. 앱이 브로커를 위해 작성할 코드는 없다.
+
+action 목록은 구현이 아니라 **설정**이다. 브로커는 그 action이 무엇을 뜻하는지 끝까지 모른다.
+
+### 워커 서버 — 틀
+
+`createWorkerServer()`는 "워커 서버로 존재하는 일" 전부를 소유한다: 명령 큐 소비, transaction claim, 이중 lease 갱신, terminal 이벤트와 outbox 행의 원자적 기록, 결과 발행, 도메인 retention.
+
+남겨 둔 구멍은 **하나**다 — 한 건의 일이 실제로 무엇을 하는가. 앱은 그 자리에 자기 워커 모듈을 끼운다. 스프링을 쓰면서 컨트롤러를 우리가 작성해 웹서버를 완성하는 것과 같은 관계다.
+
+함수가 아니라 **모듈 URL**을 넘기는 이유는 그 코드가 worker thread 안에서 로드되기 때문이다. 스레드 경계를 넘겨 함수를 전달할 수는 없다.
+
+### 클라이언트 — 송수신만
+
+`BrokerClient`가 주는 것은 이벤트를 보내고 받는 것, 그리고 재접속 시 커서로 복구하는 것뿐이다.
+
+**어떤 이벤트를 보낼지, 받은 이벤트로 화면을 어떻게 바꿀지는 전부 도메인 구현이다.** 라이브러리는 action도 payload도 들여다보지 않는다.
+
+## 도메인 패키지가 필요한 이유
+
+워커와 클라이언트는 서로를 호출하지 않지만 **같은 이벤트를 두고 합의**해야 한다. 그 합의는 도메인 패키지의 `common/protocol`에 타입으로 존재한다.
+
+```text
+packages/<domain>_domain/src/common/protocol/<name>/index.ts
+        ▲                                    ▲
+        │ import                             │ import
+   워커 구현                            클라이언트 구현
+```
+
+양쪽이 같은 파일을 import하므로, 한쪽만 지킨 payload 변경은 런타임이 아니라 **컴파일에서** 실패한다.
+
+## 소스 경계
+
+| 경로 | 책임 |
+| --- | --- |
+| `src/common/protocol/` | 엔벨롭·채널 프레임 계약. 고정이며 payload와 독립 |
+| `src/broker/service/` | 런칭 가능한 서비스 셋 |
+| `src/broker/` (그 외) | 브로커·워커를 이루는 부품 |
+| `src/front/client/` | 클라이언트 송수신 채널 |
+| `src/server/id/` | 파생 이벤트의 결정적 ID |
+
+세부 폴더 지도는 [아키텍처](architecture.md), 앱 작성 방법은 [사용법](usage.md)에 있다.

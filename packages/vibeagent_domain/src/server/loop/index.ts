@@ -1,5 +1,5 @@
 import path from "node:path";
-import { VIBE_PROGRESS_ACTIONS, type VibeTurnOutcome, type VibeTurnRequest } from "../../common/index.js";
+import { VIBE_ACTIONS, type VibeTurnOutcome, type VibeTurnRequest } from "../../common/index.js";
 import { chat, type ChatMessage, type LlmConfig } from "../llm/index.js";
 import { BASH_TOOL_SCHEMA, runBash } from "../tools/bash/index.js";
 
@@ -50,7 +50,7 @@ export async function runTurn(request: VibeTurnRequest, config: LoopConfig, emit
   // session can never reach another session's files.
   const workspace = path.join(config.workspaceRoot, request.sessionKey);
 
-  emit({ action: VIBE_PROGRESS_ACTIONS.turnStarted, sessionKey: request.sessionKey, turnKey: request.turnKey, workspace, prompt: request.prompt });
+  emit({ action: VIBE_ACTIONS.turnStarted, sessionKey: request.sessionKey, turnKey: request.turnKey, workspace, prompt: request.prompt });
 
   const messages: ChatMessage[] = [
     { role: "system", content: SYSTEM_PROMPT },
@@ -62,21 +62,21 @@ export async function runTurn(request: VibeTurnRequest, config: LoopConfig, emit
 
   for (; iteration < config.maxIterations; iteration += 1) {
     if (signal.aborted) throw new Error("turn aborted");
-    emit({ action: VIBE_PROGRESS_ACTIONS.iterationStarted, turnKey: request.turnKey, iterationIndex: iteration });
+    emit({ action: VIBE_ACTIONS.iterationStarted, turnKey: request.turnKey, iterationIndex: iteration });
 
     const reply = await chat(config, messages, [BASH_TOOL_SCHEMA], signal);
 
     if (reply.reasoning.trim()) {
-      emit({ action: VIBE_PROGRESS_ACTIONS.iterationReasoning, turnKey: request.turnKey, iterationIndex: iteration, reasoning: reply.reasoning });
+      emit({ action: VIBE_ACTIONS.iterationReasoning, turnKey: request.turnKey, iterationIndex: iteration, reasoning: reply.reasoning });
     }
     if (reply.content.trim()) {
-      emit({ action: VIBE_PROGRESS_ACTIONS.iterationMessage, turnKey: request.turnKey, iterationIndex: iteration, message: reply.content });
+      emit({ action: VIBE_ACTIONS.iterationMessage, turnKey: request.turnKey, iterationIndex: iteration, message: reply.content });
     }
 
     // No tool call means the model is answering, which is the only clean exit.
     if (!reply.toolCalls.length) {
       const answer = reply.content.trim() || reply.reasoning.trim();
-      emit({ action: VIBE_PROGRESS_ACTIONS.turnFinal, turnKey: request.turnKey, answer });
+      emit({ action: VIBE_ACTIONS.turnFinal, turnKey: request.turnKey, answer });
       return { sessionKey: request.sessionKey, turnKey: request.turnKey, iterations: iteration + 1, toolCalls, answer, stoppedBy: "final" };
     }
 
@@ -93,24 +93,24 @@ export async function runTurn(request: VibeTurnRequest, config: LoopConfig, emit
       } catch { command = ""; }
 
       if (!command) {
-        emit({ action: VIBE_PROGRESS_ACTIONS.toolFailed, turnKey: request.turnKey, toolCallKey, error: "tool call had no command" });
+        emit({ action: VIBE_ACTIONS.toolFailed, turnKey: request.turnKey, toolCallKey, error: "tool call had no command" });
         messages.push({ role: "tool", tool_call_id: call.id, content: "error: the bash tool requires a non-empty `command` string." });
         continue;
       }
 
-      emit({ action: VIBE_PROGRESS_ACTIONS.toolStarted, turnKey: request.turnKey, toolCallKey, command });
+      emit({ action: VIBE_ACTIONS.toolStarted, turnKey: request.turnKey, toolCallKey, command });
 
       const result = await runBash(command, {
         workspace,
         timeoutMs: config.toolTimeoutMs,
         maxOutputBytes: config.maxToolOutputBytes,
         signal,
-        onStdout: (chunk) => emit({ action: VIBE_PROGRESS_ACTIONS.toolStdout, turnKey: request.turnKey, toolCallKey, chunk }),
-        onStderr: (chunk) => emit({ action: VIBE_PROGRESS_ACTIONS.toolStderr, turnKey: request.turnKey, toolCallKey, chunk }),
+        onStdout: (chunk) => emit({ action: VIBE_ACTIONS.toolStdout, turnKey: request.turnKey, toolCallKey, chunk }),
+        onStderr: (chunk) => emit({ action: VIBE_ACTIONS.toolStderr, turnKey: request.turnKey, toolCallKey, chunk }),
       });
 
       emit({
-        action: VIBE_PROGRESS_ACTIONS.toolCompleted, turnKey: request.turnKey, toolCallKey,
+        action: VIBE_ACTIONS.toolCompleted, turnKey: request.turnKey, toolCallKey,
         exitCode: result.exitCode, timedOut: result.timedOut, durationMs: result.durationMs,
       });
 
@@ -119,6 +119,6 @@ export async function runTurn(request: VibeTurnRequest, config: LoopConfig, emit
   }
 
   const answer = "Stopped: reached the iteration budget before the model produced a final answer.";
-  emit({ action: VIBE_PROGRESS_ACTIONS.turnFinal, turnKey: request.turnKey, answer, stoppedBy: "iteration_budget" });
+  emit({ action: VIBE_ACTIONS.turnFinal, turnKey: request.turnKey, answer, stoppedBy: "iteration_budget" });
   return { sessionKey: request.sessionKey, turnKey: request.turnKey, iterations: iteration, toolCalls, answer, stoppedBy: "iteration_budget" };
 }

@@ -1,4 +1,5 @@
-import { VIBE_PROGRESS_ACTIONS } from "../../common/index.js";
+import type { EventEnvelope } from "agent/common";
+import { VIBE_ACTIONS, parseVibeProgressEvent, type VibeProgressEvent, type VibeTurnOutcome } from "../../common/index.js";
 
 export type TurnPhase = "idle" | "running" | "done" | "failed";
 
@@ -25,8 +26,7 @@ export interface TurnView {
 }
 
 export interface VibeSnapshot {
-  connection: "online" | "offline" | "connecting";
-  sessionKey: string;
+  sessionId: string;
   userEmail: string;
   turns: TurnView[];
 }
@@ -34,14 +34,15 @@ export interface VibeSnapshot {
 type Listener = () => void;
 
 /**
- * Folds the durable event stream into what the screen shows.
+ * Folds the vibe coding event stream into what a screen shows.
  *
- * Every field comes from a replayable event, so a reconnect that replays the
- * session from its cursor rebuilds the identical view — the model holds no
- * state the server has not already recorded.
+ * This is domain work, not transport: the broker hands over envelopes and has
+ * no opinion about turns, tools or answers. Every field here comes from an
+ * event defined in `common/protocol/vibe`, the same file the worker emits
+ * against, so the two cannot drift without a compile error.
  */
 export class VibeSessionModel {
-  private snapshot: VibeSnapshot = { connection: "connecting", sessionKey: "", userEmail: "", turns: [] };
+  private snapshot: VibeSnapshot = { sessionId: "", userEmail: "", turns: [] };
   private readonly listeners = new Set<Listener>();
   private readonly seenEventIds = new Set<string>();
 
@@ -57,85 +58,75 @@ export class VibeSessionModel {
     this.listeners.forEach((listener) => listener());
   }
 
-  setConnection(connection: VibeSnapshot["connection"]): void { this.commit({ connection }); }
-  setIdentity(sessionKey: string, userEmail: string): void { this.commit({ sessionKey, userEmail }); }
+  setIdentity(sessionId: string, userEmail: string): void { this.commit({ sessionId, userEmail }); }
+  reset(): void { this.seenEventIds.clear(); this.commit({ sessionId: "", userEmail: "", turns: [] }); }
 
   startTurn(turnKey: string, prompt: string): void {
-    const turns = [...this.snapshot.turns, { turnKey, prompt, phase: "running" as TurnPhase, reasoning: [], messages: [], tools: [], answer: "", error: "" }];
-    this.commit({ turns });
+    this.commit({ turns: [...this.snapshot.turns, { turnKey, prompt, phase: "running", reasoning: [], messages: [], tools: [], answer: "", error: "" }] });
   }
 
   private patchTurn(turnKey: string, patch: (turn: TurnView) => TurnView): void {
     let found = false;
-    const turns = this.snapshot.turns.map((turn) => {
-      if (turn.turnKey !== turnKey) return turn;
-      found = true;
-      return patch(turn);
-    });
+    const turns = this.snapshot.turns.map((turn) => { if (turn.turnKey !== turnKey) return turn; found = true; return patch(turn); });
     if (found) this.commit({ turns });
   }
 
+  private upsertTool(turn: TurnView, toolCallKey: string, mutate: (tool: ToolRun) => ToolRun): TurnView {
+    const existing = turn.tools.find((tool) => tool.toolCallKey === toolCallKey);
+    const next = mutate(existing ?? { toolCallKey, command: "", stdout: "", stderr: "", exitCode: null, timedOut: false, durationMs: 0, done: false });
+    return { ...turn, tools: existing ? turn.tools.map((tool) => (tool.toolCallKey === toolCallKey ? next : tool)) : [...turn.tools, next] };
+  }
+
   /**
-   * Delivery is at-least-once, so the same event can arrive twice. `eventId`
-   * dedupe is the client's half of that contract — without it a retried
-   * delivery would double every stdout chunk on screen.
+   * Applies one envelope.
+   *
+   * Delivery is at-least-once, so the same event can arrive twice; `eventId`
+   * dedupe is the client's half of that contract. Without it a retried delivery
+   * would double every stdout chunk on screen.
    */
-  applyEvent(eventId: string, action: string, payload: Record<string, unknown>): void {
-    if (this.seenEventIds.has(eventId)) return;
-    this.seenEventIds.add(eventId);
+  apply(envelope: EventEnvelope): void {
+    if (this.seenEventIds.has(envelope.eventId)) return;
+    this.seenEventIds.add(envelope.eventId);
 
-    const turnKey = typeof payload.turnKey === "string" ? payload.turnKey : "";
-    if (!turnKey) return;
-    const text = (key: string): string => (typeof payload[key] === "string" ? payload[key] as string : "");
-    const toolKey = text("toolCallKey");
+    if (envelope.kind === "result" || envelope.kind === "failure") { this.applyTerminal(envelope); return; }
+    const event = parseVibeProgressEvent(envelope.action, envelope.payload);
+    if (event) this.applyProgress(event);
+  }
 
-    const upsertTool = (turn: TurnView, mutate: (tool: ToolRun) => ToolRun): TurnView => {
-      const existing = turn.tools.find((tool) => tool.toolCallKey === toolKey);
-      const base: ToolRun = existing ?? { toolCallKey: toolKey, command: "", stdout: "", stderr: "", exitCode: null, timedOut: false, durationMs: 0, done: false };
-      const nextTool = mutate(base);
-      const tools = existing ? turn.tools.map((tool) => (tool.toolCallKey === toolKey ? nextTool : tool)) : [...turn.tools, nextTool];
-      return { ...turn, tools };
-    };
-
-    switch (action) {
-      case VIBE_PROGRESS_ACTIONS.iterationReasoning:
-        this.patchTurn(turnKey, (turn) => ({ ...turn, reasoning: [...turn.reasoning, text("reasoning")] }));
-        return;
-      case VIBE_PROGRESS_ACTIONS.iterationMessage:
-        this.patchTurn(turnKey, (turn) => ({ ...turn, messages: [...turn.messages, text("message")] }));
-        return;
-      case VIBE_PROGRESS_ACTIONS.toolStarted:
-        this.patchTurn(turnKey, (turn) => upsertTool(turn, (tool) => ({ ...tool, command: text("command") })));
-        return;
-      case VIBE_PROGRESS_ACTIONS.toolStdout:
-        this.patchTurn(turnKey, (turn) => upsertTool(turn, (tool) => ({ ...tool, stdout: tool.stdout + text("chunk") })));
-        return;
-      case VIBE_PROGRESS_ACTIONS.toolStderr:
-        this.patchTurn(turnKey, (turn) => upsertTool(turn, (tool) => ({ ...tool, stderr: tool.stderr + text("chunk") })));
-        return;
-      case VIBE_PROGRESS_ACTIONS.toolCompleted:
-        this.patchTurn(turnKey, (turn) => upsertTool(turn, (tool) => ({
-          ...tool, done: true,
-          exitCode: typeof payload.exitCode === "number" ? payload.exitCode : null,
-          timedOut: payload.timedOut === true,
-          durationMs: typeof payload.durationMs === "number" ? payload.durationMs : 0,
-        })));
-        return;
-      case VIBE_PROGRESS_ACTIONS.turnFinal:
-        this.patchTurn(turnKey, (turn) => ({ ...turn, answer: text("answer") }));
-        return;
+  private applyProgress(event: VibeProgressEvent): void {
+    switch (event.action) {
+      case VIBE_ACTIONS.iterationReasoning:
+        return this.patchTurn(event.turnKey, (turn) => ({ ...turn, reasoning: [...turn.reasoning, event.reasoning] }));
+      case VIBE_ACTIONS.iterationMessage:
+        return this.patchTurn(event.turnKey, (turn) => ({ ...turn, messages: [...turn.messages, event.message] }));
+      case VIBE_ACTIONS.toolStarted:
+        return this.patchTurn(event.turnKey, (turn) => this.upsertTool(turn, event.toolCallKey, (tool) => ({ ...tool, command: event.command })));
+      case VIBE_ACTIONS.toolStdout:
+        return this.patchTurn(event.turnKey, (turn) => this.upsertTool(turn, event.toolCallKey, (tool) => ({ ...tool, stdout: tool.stdout + event.chunk })));
+      case VIBE_ACTIONS.toolStderr:
+        return this.patchTurn(event.turnKey, (turn) => this.upsertTool(turn, event.toolCallKey, (tool) => ({ ...tool, stderr: tool.stderr + event.chunk })));
+      case VIBE_ACTIONS.toolCompleted:
+        return this.patchTurn(event.turnKey, (turn) => this.upsertTool(turn, event.toolCallKey, (tool) => ({ ...tool, done: true, exitCode: event.exitCode, timedOut: event.timedOut, durationMs: event.durationMs })));
+      case VIBE_ACTIONS.toolFailed:
+        return this.patchTurn(event.turnKey, (turn) => this.upsertTool(turn, event.toolCallKey, (tool) => ({ ...tool, done: true, stderr: `${tool.stderr}${event.error}\n` })));
+      case VIBE_ACTIONS.turnFinal:
+        return this.patchTurn(event.turnKey, (turn) => ({ ...turn, answer: event.answer }));
       default:
         return;
     }
   }
 
-  /** The broker's terminal result closes the turn; progress alone never does. */
-  applyTerminal(turnKey: string, ok: boolean, value: unknown, error: string): void {
-    this.patchTurn(turnKey, (turn) => ({
+  /** Only the broker's terminal result closes a turn; a final-answer progress event does not. */
+  private applyTerminal(envelope: EventEnvelope): void {
+    const payload = envelope.payload as { ok?: unknown; value?: unknown; error?: { message?: unknown } };
+    const ok = payload.ok === true;
+    const outcome = ok ? payload.value as VibeTurnOutcome | undefined : undefined;
+    const error = typeof payload.error?.message === "string" ? payload.error.message : "";
+    this.patchTurn(envelope.transactionKey, (turn) => ({
       ...turn,
       phase: ok ? "done" : "failed",
       error: ok ? "" : error,
-      answer: turn.answer || (ok && value && typeof value === "object" && typeof (value as { answer?: unknown }).answer === "string" ? (value as { answer: string }).answer : turn.answer),
+      answer: turn.answer || outcome?.answer || "",
     }));
   }
 }

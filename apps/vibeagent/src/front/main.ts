@@ -1,40 +1,34 @@
-import { parseChannelServerFrame } from "agent/common";
-import { VibeSessionModel, type TurnView, type ToolRun } from "vibeagent_domain/front";
+import { VibeClient, type TurnView, type ToolRun } from "vibeagent_domain/front";
 import "./styles.css";
 
-const model = new VibeSessionModel();
+/**
+ * The screen.
+ *
+ * It owns no transport and no event interpretation: the library handles the
+ * socket, and `VibeClient` turns events into state. This file renders that
+ * state and forwards two user intents — sign in, and run a turn.
+ */
 const app = document.querySelector<HTMLElement>("#app");
 const TOKEN_KEY = "vibe.session.token";
 
-let sessionKey = "";
-let replyChannel = "";
-let socket: WebSocket | undefined;
-let cursor: string | undefined;
-let busy = false;
 let notice = "";
+let busy = false;
 
-const escapeHtml = (value: string): string =>
-  value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const token = (): string => sessionStorage.getItem(TOKEN_KEY) ?? "";
+const setToken = (value?: string): void => { if (value) sessionStorage.setItem(TOKEN_KEY, value); else sessionStorage.removeItem(TOKEN_KEY); };
 
-function token(): string { return sessionStorage.getItem(TOKEN_KEY) ?? ""; }
-function setToken(value: string | undefined): void {
-  if (value) sessionStorage.setItem(TOKEN_KEY, value);
-  else sessionStorage.removeItem(TOKEN_KEY);
-}
+const client = new VibeClient({ token, onChange: () => render() });
+
+const escapeHtml = (value: string): string => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 async function api(pathname: string, init: RequestInit = {}): Promise<Response> {
-  return fetch(pathname, {
-    ...init,
-    headers: { "content-type": "application/json", ...(token() ? { authorization: `Bearer ${token()}` } : {}), ...(init.headers ?? {}) },
-  });
+  return fetch(pathname, { ...init, headers: { "content-type": "application/json", ...(token() ? { authorization: `Bearer ${token()}` } : {}), ...(init.headers ?? {}) } });
 }
 
 // ---------------------------------------------------------------- render ----
 
 function renderTool(tool: ToolRun): string {
-  const status = tool.done
-    ? (tool.timedOut ? "timeout" : tool.exitCode === 0 ? "ok" : "fail")
-    : "running";
+  const status = tool.done ? (tool.timedOut ? "timeout" : tool.exitCode === 0 ? "ok" : "fail") : "running";
   const body = [tool.stdout, tool.stderr].filter((part) => part.trim()).join("\n");
   return `<div class="tool" data-testid="tool-run" data-status="${status}">
     <div class="tool-head">
@@ -78,24 +72,25 @@ function renderLogin(): string {
   </main>`;
 }
 
-function renderWorkspace(snapshot: ReturnType<VibeSessionModel["getSnapshot"]>): string {
+function renderWorkspace(): string {
+  const snapshot = client.model.getSnapshot();
   const running = snapshot.turns.some((turn) => turn.phase === "running");
   return `<div class="app-shell">
     <header class="topbar">
       <div class="brand-lockup"><span class="brand-mark" aria-hidden="true">◈</span>
         <div><p class="eyebrow">VIBE CODING</p><h1>Coding agent</h1></div></div>
       <div class="topbar-meta">
-        <span class="live-dot ${snapshot.connection}"></span>
-        <span data-testid="connection-state">${snapshot.connection}</span>
+        <span class="live-dot ${client.getConnection()}"></span>
+        <span data-testid="connection-state">${client.getConnection()}</span>
         <span class="system-chip" data-testid="session-user">${escapeHtml(snapshot.userEmail)}</span>
         <button class="text-button" data-action="logout" data-testid="logout">Sign out</button>
       </div>
     </header>
     <section class="session-strip panel">
-      <div><p class="section-kicker">Session</p><strong data-testid="session-key">${escapeHtml(snapshot.sessionKey || "—")}</strong></div>
+      <div><p class="section-kicker">Session</p><strong data-testid="session-key">${escapeHtml(snapshot.sessionId || "—")}</strong></div>
       <div><span>turns</span><strong data-testid="turn-count">${snapshot.turns.length}</strong></div>
       <div><span>tool</span><strong>bash (separate process)</strong></div>
-      <div><a class="text-button" href="/workspace/${encodeURIComponent(snapshot.sessionKey)}/" target="_blank" rel="noopener" data-testid="open-workspace">Open workspace ↗</a></div>
+      <div><a class="text-button" href="/workspace/${encodeURIComponent(snapshot.sessionId)}/" target="_blank" rel="noopener" data-testid="open-workspace">Open workspace ↗</a></div>
     </section>
     <main class="workspace">
       <section class="stream-column">
@@ -121,121 +116,38 @@ function renderWorkspace(snapshot: ReturnType<VibeSessionModel["getSnapshot"]>):
 
 function render(): void {
   if (!app) return;
-  app.innerHTML = token() && sessionKey ? renderWorkspace(model.getSnapshot()) : renderLogin();
-}
-
-model.subscribe(render);
-
-// ------------------------------------------------------------- transport ----
-
-function connectStream(): void {
-  socket?.close();
-  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  // The token rides the upgrade URL because a browser cannot set headers on a
-  // WebSocket handshake. The server rejects the upgrade if it does not verify.
-  socket = new WebSocket(`${protocol}//${location.host}/ws?session=${encodeURIComponent(token())}`);
-  model.setConnection("connecting");
-  socket.onopen = () => {
-    model.setConnection("online");
-    socket?.send(JSON.stringify({ type: "subscribe", channels: [replyChannel], ...(cursor ? { cursor } : {}) }));
-  };
-  socket.onerror = () => model.setConnection("offline");
-  socket.onclose = () => {
-    model.setConnection("offline");
-    // The transcript is durable, so a reconnect replays from the cursor rather
-    // than losing whatever arrived while the socket was down.
-    window.setTimeout(() => { if (sessionKey) connectStream(); }, 1000);
-  };
-  socket.onmessage = (message) => {
-    try {
-      const frame = parseChannelServerFrame(JSON.parse(String(message.data)));
-      if (!frame) return;
-      if (frame.type === "subscribed" || frame.type === "replay") { cursor = frame.cursor; return; }
-      if (frame.type !== "event") return;
-      cursor = frame.cursor;
-      const event = frame.event;
-      const payload = event.payload as Record<string, unknown>;
-      if (event.kind === "result" || event.kind === "failure") {
-        const ok = payload.ok === true;
-        const value = payload.value;
-        const error = (payload.error as { message?: string } | undefined)?.message ?? "";
-        const turnKey = event.transactionKey;
-        model.applyTerminal(turnKey, ok, value, error);
-        busy = false;
-        render();
-        return;
-      }
-      model.applyEvent(event.eventId, event.action, payload);
-    } catch { /* a malformed frame is not actionable on the client */ }
-  };
+  app.innerHTML = token() && client.getSessionId() ? renderWorkspace() : renderLogin();
 }
 
 // ----------------------------------------------------------------- flows ----
 
 async function bootstrap(): Promise<void> {
   if (!token()) { render(); return; }
-  const me = await api("/api/vibe/me");
+  const me = await api("/api/auth/me");
   if (!me.ok) { setToken(undefined); notice = "Session expired. Sign in again."; render(); return; }
   const user = await me.json() as { id: string; email: string };
-  await openSession(user.id, user.email);
-}
-
-async function openSession(userId: string, email: string): Promise<void> {
-  // The key carries its owner, so the socket guard can reject a key minted for
-  // another account. Opening a session needs no HTTP round trip: the stream is
-  // created by the first event that lands on it.
-  sessionKey = `${userId}-${crypto.randomUUID()}`;
-  replyChannel = `vibe.${sessionKey}`;
-  cursor = undefined;
-  model.setIdentity(sessionKey, email);
-  connectStream();
-  render();
+  client.open(user.id, user.email);
 }
 
 async function submitAuth(mode: string, email: string, password: string): Promise<void> {
   notice = "";
   try {
-    // Same origin: the gateway forwards to the account service, which is not
-    // reachable from a browser.
-    const response = await api(`/api/vibe/auth/${mode === "signup" ? "signup" : "login"}`, {
-      method: "POST", body: JSON.stringify({ email, password }),
-    });
+    // Same origin: the broker forwards to the account service, which a browser
+    // cannot reach directly.
+    const response = await api(`/api/auth/${mode === "signup" ? "signup" : "login"}`, { method: "POST", body: JSON.stringify({ email, password }) });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) { notice = String(body.error ?? "Request failed."); render(); return; }
-
     if (mode === "signup") {
-      notice = body.status === "active"
-        ? "Account created and active. Sign in now."
-        : "Account created and waiting for administrator approval.";
+      notice = body.status === "active" ? "Account created and active. Sign in now." : "Account created and waiting for administrator approval.";
       render();
       return;
     }
     setToken(body.sessionToken);
-    await openSession(String(body.user?.id ?? ""), String(body.user?.email ?? email));
+    client.open(String(body.user?.id ?? ""), String(body.user?.email ?? email));
   } catch (error) {
     notice = error instanceof Error ? error.message : "Request failed.";
     render();
   }
-}
-
-/**
- * Submitting a turn is an event on the same socket the results come back on.
- * The server re-stamps identity and ownership, so what is sent here is only a
- * proposal.
- */
-function submitTurn(prompt: string): void {
-  if (!prompt.trim()) return;
-  if (socket?.readyState !== WebSocket.OPEN) { notice = "Not connected. Reconnecting…"; render(); return; }
-  const turnKey = crypto.randomUUID();
-  busy = true; notice = "";
-  model.startTurn(turnKey, prompt);
-  socket.send(JSON.stringify({
-    type: "event",
-    action: "vibe.turn.run",
-    transactionKey: turnKey,
-    payload: { sessionKey, prompt },
-  }));
-  render();
 }
 
 // ---------------------------------------------------------------- events ----
@@ -245,20 +157,22 @@ app?.addEventListener("submit", (event) => {
   const form = event.target as HTMLFormElement;
   const data = new FormData(form);
   if (form.dataset.form === "login") {
-    const mode = String((event.submitter as HTMLButtonElement)?.value ?? "login");
-    void submitAuth(mode, String(data.get("email") ?? ""), String(data.get("password") ?? ""));
+    void submitAuth(String((event.submitter as HTMLButtonElement)?.value ?? "login"), String(data.get("email") ?? ""), String(data.get("password") ?? ""));
     return;
   }
   if (form.dataset.form === "turn") {
-    submitTurn(String(data.get("prompt") ?? ""));
+    busy = true;
+    const turnKey = client.submit(String(data.get("prompt") ?? ""));
+    busy = false;
+    if (!turnKey) notice = "Not connected. Reconnecting…";
+    render();
   }
 });
 
 app?.addEventListener("click", (event) => {
-  const action = (event.target as HTMLElement).dataset.action;
-  if (action !== "logout") return;
+  if ((event.target as HTMLElement).dataset.action !== "logout") return;
   setToken(undefined);
-  sessionKey = ""; replyChannel = ""; socket?.close(); socket = undefined;
+  client.close();
   notice = "Signed out.";
   render();
 });

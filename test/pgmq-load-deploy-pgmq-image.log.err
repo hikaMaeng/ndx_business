@@ -1,0 +1,25 @@
+ Image ndx-business-admin:latest Building 
+Dockerfile:17
+
+--------------------
+
+  16 |     
+
+  17 | >>> RUN apt-get update \
+
+  18 | >>>     && apt-get install -y --no-install-recommends libatomic1 \
+
+  19 | >>>     && rm -rf /var/lib/apt/lists/* \
+
+  20 | >>>     && chmod 0755 /usr/local/bin/admin-entrypoint.sh \
+
+  21 | >>>     && mkdir -p /app/data \
+
+  22 | >>>     && chown -R postgres:postgres /app
+
+  23 |     
+
+--------------------
+
+failed to solve: process "/bin/sh -c apt-get update     && apt-get install -y --no-install-recommends libatomic1     && rm -rf /var/lib/apt/lists/*     && chmod 0755 /usr/local/bin/admin-entrypoint.sh     && mkdir -p /app/data     && chown -R postgres:postgres /app" did not complete successfully: exit code: 100
+

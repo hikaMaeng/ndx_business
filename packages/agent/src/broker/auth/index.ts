@@ -1,7 +1,7 @@
 import type express from "express";
 
 export interface AuthenticatedUser { id: string; email: string; status: string; isMasterAdmin?: boolean }
-export type AuthedRequest = express.Request & { vibeUser?: AuthenticatedUser; vibeToken?: string };
+export type AuthedRequest = express.Request & { sessionUser?: AuthenticatedUser; sessionToken?: string };
 
 /**
  * Session validation lives here, not in the broker.
@@ -43,7 +43,7 @@ export function createSessionVerifier(input: { adminBaseUrl: string; cacheMs: nu
 export function readBearer(request: express.Request): string | undefined {
   const header = request.header("authorization");
   if (header?.startsWith("Bearer ")) return header.slice(7).trim();
-  const custom = request.header("x-vibe-session");
+  const custom = request.header("x-broker-session");
   return custom || undefined;
 }
 
@@ -53,7 +53,7 @@ export function requireSession(verifier: ReturnType<typeof createSessionVerifier
     const token = readBearer(request);
     if (!token) { response.status(401).json({ error: "session token required" }); return; }
     verifier.verify(token)
-      .then((user) => { request.vibeUser = user; request.vibeToken = token; next(); })
+      .then((user) => { request.sessionUser = user; request.sessionToken = token; next(); })
       .catch((error) => response.status(401).json({ error: error instanceof Error ? error.message : "unauthenticated" }));
   };
 }

@@ -21,7 +21,7 @@ const post = async (url, body) => {
   return { ok: response.ok, status: response.status, body: await response.json().catch(() => ({})) };
 };
 
-const login = await post(`${adminUrl}/api/auth/login`, { email, password });
+const login = await post(`${gatewayUrl}/api/auth/login`, { email, password });
 assert.ok(login.ok, `login failed: ${JSON.stringify(login.body)}`);
 const token = login.body.sessionToken;
 const userId = login.body.user.id;
@@ -47,7 +47,7 @@ const done = new Promise((resolve, reject) => {
     const frame = JSON.parse(String(raw));
     if (frame.type === "subscribed") {
       // Submit only after the subscription exists, so no progress is missed.
-      socket.send(JSON.stringify({ type: "event", action: "vibe.turn.run", transactionKey: turnKey, payload: { sessionKey, prompt } }));
+      socket.send(JSON.stringify({ type: "event", action: "vibe.turn.run", transactionKey: turnKey, sessionId: sessionKey, payload: { sessionKey, turnKey, prompt } }));
       return;
     }
     if (frame.type !== "event") return;
