@@ -66,7 +66,7 @@ export async function executeHandler(event: EventEnvelope, signal: AbortSignal, 
 핸들러가 지켜야 할 것.
 
 - **`signal`을 존중한다.** abort는 소유권을 잃었다는 뜻이다. 무시하면 두 프로세스가 같은 일을 한다
-- **`emit`은 내구적이다.** 진행 상황도 event store에 append되고 outbox를 탄다. 중간에 재접속한 클라이언트가 replay로 복원한다
+- **`emit`은 내구적이다.** 진행 상황도 event store에 append되고, 브로커의 로그 tail이 그것을 그대로 소켓으로 흘린다. 중간에 재접속한 클라이언트가 replay로 복원한다
 - **긴 CPU 작업을 스레드에서 직접 하지 않는다.** 그 스레드는 20초마다 lease heartbeat에 응답해야 한다. 외부 작업은 별도 프로세스로 내보낸다
 - **재실행을 전제한다.** 워커가 소실되면 handler는 처음부터 다시 돈다. 되돌릴 수 없는 부작용은 `event_store`를 조회해 건너뛴다
 
@@ -76,7 +76,7 @@ export async function executeHandler(event: EventEnvelope, signal: AbortSignal, 
 
 ```ts
 // apps/<app>/src/server/index.ts
-import { readEnv, createEventBroker, createResultRouter, createWorkerServer, runService } from "agent/broker";
+import { readEnv, createEventBroker, createWorkerServer, runService } from "agent/broker";
 import { MY_ACTION } from "<domain>_domain/common";
 
 const env = readEnv();
@@ -167,7 +167,7 @@ new BrokerClient({ initialCursor: cursor, ... }).connect();
 
 | 이름 | 기본값 | 의미 |
 | --- | --- | --- |
-| `AGENT_ROLE` | `gateway` | `gateway` · `worker` · `router` |
+| `AGENT_ROLE` | `gateway` | `gateway` · `worker` |
 | `DATABASE_URL` | — | PGMQ와 PostgreSQL |
 | `AGENT_GATEWAY_ID` | 호스트명 | 브로커 identity. 같은 ID의 두 번째 프로세스는 standby |
 | `QUEUE_VISIBILITY_TIMEOUT_SECONDS` | `60` | 큐 재전달 시계 |

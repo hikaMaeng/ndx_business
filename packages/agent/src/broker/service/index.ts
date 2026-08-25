@@ -1,5 +1,4 @@
 import { createServer, type RequestListener } from "node:http";
-import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import { readEnv, type AgentEnv } from "../env.js";
 import { createDatabasePool, snapshotDatabasePool } from "../database.js";
@@ -7,14 +6,10 @@ import { PgmqClient } from "../pgmq/client.js";
 import { MetricsRegistry } from "../metrics/registry.js";
 import { writeMetrics } from "../metrics/endpoint.js";
 import { EventStore } from "../event-store/store.js";
+import { EventLogListener } from "../event-store/notify.js";
 import { EventStreamHub } from "../stream/hub.js";
-import { GatewaySubscriptionStore } from "../subscription/store.js";
-import { GatewayOutboxStore } from "../gateway-outbox/store.js";
 import { ExecutionStore } from "../idempotency/store.js";
-import { DeliveryStore } from "../delivery/store.js";
-import { startDeliveryPublisher } from "../delivery/publisher.js";
-import { startGatewayDelivery } from "../loops/gateway-delivery.js";
-import { startResultRouter } from "../loops/result-router.js";
+import { startEventLogTail } from "../loops/log-tail.js";
 import { startWorkerConsumer } from "../loops/worker-consumer.js";
 import { attachWebSocketTransport } from "../transport/websocket.js";
 import { createGatewayStandby } from "../gateway/standby/index.js";
@@ -34,14 +29,14 @@ import { createWebBackend } from "../http/app.js";
  *
  * `createEventBroker` is a finished product. Give it a PGMQ/PostgreSQL
  * connection and the list of actions clients may submit, and it is a working
- * broker — sockets, authentication, subscriptions, fan-in, replay and shutdown
- * included. There is nothing to implement.
+ * broker — sockets, authentication, subscriptions, log tail, replay and
+ * shutdown included. There is nothing to implement.
  *
  * `createWorkerServer` is a frame. It owns everything about *being* a worker
- * server — claiming an execution, holding the lease, recording terminal events,
- * publishing results — and leaves exactly one hole: what a task actually does.
- * The application fills that hole with its own worker module, the way a Spring
- * application supplies controllers to a web framework it did not write.
+ * server — claiming an execution, holding the lease, recording terminal events
+ * — and leaves exactly one hole: what a task actually does. The application
+ * fills that hole with its own worker module, the way a Spring application
+ * supplies controllers to a web framework it did not write.
  */
 export interface Service {
   start(): Promise<void>;
@@ -57,14 +52,11 @@ interface Runtime {
   stopMetrics(): void;
 }
 
-/** Pools sized so broker, router and worker together stay under PostgreSQL's 100-client default. */
+/** Pools sized so broker and worker together stay under PostgreSQL's 100-client default. */
 function createRuntime(env: AgentEnv): Runtime {
-  const databasePoolLimit = env.role === "worker"
-    ? Math.min(env.databasePoolMax, 24)
-    : env.role === "router" ? Math.min(env.databasePoolMax, env.routerConcurrency) : Math.min(env.databasePoolMax, 20);
-  const queuePoolLimit = env.role === "router" ? env.routerConcurrency + 1 : 12;
+  const databasePoolLimit = env.role === "worker" ? Math.min(env.databasePoolMax, 24) : Math.min(env.databasePoolMax, 20);
   const database = createDatabasePool(env.databaseUrl, databasePoolLimit);
-  const queueDatabase = createDatabasePool(env.databaseUrl, queuePoolLimit);
+  const queueDatabase = createDatabasePool(env.databaseUrl, 12);
   const metrics = new MetricsRegistry();
   const refresh = (): void => {
     for (const [name, pool] of [["databasePool", snapshotDatabasePool(database)], ["queuePool", snapshotDatabasePool(queueDatabase)]] as const) {
@@ -109,10 +101,15 @@ export interface EventBrokerOptions {
 }
 
 /**
- * A complete event broker. Connect it to PGMQ and launch it.
+ * A complete event broker. Connect it to PostgreSQL and launch it.
  *
- * It creates only its own routing state; event history belongs to the worker
- * that writes it, so a broker can run against a domain it knows nothing about.
+ * It owns no durable state beyond the replay cursors it hands to clients. Its
+ * working state is a tail position and a channel-to-socket map, both in memory,
+ * which is why any number of these can run against the same database without
+ * coordinating and why one dying costs nothing but its open sockets.
+ *
+ * Event history belongs to the worker that writes it, so a broker can run
+ * against a domain it knows nothing about.
  */
 export function createEventBroker(options: EventBrokerOptions): Service {
   const env = options.env ?? readEnv();
@@ -122,37 +119,27 @@ export function createEventBroker(options: EventBrokerOptions): Service {
   return {
     async start(): Promise<void> {
       const { queue, metrics, database, queueDatabase } = runtime;
-      const subscriptions = new GatewaySubscriptionStore(database, env.subscriptionLeaseSeconds);
-      const gatewayOutbox = new GatewayOutboxStore(database);
       const eventStore = new EventStore(database, metrics);
-      const gatewayQueue = `${env.gatewayQueuePrefix}${env.gatewayId.replace(/[^a-zA-Z0-9_]/g, "_")}`;
 
-      await subscriptions.ensureSchema();
-
-      // Bind the port before claiming the identity, so a second process with
-      // this id answers /health while it waits instead of racing for the queue.
+      // Bind the port first so the process answers /health while it wires up.
       const standby = createGatewayStandby();
       await new Promise<void>((resolve, reject) => {
         standby.server.once("error", reject);
         standby.server.listen(env.port, () => { standby.server.off("error", reject); resolve(); });
       });
 
-      const instanceId = randomUUID();
-      for (;;) {
-        const claim = await subscriptions.claimGateway(env.gatewayId, instanceId);
-        if (claim.owned) break;
-        console.warn(JSON.stringify({ event: "gateway.identity.waiting", gatewayId: env.gatewayId, retryAfterMs: claim.retryAfterMs }));
-        await new Promise<void>((resolve) => setTimeout(resolve, claim.retryAfterMs));
-      }
-
       await queue.ensure(env.queue);
-      await queue.ensure(env.resultQueue);
-      await queue.ensure(gatewayQueue);
 
       const accountBaseUrl = options.accountBaseUrl ?? "http://admin:18080";
       const verifier = createSessionVerifier({ adminBaseUrl: accountBaseUrl, cacheMs: options.sessionCacheMs ?? 5_000 });
       const hub = new EventStreamHub();
-      const delivery = startGatewayDelivery({ queue, queueName: gatewayQueue, hub, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds });
+
+      // Delivery is a read of the log, not a consumption of a queue. Nothing
+      // here removes or hides anything, so brokers never contend.
+      const tail = startEventLogTail({ eventStore, hub, metrics, pollMs: env.logTailPollMs, batchSize: env.logTailBatch });
+      hub.watchChannels(() => tail.wake());
+      const listener = new EventLogListener(env.databaseUrl, (channel) => tail.wake(channel));
+      await listener.start();
 
       const backend = createWebBackend({
         env, queue, metrics, verifier, accountBaseUrl,
@@ -167,7 +154,6 @@ export function createEventBroker(options: EventBrokerOptions): Service {
 
       const websocket = attachWebSocketTransport(
         standby.server, env, queue, hub, eventStore, metrics,
-        { replace: (connectionId, channels) => subscriptions.replaceConnection(env.gatewayId, connectionId, channels), remove: (connectionId) => subscriptions.removeConnection(env.gatewayId, connectionId) },
         createSocketPolicy({
           verifier,
           allowedActions: options.allowedActions,
@@ -175,62 +161,21 @@ export function createEventBroker(options: EventBrokerOptions): Service {
         }),
       );
 
-      const renewTimer = setInterval(() => { void subscriptions.renewGateway(env.gatewayId, instanceId).then((owned) => {
-        if (!owned) { console.error(JSON.stringify({ event: "gateway.identity.lost", gatewayId: env.gatewayId })); process.exit(1); }
-      }).catch((error) => console.error(JSON.stringify({ event: "gateway.subscription.renew.failed", error: error instanceof Error ? error.message : String(error) }))); }, Math.max(1_000, Math.floor(env.subscriptionLeaseSeconds * 500)));
-
       // Only the broker's own state. Domain history is not its to delete.
-      const retentionTimer = setInterval(() => { void (async () => {
-        await subscriptions.pruneExpired();
-        await eventStore.pruneChannelCursors(env.retentionDays);
-        await gatewayOutbox.prune(env.retentionDays);
-      })().catch((error) => console.error(JSON.stringify({ event: "broker.retention.failed", error: error instanceof Error ? error.message : String(error) }))); }, 60 * 60 * 1_000);
+      const retentionTimer = setInterval(() => { void eventStore.pruneChannelCursors(env.retentionDays)
+        .catch((error) => console.error(JSON.stringify({ event: "broker.retention.failed", error: error instanceof Error ? error.message : String(error) }))); }, 60 * 60 * 1_000);
 
       stopService = async () => {
-        runtime.stopMetrics(); clearInterval(renewTimer); clearInterval(retentionTimer);
+        runtime.stopMetrics(); clearInterval(retentionTimer);
+        await listener.stop();
         await shutdownGateway({
-          stopReader: delivery.stop,
-          waitForReader: async () => delivery.done,
+          stopReader: tail.stop,
+          waitForReader: async () => tail.done,
           closeSocketsAndRemoveSubscriptions: websocket.closeClientsAndRemoveSubscriptions,
           closeHttp: async () => closeHttpServer(standby.server),
-          releaseOwnership: async () => subscriptions.releaseGateway(env.gatewayId, instanceId),
+          releaseOwnership: async () => undefined,
         });
         await queueDatabase.end(); await database.end();
-      };
-    },
-    async stop(): Promise<void> { await stopService?.(); },
-  };
-}
-
-// =========================================================== result router ====
-
-export interface ResultRouterOptions { env?: AgentEnv }
-
-/**
- * Fans each result to every broker holding a matching subscription. Complete as
- * shipped: it is pure transport and has nothing for an application to fill in.
- */
-export function createResultRouter(options: ResultRouterOptions = {}): Service {
-  const env = options.env ?? readEnv();
-  const runtime = createRuntime(env);
-  let stopService: (() => Promise<void>) | undefined;
-
-  return {
-    async start(): Promise<void> {
-      const { queue, metrics, database, queueDatabase } = runtime;
-      const subscriptions = new GatewaySubscriptionStore(database, env.subscriptionLeaseSeconds);
-      const gatewayOutbox = new GatewayOutboxStore(database);
-      await subscriptions.ensureSchema();
-      await gatewayOutbox.ensureSchema();
-      await queue.ensure(env.resultQueue);
-
-      const router = startResultRouter({ queue, resultQueue: env.resultQueue, gatewayQueuePrefix: env.gatewayQueuePrefix, subscriptions, outbox: gatewayOutbox, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, maxInFlight: env.routerConcurrency, maxDeliveryReads: env.maxDeliveryReads, maxGatewayDeliveryAttempts: env.maxGatewayDeliveryAttempts });
-      const server = internalHealthServer(runtime);
-      console.log(JSON.stringify({ event: "broker.router.started", resultQueue: env.resultQueue }));
-
-      stopService = async () => {
-        router.stop(); server.close(); await router.done;
-        runtime.stopMetrics(); await queueDatabase.end(); await database.end();
       };
     },
     async stop(): Promise<void> { await stopService?.(); },
@@ -265,9 +210,12 @@ export interface WorkerServerOptions {
  * A worker server frame.
  *
  * Everything about being a worker is here — claiming a transaction, renewing
- * both leases, recording terminal events with their outbox row, publishing
- * results, pruning domain history. What a task *does* is supplied by the
- * application through `worker`.
+ * both leases, recording terminal events, pruning domain history. What a task
+ * *does* is supplied by the application through `worker` or `execute`.
+ *
+ * Results are not sent anywhere. Appending an event to the log is what
+ * publishing means now, so there is no second system to hand it to and
+ * therefore no outbox bridging the two.
  */
 export function createWorkerServer(options: WorkerServerOptions): Service {
   if (Boolean(options.worker) === Boolean(options.execute)) throw new Error("createWorkerServer needs exactly one of worker (CPU-bound, thread) or execute (IO-bound, inline)");
@@ -280,14 +228,11 @@ export function createWorkerServer(options: WorkerServerOptions): Service {
       const { queue, metrics, database, queueDatabase } = runtime;
       const eventStore = new EventStore(database, metrics);
       const executions = new ExecutionStore(database, env.executionLeaseSeconds);
-      const deliveries = new DeliveryStore(database, env.executionLeaseSeconds);
 
       // The worker writes domain history, so it owns that schema and its retention.
       await eventStore.ensureSchema();
       await executions.ensureSchema();
-      await deliveries.ensureSchema();
       await queue.ensure(env.queue);
-      await queue.ensure(env.resultQueue);
 
       const prune = async (): Promise<void> => {
         const expired = await executions.expiredRunningCount();
@@ -295,7 +240,7 @@ export function createWorkerServer(options: WorkerServerOptions): Service {
         if (expired) console.warn(JSON.stringify({ event: "execution.lease.expired", rows: expired }));
         await eventStore.prune(env.retentionDays);
         await eventStore.pruneStreamWatermarks(env.retentionDays);
-        await Promise.all([executions.prune(env.retentionDays), deliveries.prune(env.retentionDays)]);
+        await executions.prune(env.retentionDays);
       };
       await prune();
       const retentionTimer = setInterval(() => { void prune().catch((error) => console.error(JSON.stringify({ event: "worker.retention.failed", error: error instanceof Error ? error.message : String(error) }))); }, 60 * 60 * 1_000);
@@ -305,14 +250,13 @@ export function createWorkerServer(options: WorkerServerOptions): Service {
       const pool = options.execute
         ? createInlinePool(options.execute, maxInFlight)
         : createWorkerPool({ minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, maxQueue: env.maxQueue, workerUrl: options.worker! });
-      const publisher = startDeliveryPublisher({ queue, store: deliveries, maxAttempts: env.maxOutboxAttempts, metrics });
-      const consumer = startWorkerConsumer({ queue, commandQueue: env.queue, resultQueue: env.resultQueue, eventStore, deliveries, executions, pool, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, batchSize: env.pollBatchSize, maxInFlight, maxExecutionAttempts: env.maxExecutionAttempts, terminalPersistenceAlertAttempts: env.terminalPersistenceAlertAttempts, terminalPersistenceBackoffMaxSeconds: env.terminalPersistenceBackoffMaxSeconds, onTerminalPersisted: publisher.wake });
+      const consumer = startWorkerConsumer({ queue, commandQueue: env.queue, eventStore, executions, pool, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, batchSize: env.pollBatchSize, maxInFlight, maxExecutionAttempts: env.maxExecutionAttempts, terminalPersistenceAlertAttempts: env.terminalPersistenceAlertAttempts, terminalPersistenceBackoffMaxSeconds: env.terminalPersistenceBackoffMaxSeconds });
       const server = internalHealthServer(runtime);
-      console.log(JSON.stringify({ event: "worker.server.started", mode: inline ? "inline" : "threads", maxInFlight, commandQueue: env.queue, resultQueue: env.resultQueue }));
+      console.log(JSON.stringify({ event: "worker.server.started", mode: inline ? "inline" : "threads", maxInFlight, commandQueue: env.queue }));
 
       stopService = async () => {
-        consumer.stop(); publisher.stop(); server.close(); clearInterval(retentionTimer);
-        await Promise.all([consumer.done, publisher.done]);
+        consumer.stop(); server.close(); clearInterval(retentionTimer);
+        await consumer.done;
         await pool.destroy();
         runtime.stopMetrics(); await queueDatabase.end(); await database.end();
       };

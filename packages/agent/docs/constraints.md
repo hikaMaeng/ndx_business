@@ -2,7 +2,7 @@
 
 | export | 소비자 | 불변식 |
 | --- | --- | --- |
-| `common` event | Gateway, Worker, Router, WebSocket client | `eventId`는 immutable, `sequence`는 문자열, canonical sequence는 server append만 발급 |
+| `common` event | Gateway, Worker, WebSocket client | `eventId`는 immutable, `sequence`는 문자열, canonical sequence는 server append만 발급 |
 | `common` channel | Gateway WebSocket, frontend | cursor는 opaque UUID이며 subscribe channel 집합과 결합됨 |
 | `server` ID | Worker | result ID namespace는 command·conflict와 충돌하면 안 됨 |
 | `server` handlers | Worker Thread | unknown action은 현재 acknowledge fallback이 실행됨 |

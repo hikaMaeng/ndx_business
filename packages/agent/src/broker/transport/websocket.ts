@@ -30,7 +30,11 @@ export interface GatewayWebSocketTransport {
   closeClientsAndRemoveSubscriptions(): Promise<void>;
 }
 
-export function attachWebSocketTransport(server: Server, env: AgentEnv, queue: EventQueueTransport, hub: EventStreamHub, eventStore: EventStore, metrics: MetricsRegistry, subscriptions?: { replace(connectionId: string, channels: readonly string[]): Promise<void>; remove(connectionId: string): Promise<void> }, policy?: GatewaySocketPolicy): GatewayWebSocketTransport {
+/**
+ * Subscriptions live in the hub and nowhere else. Nothing routes to this
+ * process, so no other process needs to know what it is holding.
+ */
+export function attachWebSocketTransport(server: Server, env: AgentEnv, queue: EventQueueTransport, hub: EventStreamHub, eventStore: EventStore, metrics: MetricsRegistry, policy?: GatewaySocketPolicy): GatewayWebSocketTransport {
   // Authorisation runs before the handshake completes, so an unauthenticated
   // peer never reaches the subscribe path or the ingress path.
   const contexts = new WeakMap<IncomingMessage, Record<string, unknown>>();
@@ -42,10 +46,8 @@ export function attachWebSocketTransport(server: Server, env: AgentEnv, queue: E
         .catch(() => done(false, 401, "unauthorized"));
     } } : {}),
   });
-  const removals = new Set<Promise<void>>();
   websocket.on("connection", (socket, request: IncomingMessage) => {
     const connectionContext = contexts.get(request);
-    const connectionId = globalThis.crypto.randomUUID();
     let positions: Record<string, string> = {};
     let cursorToken: string | undefined;
     let subscriptionGeneration = 0;
@@ -95,7 +97,6 @@ export function attachWebSocketTransport(server: Server, env: AgentEnv, queue: E
         if (channels.length === 0 || channels.some((channel) => channel.length > 128)) { socket.close(1008, "invalid channel subscription"); return; }
         if (frame.cursor && !parseChannelCursor(frame.cursor)) { socket.close(1008, "invalid channel cursor"); return; }
         const cursor = await eventStore.openChannelCursor(channels, frame.cursor);
-        await subscriptions?.replace(connectionId, channels);
         if (generation !== subscriptionGeneration || closed) return;
         cursorToken = cursor.token;
         positions = cursor.positions;
@@ -157,9 +158,6 @@ export function attachWebSocketTransport(server: Server, env: AgentEnv, queue: E
       subscriptionGeneration += 1;
       unsubscribe();
       mailbox.dispose();
-      const removal = subscriptions ? subscriptions.remove(connectionId) : Promise.resolve();
-      removals.add(removal);
-      void removal.catch((error) => console.error(JSON.stringify({ event: "gateway.subscription.remove.failed", error: error instanceof Error ? error.message : String(error) }))).finally(() => removals.delete(removal));
       metrics.increment("websocketConnections", -1);
       console.log(JSON.stringify({ event: "websocket.disconnected" }));
     });
@@ -175,7 +173,6 @@ export function attachWebSocketTransport(server: Server, env: AgentEnv, queue: E
         client.close(1001, "gateway shutdown");
       }));
       await Promise.all(closed);
-      await Promise.all([...removals]);
     },
   };
 }

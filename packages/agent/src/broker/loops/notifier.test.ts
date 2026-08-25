@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DeliveryNotifier } from "./notifier.js";
+import { CoalescedWakeup } from "./notifier.js";
 
 test("delivery notifier coalesces a burst into one durable-poll wakeup", async () => {
-  const notifier = new DeliveryNotifier();
+  const notifier = new CoalescedWakeup();
   notifier.notify(); notifier.notify(); notifier.notify();
   const started = Date.now();
   await notifier.wait(100);

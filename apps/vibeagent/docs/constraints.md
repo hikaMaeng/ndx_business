@@ -2,7 +2,7 @@
 
 ## 전달 보장
 
-Worker는 command를 canonical event로 append한다. terminal event와 `agent_result_delivery` outbox 행은 하나의 PostgreSQL transaction으로 기록되고, 별도 publisher가 outbox를 `AGENT_RESULT_QUEUE`에 전송·fence 완료한 뒤에만 delivered로 표시한다. Worker는 이 durable handoff가 끝난 뒤에만 원본 PGMQ message를 delete한다. 실행 중에는 execution lease와 PGMQ visibility를 함께 연장한다. 이 규칙은 Worker 장애 뒤 원본 command가 다시 나타나 execution을 reclaim할 수 있게 한다.
+Worker는 command를 canonical event로 append한다. terminal event 기록과 execution 종결이 하나의 PostgreSQL transaction이고, 그 commit이 곧 발행이다 — 보낼 대상 시스템이 없으므로 outbox도 없다. Worker는 이 commit이 끝난 뒤에만 원본 PGMQ message를 delete한다. 실행 중에는 execution lease와 PGMQ visibility를 함께 연장한다. 이 규칙은 Worker 장애 뒤 원본 command가 다시 나타나 execution을 reclaim할 수 있게 한다.
 
 execution attempt와 terminal persistence retry는 다른 예산이다. handler owner를 잃었을 때만 `AGENT_MAX_EXECUTION_ATTEMPTS`를 소비한다. 완료된 execution의 terminal event append·source ACK가 실패하면 source message를 남기고 다시 시도한다. immutable terminal event가 없으면 포기할 수 없으므로 이 경로는 execution attempt를 소비하지 않는다. terminal persistence 실패가 PGMQ read count `AGENT_TERMINAL_PERSISTENCE_ALERT_ATTEMPTS` 이상에서 일어나면 매 실패를 `terminalPersistenceAlerts`와 구조화 오류로 기록한다. read count는 다른 재전달 사유로 임계를 건널 수 있으므로 엄격 일치를 사용하면 안 된다.
 

@@ -29,7 +29,7 @@
 
 큐는 `read`와 `delete`가 **분리**돼 있다. 꺼내도 지워지지 않고 visibility timeout 동안만 남에게 안 보인다. 그 사이에 소비자가 죽으면 메시지가 되살아난다. 이것이 이 아키텍처가 신뢰성을 얻는 유일한 원천이다.
 
-PGMQ는 PostgreSQL 테이블이므로, 큐 조작과 도메인 테이블 쓰기를 **하나의 트랜잭션**에 넣을 수 있다. 별도 브로커(Kafka·RabbitMQ)로는 불가능한 성질이며, 아래 outbox가 이 위에 선다.
+PGMQ는 PostgreSQL 테이블이므로, 큐 조작과 도메인 테이블 쓰기를 **하나의 트랜잭션**에 넣을 수 있다. 별도 브로커(Kafka·RabbitMQ)로는 불가능한 성질이다. 결과를 로그에 적는 것만으로 발행이 끝나 outbox가 필요 없어진 것도 같은 성질 덕분이다.
 
 ## 3. 이벤트 엔벨롭 — 고정 계약
 
@@ -57,15 +57,16 @@ interface IngressCommand {
 
 ```text
 ① 클라이언트 ─event─► 브로커 ─write─► agent_requests
-② 워커 read ─► claim ─► 실행 ─► [terminal event + outbox 행] 한 트랜잭션
-③ publisher: outbox → agent_results 전송 성공 ─► 그때 비로소 ①의 원본 delete
-④ 라우터 read ─► 구독 조회 ─► [handoff 원장 기록] ─► gateway 큐 write ─► ②의 결과 delete
-⑤ 브로커 read ─► 소켓 전송 ─► delete
+② 워커 read ─► claim ─► 실행 ─► [command·terminal event append + execution 종결] 한 트랜잭션
+③ 그 커밋이 끝난 뒤에야 ①의 원본 delete
+④ 브로커들이 로그를 tail ─► 소켓 전송
 ```
 
-②③과 ④가 **내구 인계 지점**이다. 어느 프로세스가 언제 죽어도 아직 delete되지 않은 원본이 남아 있으므로 다음 delivery가 이어받는다.
+②③이 유일한 **내구 인계 지점**이다. 어느 프로세스가 언제 죽어도 아직 delete되지 않은 원본이 남아 있으므로 다음 delivery가 이어받는다.
 
-⑤에서 보장이 끊긴다. WebSocket 전달에는 영수증이 없다. 그래서 클라이언트에게 두 가지 의무가 생긴다 — `eventId` 중복 제거와 cursor 재개.
+④에는 인계가 없다. 로그는 소비되지 않으므로 브로커에게 넘겨줄 것이 없고, 브로커가 죽으면 커서를 되감기만 하면 된다.
+
+④에서 보장이 끊긴다. WebSocket 전달에는 영수증이 없다. 그래서 클라이언트에게 두 가지 의무가 생긴다 — `eventId` 중복 제거와 cursor 재개.
 
 ## 5. 중복을 흡수하는 지점
 
@@ -93,22 +94,23 @@ interface IngressCommand {
 
 그래서 heartbeat는 비대칭이다. DB lease 갱신 실패는 곧 소유권 상실이므로 handler를 abort하지만, PGMQ `set_vt` 일시 실패는 무시한다 — 재노출된 원본은 안전하게 회수되기 때문이다.
 
-## 7. 라우터가 존재하는 이유
+## 7. 결과 경로에 큐를 쓰지 않는 이유
 
-구상대로라면 브로커가 PGMQ에서 "자기 클라이언트가 원하는 채널의 이벤트만" 골라 읽으면 된다. **PGMQ에서는 불가능하다.** read는 큐 단위 FIFO이고, 브로커 A가 B의 클라이언트용 이벤트를 읽으면 visibility 동안 B에게 보이지 않는다 — 경쟁 소비가 곧 사고다.
+한동안 결과도 큐로 흘렸다. 그러자 브로커가 서로를 막았다. PGMQ `read`는 큐 단위 FIFO여서 "내 채널만" 골라 읽을 수 없고, 일단 읽어야 누구 것인지 안다. 그런데 읽는 순간 visibility가 걸리므로 브로커 A가 B의 이벤트를 읽으면 놓아줄 때까지 B에게 보이지 않는다. 이를 봉합하려고 **라우터**(결과 큐를 읽어 브로커별 전용 큐로 복제)와 두 번째 outbox, 브로커 identity lease, 전용 테이블 3개가 생겼다.
 
-두 해법이 있다.
+봉합의 값이 원래 문제보다 커졌을 때 의심해야 하는 것은 봉합이 아니라 전제다. **큐는 일감 하나를 정확히 한 명에게 주는 도구**다. 명령 경로에는 맞지만, 결과 경로가 요구하는 것은 정반대 — 그 채널에 관심 있는 브로커가 **전부** 봐야 한다. 하나에게 주는 도구로 여럿에게 주려 한 어긋남을 메우던 부품이 라우터였다.
 
-1. **채널당 큐 1개** — 구상에 정확히 맞지만 채널 수만큼 PGMQ 테이블이 생긴다. 채널이 세션 단위면 현실적으로 불가
-2. **라우터** — 결과 큐를 읽어 구독 테이블을 보고 브로커별 전용 큐로 복제
+이벤트는 불변이므로 그럴 필요가 없다. 브로커는 큐를 소비하는 대신 `event_store`를 자기 위치부터 **따라 읽는다**([`startEventLogTail`](../src/broker/loops/log-tail.ts)). 읽어도 아무것도 바뀌지 않으니 독자끼리 조정할 일이 없고, 라우터·브로커별 큐·두 번째 outbox·identity lease가 한꺼번에 근거를 잃는다.
 
-이 아키텍처는 2를 택했다. 라우터는 처리를 하지 않으므로 **브로커의 일부**이지 다섯 번째 참가자가 아니다.
+`(stream_id, sequence)` 로 따라 읽는 것이 안전한 이유가 중요하다. sequence는 append 트랜잭션 안에서 `event_stream_sequence` 행 잠금 아래 발급되므로, **한 스트림 안에서는 커밋 순서가 곧 sequence 순서**다. 전역 auto-increment였다면 커밋이 뒤바뀌며 생기는 구멍을 건너뛸 수 있지만 여기서는 그럴 수 없다.
+
+깨우기는 `pg_notify`가 맡는다([`EventLogListener`](../src/broker/event-store/notify.ts)). 커밋 시점에만 발화하므로 깨어난 tail은 항상 실재하는 행을 찾는다. 그 아래로 `AGENT_LOG_TAIL_POLL_MS` 간격 폴링이 깔려 있어, 알림을 놓치면 지연을 치를 뿐 전달을 잃지는 않는다.
 
 | 큐 | 쓰는 쪽 | 읽는 쪽 | 경쟁 소비 |
 | --- | --- | --- | --- |
 | `agent_requests` | 브로커 | 워커 전부 | 목적 (부하 분산) |
-| `agent_results` | 워커 publisher | 라우터 전부 | 목적 |
-| `agent_gateway_<id>` | 라우터 | 해당 브로커 1개 | **사고** — instance lease로 단일 소유 강제 |
+
+남는 큐는 하나다. 큐가 실제로 잘하는 일만 남겼다.
 
 ## 8. 저장소 소유권
 
@@ -116,12 +118,11 @@ interface IngressCommand {
 
 | 테이블 | 주인 | 용도 |
 | --- | --- | --- |
-| `event_store`, `event_stream_sequence` | **워커** | 불변 이벤트 기록과 stream watermark |
+| `event_store`, `event_stream_sequence` | **워커** | 불변 이벤트 기록과 stream watermark. 여기에 적는 것이 곧 발행이다 |
 | `agent_execution`, `agent_execution_recipient` | **워커** | 실행 claim·lease·수신자 |
-| `agent_result_delivery` | **워커** | 워커→결과 큐 outbox |
-| `event_subscription_cursor` | **브로커** | 클라이언트별 재생 위치 |
-| `agent_gateway_instance`, `agent_gateway_subscription` | **브로커** | 브로커 identity와 채널 구독 |
-| `agent_gateway_delivery` | **브로커(라우터)** | 라우터→브로커 handoff 원장 |
+| `event_subscription_cursor` | **브로커** | 클라이언트별 재생 위치 — 브로커가 갖는 유일한 테이블 |
+
+브로커의 구독 상태는 테이블이 아니라 메모리다([`EventStreamHub`](../src/broker/stream/hub.ts)). 아무도 이 프로세스로 라우팅하지 않으므로 무엇을 들고 있는지 밖에서 알 필요가 없고, 그래서 브로커끼리 완전히 교체 가능하다.
 
 브로커가 도메인 이벤트 기록을 지우지 않는 것이 중요하다. 그것을 지우는 순간 브로커는 도메인을 아는 존재가 된다.
 
@@ -152,15 +153,14 @@ interface IngressCommand {
 | `src/common/protocol/event/` | 엔벨롭 계약과 draft 생성. 고정이며 payload와 독립 | [`createIngressEvent`](../src/common/protocol/event/index.ts) |
 | `src/common/protocol/channel/` | WebSocket client/server frame과 cursor parser | [`parseChannelClientFrame`](../src/common/protocol/channel/index.ts) |
 | `src/common/protocol/stream/` | 화면용 stream snapshot 타입 | [`StreamSnapshot`](../src/common/protocol/stream/index.ts) |
-| `src/broker/service/` | 런칭 가능한 서비스 — 브로커·라우터는 완제품, 워커는 틀 | [`createEventBroker`](../src/broker/service/index.ts) |
-| `src/broker/loops/` | 워커 소비, 결과 라우팅, 브로커 전달 루프 | [`startWorkerConsumer`](../src/broker/loops/worker-consumer.ts) |
-| `src/broker/event-store/` | append, replay, cursor, stream watermark | [`EventStore`](../src/broker/event-store/store.ts) |
+| `src/broker/service/` | 런칭 가능한 서비스 — 브로커는 완제품, 워커는 틀 | [`createEventBroker`](../src/broker/service/index.ts) |
+| `src/broker/loops/` | 워커 소비 루프와 로그 tail | [`startEventLogTail`](../src/broker/loops/log-tail.ts) |
+| `src/broker/event-store/` | append, replay, cursor, watermark, 커밋 알림 | [`EventStore`](../src/broker/event-store/store.ts) |
 | `src/broker/idempotency/` | transaction claim·lease·recipient | [`ExecutionStore`](../src/broker/idempotency/store.ts) |
-| `src/broker/delivery/`, `src/broker/gateway-outbox/` | 두 transactional outbox | [`DeliveryStore`](../src/broker/delivery/store.ts) |
 | `src/broker/transport/`, `src/broker/stream/` | WebSocket, hub, mailbox, replay buffer | [`attachWebSocketTransport`](../src/broker/transport/websocket.ts) |
 | `src/broker/auth/`, `src/broker/policy/`, `src/broker/http/` | 세션 검증, 소켓 정책, 웹 백엔드 | [`createSocketPolicy`](../src/broker/policy/index.ts) |
 | `src/broker/pgmq/`, `src/broker/queue/` | PGMQ adapter와 transport 계약 | [`PgmqClient`](../src/broker/pgmq/client.ts) |
 | `src/broker/worker/` | Worker Thread pool과 thread 진입 루프 | [`createWorkerPool`](../src/broker/worker/pool.ts) |
-| `src/broker/subscription/`, `src/broker/gateway/`, `src/broker/metrics/`, `src/broker/ingress/` | 구독 registry, standby·종료, 계수기, draft 변환 | [`GatewaySubscriptionStore`](../src/broker/subscription/store.ts) |
+| `src/broker/gateway/`, `src/broker/metrics/`, `src/broker/ingress/` | standby·종료, 계수기, draft 변환 | [`shutdownGateway`](../src/broker/gateway/lifecycle/index.ts) |
 | `src/front/client/` | 클라이언트 송수신 채널 | [`BrokerClient`](../src/front/client/index.ts) |
 | `src/server/id/` | 파생 이벤트의 결정적 ID | [`deterministicEventId`](../src/server/id/index.ts) |

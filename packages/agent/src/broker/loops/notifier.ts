@@ -1,5 +1,5 @@
-/** A coalesced local wakeup: durable rows remain the source of truth. */
-export class DeliveryNotifier {
+/** A coalesced local wakeup: the durable log remains the source of truth. */
+export class CoalescedWakeup {
   private pending = false;
   private waiter: (() => void) | undefined;
 

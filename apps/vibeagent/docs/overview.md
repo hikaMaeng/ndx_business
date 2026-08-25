@@ -4,9 +4,11 @@ vibeagent는 사용자가 자연어로 요청하면 bash 명령으로 그것을 
 
 ```text
 브라우저 ─(WebSocket)─ Gateway → agent_requests → Worker ─(bash 자식 프로세스)─ workspace
-                          ↑                            ↓
-                    Gateway 큐 ← Router ← agent_results
+                          │                            │
+                          └──── tail ── event_store ◄── append
 ```
+
+일감은 큐로 흐르고(정확히 한 Worker가 가져간다) 사실은 로그로 흐른다(관심 있는 Gateway가 전부 읽는다). Gateway는 로그를 소비하지 않고 자기 위치부터 따라 읽으므로 몇 대를 띄워도 서로를 막지 않는다.
 
 ## 전송이 둘로 나뉘는 이유
 

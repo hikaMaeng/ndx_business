@@ -22,7 +22,7 @@ action 목록은 구현이 아니라 **설정**이다. 브로커는 그 action�
 
 ### 워커 서버 — 틀
 
-`createWorkerServer()`는 "워커 서버로 존재하는 일" 전부를 소유한다: 명령 큐 소비, transaction claim, 이중 lease 갱신, terminal 이벤트와 outbox 행의 원자적 기록, 결과 발행, 도메인 retention.
+`createWorkerServer()`는 "워커 서버로 존재하는 일" 전부를 소유한다: 명령 큐 소비, transaction claim, 이중 lease 갱신, terminal 이벤트 기록, 도메인 retention. 결과를 어디로 보내는 단계는 없다 — 로그에 적는 것이 곧 발행이다.
 
 남겨 둔 구멍은 **하나**다 — 한 건의 일이 실제로 무엇을 하는가. 앱은 그 자리에 자기 워커 모듈을 끼운다. 스프링을 쓰면서 컨트롤러를 우리가 작성해 웹서버를 완성하는 것과 같은 관계다.
 

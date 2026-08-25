@@ -7,10 +7,9 @@ import { toEventDraft, toResultDraft } from "../ingress/event-draft.js";
 import { toProcessingFailureDraft, toProgressDraft } from "../ingress/event-draft.js";
 import { runWorker, type WorkerPool, WorkerLostError } from "../worker/pool.js";
 import type { MetricsRegistry } from "../metrics/registry.js";
-import type { BrokerLoop } from "./gateway-delivery.js";
+import type { BrokerLoop } from "./log-tail.js";
 import { ExecutionStore, type ResultPayload } from "../idempotency/store.js";
 import { nextReadBackoff, wait } from "./backoff.js";
-import { DeliveryStore } from "../delivery/store.js";
 
 function resultId(event: EventEnvelope): string { return deterministicEventId(`result:${event.transactionKey}:${event.streamId}:${event.replyChannel ?? event.channel}`); }
 function conflictId(event: EventEnvelope): string { return deterministicEventId(`conflict:${event.eventId}`); }
@@ -20,14 +19,19 @@ export function terminalPersistenceVisibilitySeconds(readCount: number, visibili
   return Math.min(maxSeconds, visibilitySeconds * 2 ** Math.min(6, Math.max(0, readCount - 1)));
 }
 
-/** A Worker server is only a PGMQ command consumer and PGMQ result producer. */
-export function startWorkerConsumer(input: { queue: EventQueueTransport; commandQueue: string; resultQueue: string; eventStore: EventStore; deliveries: DeliveryStore; executions: ExecutionStore; pool: WorkerPool; metrics: MetricsRegistry; visibilitySeconds: number; pollSeconds: number; batchSize: number; maxInFlight: number; maxExecutionAttempts: number; terminalPersistenceAlertAttempts?: number; terminalPersistenceBackoffMaxSeconds?: number; onTerminalPersisted?: () => void }): BrokerLoop {
+/**
+ * A worker server consumes one PGMQ command queue and produces nothing but log
+ * rows.
+ *
+ * There used to be a second half to this: a result queue, and an outbox row
+ * written in the same transaction as the terminal event so the two could not
+ * disagree. Both are gone. Appending to the log *is* the publish, so there is
+ * no other system for the append to get out of step with, and nothing left to
+ * bridge.
+ */
+export function startWorkerConsumer(input: { queue: EventQueueTransport; commandQueue: string; eventStore: EventStore; executions: ExecutionStore; pool: WorkerPool; metrics: MetricsRegistry; visibilitySeconds: number; pollSeconds: number; batchSize: number; maxInFlight: number; maxExecutionAttempts: number; terminalPersistenceAlertAttempts?: number; terminalPersistenceBackoffMaxSeconds?: number }): BrokerLoop {
   let stopped = false;
-  const persistResult = async (draft: Parameters<EventStore["append"]>[0]): Promise<EventEnvelope> => {
-    const persisted = await input.eventStore.append(draft, (client, event) => input.deliveries.enqueue(client, input.resultQueue, event));
-    input.onTerminalPersisted?.();
-    return persisted;
-  };
+  const persistResult = async (draft: Parameters<EventStore["append"]>[0]): Promise<EventEnvelope> => input.eventStore.append(draft);
   const process = async (message: { id: string; event: IngressEvent; readCount: number }): Promise<void> => {
     const command = await input.eventStore.append(toEventDraft(message.event));
     const claim = await input.executions.claim(command, randomUUID());

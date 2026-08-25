@@ -1,15 +1,15 @@
 import express from "express";
 import { Pool } from "pg";
-import { readEnv, createEventBroker, createResultRouter, createWorkerServer, runService, requireSession, createSessionVerifier, type AuthedRequest } from "agent/broker";
+import { readEnv, createEventBroker, createWorkerServer, runService, requireSession, createSessionVerifier, type AuthedRequest } from "agent/broker";
 import { VIBE_TURN_ACTION } from "vibeagent_domain/common";
 import { executeHandler, listVibeSessions, ownsVibeChannel } from "vibeagent_domain/server";
 
 /**
- * vibeagent runs three services from one image, chosen by `AGENT_ROLE`.
+ * vibeagent runs two services from one image, chosen by `AGENT_ROLE`.
  *
- * The event broker and the result router arrive finished — this file connects
- * them and launches them. The worker server arrives as a frame, and the hole is
- * filled with this project's own handler.
+ * The event broker arrives finished — this file connects it and launches it.
+ * The worker server arrives as a frame, and the hole is filled with this
+ * project's own handler.
  */
 const env = readEnv();
 const accountBaseUrl = process.env.VIBE_ACCOUNT_BASE_URL ?? "http://admin:18080";
@@ -27,8 +27,6 @@ if (env.role === "worker") {
     execute: executeHandler,
     maxConcurrent: Number(process.env.VIBE_MAX_CONCURRENT_TURNS ?? 256),
   }));
-} else if (env.role === "router") {
-  await runService(createResultRouter());
 } else {
   // Listing sessions is a domain query over event history, so it belongs to
   // this app rather than the broker. Its own small pool keeps it off the

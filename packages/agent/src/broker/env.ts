@@ -1,20 +1,15 @@
 import { cpus } from "node:os";
 
 export interface AgentEnv {
-  role: "gateway" | "worker" | "router";
+  role: "gateway" | "worker";
   port: number;
   databaseUrl: string;
   queue: string;
-  resultQueue: string;
-  gatewayQueuePrefix: string;
+  /** Instance label for logs and metrics only. Brokers are interchangeable, so it grants nothing. */
   gatewayId: string;
-  subscriptionLeaseSeconds: number;
   visibilityTimeoutSeconds: number;
   executionLeaseSeconds: number;
-  maxDeliveryReads: number;
   maxExecutionAttempts: number;
-  maxOutboxAttempts: number;
-  maxGatewayDeliveryAttempts: number;
   terminalPersistenceAlertAttempts: number;
   terminalPersistenceBackoffMaxSeconds: number;
   retentionDays: number;
@@ -24,8 +19,10 @@ export interface AgentEnv {
   minWorkerThreads: number;
   maxWorkerThreads: number;
   maxQueue: number;
-  routerConcurrency: number;
   databasePoolMax: number;
+  /** Fallback tail interval. LISTEN/NOTIFY normally wakes the tail sooner. */
+  logTailPollMs: number;
+  logTailBatch: number;
   metricsToken: string;
   websocketMailboxMax: number;
   websocketReplayMax: number;
@@ -40,7 +37,7 @@ function positive(source: NodeJS.ProcessEnv, name: string, fallback: number, all
 
 export function readEnv(source = process.env): AgentEnv {
   const role = source.AGENT_ROLE ?? "gateway";
-  if (role !== "gateway" && role !== "worker" && role !== "router") throw new Error("AGENT_ROLE must be gateway, worker, or router");
+  if (role !== "gateway" && role !== "worker") throw new Error("AGENT_ROLE must be gateway or worker");
   const cpuCount = cpus().length;
   const maxWorkerThreads = positive(source, "AGENT_MAX_THREADS", cpuCount * 2, false);
   const minWorkerThreads = positive(source, "AGENT_MIN_THREADS", maxWorkerThreads);
@@ -52,18 +49,12 @@ export function readEnv(source = process.env): AgentEnv {
     port: positive(source, "PORT", 18081),
     databaseUrl: source.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/ndx_business",
     queue: source.AGENT_QUEUE ?? "agent_requests",
-    resultQueue: source.AGENT_RESULT_QUEUE ?? "agent_results",
-    gatewayQueuePrefix: source.AGENT_GATEWAY_QUEUE_PREFIX ?? "agent_gateway_",
     gatewayId: source.AGENT_GATEWAY_ID ?? source.HOSTNAME ?? globalThis.crypto.randomUUID(),
-    subscriptionLeaseSeconds: positive(source, "AGENT_SUBSCRIPTION_LEASE_SECONDS", 30),
     visibilityTimeoutSeconds,
     // The execution fence must outlive a single PGMQ visibility lease so a visibility probe
     // can distinguish queue redelivery from a database ownership reclaim.
     executionLeaseSeconds: positive(source, "AGENT_EXECUTION_LEASE_SECONDS", visibilityTimeoutSeconds * 2),
-    maxDeliveryReads: positive(source, "AGENT_MAX_DELIVERY_READS", 5),
     maxExecutionAttempts: positive(source, "AGENT_MAX_EXECUTION_ATTEMPTS", 5),
-    maxOutboxAttempts: positive(source, "AGENT_MAX_OUTBOX_ATTEMPTS", 10),
-    maxGatewayDeliveryAttempts: positive(source, "AGENT_MAX_GATEWAY_DELIVERY_ATTEMPTS", 10),
     terminalPersistenceAlertAttempts: positive(source, "AGENT_TERMINAL_PERSISTENCE_ALERT_ATTEMPTS", 10),
     terminalPersistenceBackoffMaxSeconds: positive(source, "AGENT_TERMINAL_PERSISTENCE_BACKOFF_MAX_SECONDS", 300),
     retentionDays: positive(source, "AGENT_RETENTION_DAYS", 30),
@@ -74,7 +65,8 @@ export function readEnv(source = process.env): AgentEnv {
     maxWorkerThreads,
     maxQueue: positive(source, "AGENT_MAX_QUEUE", 64),
     databasePoolMax,
-    routerConcurrency: positive(source, "AGENT_ROUTER_CONCURRENCY", Math.min(12, databasePoolMax)),
+    logTailPollMs: positive(source, "AGENT_LOG_TAIL_POLL_MS", 1_000),
+    logTailBatch: positive(source, "AGENT_LOG_TAIL_BATCH", 256),
     metricsToken: source.AGENT_METRICS_TOKEN ?? "",
     websocketMailboxMax: positive(source, "AGENT_WEBSOCKET_MAILBOX_MAX", 256),
     websocketReplayMax: positive(source, "AGENT_WEBSOCKET_REPLAY_MAX", 256),

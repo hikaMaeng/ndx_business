@@ -2,6 +2,7 @@ import type { Pool, PoolClient } from "pg";
 import { randomUUID } from "node:crypto";
 import type { EventDraft, EventEnvelope } from "../../common/index.js";
 import type { MetricsRegistry } from "../metrics/registry.js";
+import { EVENT_LOG_NOTIFY_CHANNEL } from "./notify.js";
 
 const COLUMNS = "event_id,stream_id,sequence,action,transaction_key,event_version,kind,channel,reply_channel,session_id,run_id,turn_id,causation_event_id,correlation_id,source,payload,created_at";
 const QUALIFIED_COLUMNS = COLUMNS.split(",").map((column) => `event_store.${column}`).join(",");
@@ -109,6 +110,12 @@ export class EventStore {
         persisted.push(fromRow(inserted.rows[0]));
       }
       if (afterAppend) await afterAppend(client, persisted);
+      // Appending is publishing: there is no queue to hand the event to, so the
+      // only thing left is to tell the tails a row exists. pg_notify fires on
+      // commit, never before, so a woken tail always finds it.
+      for (const channel of new Set(persisted.map((event) => event.channel))) {
+        await client.query("SELECT pg_notify($1, $2)", [EVENT_LOG_NOTIFY_CHANNEL, channel]);
+      }
       await client.query("COMMIT");
       for (const _event of events) this.record(startedAt);
       return persisted;
@@ -120,6 +127,15 @@ export class EventStore {
     const result = await this.pool.query<{ stream_id: string; sequence: string | number }>(`SELECT stream_id, max(sequence)::text AS sequence
       FROM event_store WHERE channel = ANY($1::text[]) GROUP BY stream_id`, [channels]);
     return Object.fromEntries(result.rows.map((row) => [row.stream_id, String(row.sequence)]));
+  }
+
+  /** High-water per stream, grouped by channel, so a tail can seed one channel without disturbing others. */
+  async channelHighWaterByChannel(channels: string[]): Promise<Record<string, Record<string, string>>> {
+    const result = await this.pool.query<{ channel: string; stream_id: string; sequence: string | number }>(`SELECT channel, stream_id, max(sequence)::text AS sequence
+      FROM event_store WHERE channel = ANY($1::text[]) GROUP BY channel, stream_id`, [channels]);
+    const grouped: Record<string, Record<string, string>> = {};
+    for (const row of result.rows) (grouped[row.channel] ??= {})[row.stream_id] = String(row.sequence);
+    return grouped;
   }
 
   async replayChannels(channels: string[], positions: Record<string, string>, highWater: Record<string, string>, limit: number): Promise<{ events: EventEnvelope[]; complete: boolean }> {

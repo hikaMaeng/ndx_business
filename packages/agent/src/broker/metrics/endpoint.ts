@@ -9,8 +9,8 @@ export function writeMetrics(request: IncomingMessage, response: ServerResponse,
   response.writeHead(200, { "content-type": "application/json" });
   response.end(JSON.stringify({ service: "agent", configuration: {
     visibilityTimeoutSeconds: env.visibilityTimeoutSeconds, executionLeaseSeconds: env.executionLeaseSeconds,
-    maxExecutionAttempts: env.maxExecutionAttempts, maxOutboxAttempts: env.maxOutboxAttempts, maxGatewayDeliveryAttempts: env.maxGatewayDeliveryAttempts, terminalPersistenceAlertAttempts: env.terminalPersistenceAlertAttempts, terminalPersistenceBackoffMaxSeconds: env.terminalPersistenceBackoffMaxSeconds,
-    maxDeliveryReads: env.maxDeliveryReads, retentionDays: env.retentionDays, routerConcurrency: env.routerConcurrency,
+    maxExecutionAttempts: env.maxExecutionAttempts, terminalPersistenceAlertAttempts: env.terminalPersistenceAlertAttempts, terminalPersistenceBackoffMaxSeconds: env.terminalPersistenceBackoffMaxSeconds,
+    retentionDays: env.retentionDays, logTailPollMs: env.logTailPollMs, logTailBatch: env.logTailBatch,
   }, metrics: metrics.snapshot() }));
   return true;
 }

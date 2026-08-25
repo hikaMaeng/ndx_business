@@ -35,8 +35,8 @@ services:
         required: false
     environment:
       AGENT_ROLE: gateway
-      # Stable in the default single-Gateway deployment. A second Gateway with this
-      # identity fails closed; a scaled deployment must assign each replica an ID.
+      # A log label, nothing more. Brokers hold no durable state and nothing routes
+      # to them by name, so replicas may share it without failing closed.
       AGENT_GATEWAY_ID: agent
     labels:
       ndx.business.deploy-health-path: /ready
@@ -75,6 +75,8 @@ services:
       - ${VIBE_WORKSPACE_HOST_DIR:-./workspace}:/workspace
     networks:
       - ndx-business_internal
+  # A second broker, to show they are interchangeable: it claims nothing, is
+  # granted nothing, and tails the same log as the first.
   vibeagent-gateway-b:
     profiles: [gateway-ha]
     build:
@@ -96,24 +98,8 @@ services:
         condition: service_healthy
     ports:
       - "${AGENT_GATEWAY_B_HOST_PORT:-18082}:18081"
-    networks:
-      - ndx-business_internal
-  vibeagent-router:
-    build:
-      context: .
-      dockerfile: apps/vibeagent/docker/Dockerfile
-    image: ndx-business-vibeagent:latest
-    init: true
-    restart: unless-stopped
-    env_file:
-      - path: apps/vibeagent/docker/.env
-        required: false
-    environment:
-      AGENT_ROLE: router
-    depends_on:
-      admin:
-        condition: service_healthy
-    # Internal only: router fans results into Gateway-specific PGMQ queues.
+    volumes:
+      - ${VIBE_WORKSPACE_HOST_DIR:-./workspace}:/workspace
     networks:
       - ndx-business_internal
 
