@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": { "outDir": "dist/server", "rootDir": "src/server", "module": "NodeNext", "moduleResolution": "NodeNext", "noEmit": true, "types": ["node"], "baseUrl": "../..", "paths": { "agent/common": ["packages/agent/dist/common/index.d.ts"], "agent/front": ["packages/agent/dist/front/index.d.ts"], "agent/server": ["packages/agent/dist/server/index.d.ts"], "agent/broker": ["packages/agent/dist/broker/index.d.ts"], "agent/broker/worker": ["packages/agent/dist/broker/worker/index.d.ts"], "vibeagent_domain/server": ["packages/vibeagent_domain/dist/server/index.d.ts"], "vibeagent_domain/common": ["packages/vibeagent_domain/dist/common/index.d.ts"] } },
+  "include": ["src/server/**/*.ts"]
+}

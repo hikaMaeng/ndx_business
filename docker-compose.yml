@@ -22,16 +22,16 @@ services:
       - admin_data:/app/data
     networks:
       - ndx-business_internal
-  agent:
+  vibeagent:
     build:
       context: .
-      dockerfile: apps/agent/docker/Dockerfile
-    image: ndx-business-agent:latest
-    container_name: agent
+      dockerfile: apps/vibeagent/docker/Dockerfile
+    image: ndx-business-vibeagent:latest
+    container_name: vibeagent
     init: true
     restart: unless-stopped
     env_file:
-      - path: apps/agent/docker/.env
+      - path: apps/vibeagent/docker/.env
         required: false
     environment:
       AGENT_ROLE: gateway
@@ -45,17 +45,19 @@ services:
         condition: service_healthy
     ports:
       - "${AGENT_HOST_PORT:-18081}:18081"
+    volumes:
+      - vibeagent_workspace:/workspace
     networks:
       - ndx-business_internal
-  agent-worker:
+  vibeagent-worker:
     build:
       context: .
-      dockerfile: apps/agent/docker/Dockerfile
-    image: ndx-business-agent:latest
+      dockerfile: apps/vibeagent/docker/Dockerfile
+    image: ndx-business-vibeagent:latest
     init: true
     restart: unless-stopped
     env_file:
-      - path: apps/agent/docker/.env
+      - path: apps/vibeagent/docker/.env
         required: false
     environment:
       AGENT_ROLE: worker
@@ -63,18 +65,22 @@ services:
       admin:
         condition: service_healthy
     # Internal only: workers never accept client traffic.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - vibeagent_workspace:/workspace
     networks:
       - ndx-business_internal
-  agent-gateway-b:
+  vibeagent-gateway-b:
     profiles: [gateway-ha]
     build:
       context: .
-      dockerfile: apps/agent/docker/Dockerfile
-    image: ndx-business-agent:latest
+      dockerfile: apps/vibeagent/docker/Dockerfile
+    image: ndx-business-vibeagent:latest
     init: true
     restart: unless-stopped
     env_file:
-      - path: apps/agent/docker/.env
+      - path: apps/vibeagent/docker/.env
         required: false
     environment:
       AGENT_ROLE: gateway
@@ -88,15 +94,15 @@ services:
       - "${AGENT_GATEWAY_B_HOST_PORT:-18082}:18081"
     networks:
       - ndx-business_internal
-  agent-router:
+  vibeagent-router:
     build:
       context: .
-      dockerfile: apps/agent/docker/Dockerfile
-    image: ndx-business-agent:latest
+      dockerfile: apps/vibeagent/docker/Dockerfile
+    image: ndx-business-vibeagent:latest
     init: true
     restart: unless-stopped
     env_file:
-      - path: apps/agent/docker/.env
+      - path: apps/vibeagent/docker/.env
         required: false
     environment:
       AGENT_ROLE: router
@@ -110,6 +116,9 @@ services:
 volumes:
   admin_data:
     name: ndx-business_admin_data
+  # Generated sessions. Shared so the Gateway can serve what the Worker wrote.
+  vibeagent_workspace:
+    name: ndx-business_vibeagent_workspace
 
 networks:
   # Project-scoped: no other compose project joins this network. Publishing a

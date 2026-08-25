@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": { "module": "ESNext", "moduleResolution": "Bundler", "noEmit": true, "resolveJsonModule": true, "types": ["vite/client"], "baseUrl": "../..", "paths": { "agent/common": ["packages/agent/dist/common/index.d.ts"], "agent/front": ["packages/agent/dist/front/index.d.ts"], "vibeagent_domain/front": ["packages/vibeagent_domain/dist/front/index.d.ts"], "vibeagent_domain/common": ["packages/vibeagent_domain/dist/common/index.d.ts"] } },
+  "include": ["src/front", "assets/i18n", "vite.config.ts"]
+}

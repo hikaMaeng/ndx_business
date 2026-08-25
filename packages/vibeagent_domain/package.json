@@ -1,0 +1,30 @@
+{
+  "name": "vibeagent_domain",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/common/index.js",
+  "module": "./dist/common/index.js",
+  "types": "./dist/common/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/common/index.d.ts", "import": "./dist/common/index.js" },
+    "./common": { "types": "./dist/common/index.d.ts", "import": "./dist/common/index.js" },
+    "./server": { "types": "./dist/server/index.d.ts", "import": "./dist/server/index.js" },
+    "./front": { "types": "./dist/front/index.d.ts", "import": "./dist/front/index.js" },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "README.md", "docs"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node ../../scripts/run-tests.mjs src",
+    "lint": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "agent": "*"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.1",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3"
+  }
+}

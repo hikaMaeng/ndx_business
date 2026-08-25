@@ -1,5 +1,0 @@
-{
-  "extends": "../../tsconfig.json",
-  "compilerOptions": { "outDir": "dist/server", "rootDir": "src/server", "module": "NodeNext", "moduleResolution": "NodeNext", "noEmit": true, "types": ["node"], "baseUrl": "../..", "paths": { "agent_domain/common": ["packages/agent_domain/dist/common/index.d.ts"], "agent_domain/front": ["packages/agent_domain/dist/front/index.d.ts"], "agent_domain/server": ["packages/agent_domain/dist/server/index.d.ts"], "agent_domain/broker": ["packages/agent_domain/dist/broker/index.d.ts"], "agent_domain/broker/worker": ["packages/agent_domain/dist/broker/worker/index.d.ts"] } },
-  "include": ["src/server/**/*.ts"]
-}
