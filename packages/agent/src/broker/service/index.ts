@@ -20,6 +20,8 @@ import { attachWebSocketTransport } from "../transport/websocket.js";
 import { createGatewayStandby } from "../gateway/standby/index.js";
 import { closeHttpServer, shutdownGateway } from "../gateway/lifecycle/index.js";
 import { createWorkerPool } from "../worker/pool.js";
+import { createInlinePool } from "../worker/inline.js";
+import type { WorkerExecute } from "../worker/entry.js";
 import { createSessionVerifier } from "../auth/index.js";
 import { createSocketPolicy } from "../policy/index.js";
 import { createWebBackend } from "../http/app.js";
@@ -235,13 +237,23 @@ export function createResultRouter(options: ResultRouterOptions = {}): Service {
 
 export interface WorkerServerOptions {
   /**
-   * The application's worker module — the one hole in this frame.
-   *
-   * It must be a module that calls `startWorkerEntry(execute)`. A function
-   * cannot be passed instead: the module is loaded inside a worker thread, so
-   * the injection point is a URL rather than a callback.
+   * CPU-bound work: the application's worker module, loaded inside a worker
+   * thread. A function cannot be passed instead — the thread boundary is why
+   * this is a URL. The module must call `startWorkerEntry(execute)`.
    */
-  worker: URL;
+  worker?: URL;
+  /**
+   * IO-bound work: the handler itself, run on the main thread.
+   *
+   * A handler that only awaits — inference, a child process, a database round
+   * trip — does no CPU work, so a thread buys nothing and caps concurrency at
+   * `cpus × 2`. Supply this instead and bound concurrency with `maxConcurrent`,
+   * which should reflect what downstream services can absorb rather than how
+   * many cores this machine happens to have.
+   */
+  execute?: WorkerExecute;
+  /** In-flight ceiling for inline execution. Ignored in thread mode. */
+  maxConcurrent?: number;
   env?: AgentEnv;
 }
 
@@ -254,6 +266,7 @@ export interface WorkerServerOptions {
  * application through `worker`.
  */
 export function createWorkerServer(options: WorkerServerOptions): Service {
+  if (Boolean(options.worker) === Boolean(options.execute)) throw new Error("createWorkerServer needs exactly one of worker (CPU-bound, thread) or execute (IO-bound, inline)");
   const env = options.env ?? readEnv();
   const runtime = createRuntime(env);
   let stopService: (() => Promise<void>) | undefined;
@@ -283,11 +296,15 @@ export function createWorkerServer(options: WorkerServerOptions): Service {
       await prune();
       const retentionTimer = setInterval(() => { void prune().catch((error) => console.error(JSON.stringify({ event: "worker.retention.failed", error: error instanceof Error ? error.message : String(error) }))); }, 60 * 60 * 1_000);
 
-      const pool = createWorkerPool({ minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, maxQueue: env.maxQueue, workerUrl: options.worker });
+      const inline = Boolean(options.execute);
+      const maxInFlight = inline ? (options.maxConcurrent ?? 256) : env.maxWorkerThreads + env.maxQueue;
+      const pool = options.execute
+        ? createInlinePool(options.execute, maxInFlight)
+        : createWorkerPool({ minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, maxQueue: env.maxQueue, workerUrl: options.worker! });
       const publisher = startDeliveryPublisher({ queue, store: deliveries, maxAttempts: env.maxOutboxAttempts, metrics });
-      const consumer = startWorkerConsumer({ queue, commandQueue: env.queue, resultQueue: env.resultQueue, eventStore, deliveries, executions, pool, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, batchSize: env.pollBatchSize, maxInFlight: env.maxWorkerThreads + env.maxQueue, maxExecutionAttempts: env.maxExecutionAttempts, terminalPersistenceAlertAttempts: env.terminalPersistenceAlertAttempts, terminalPersistenceBackoffMaxSeconds: env.terminalPersistenceBackoffMaxSeconds, onTerminalPersisted: publisher.wake });
+      const consumer = startWorkerConsumer({ queue, commandQueue: env.queue, resultQueue: env.resultQueue, eventStore, deliveries, executions, pool, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, batchSize: env.pollBatchSize, maxInFlight, maxExecutionAttempts: env.maxExecutionAttempts, terminalPersistenceAlertAttempts: env.terminalPersistenceAlertAttempts, terminalPersistenceBackoffMaxSeconds: env.terminalPersistenceBackoffMaxSeconds, onTerminalPersisted: publisher.wake });
       const server = internalHealthServer(runtime);
-      console.log(JSON.stringify({ event: "worker.server.started", commandQueue: env.queue, resultQueue: env.resultQueue }));
+      console.log(JSON.stringify({ event: "worker.server.started", mode: inline ? "inline" : "threads", maxInFlight, commandQueue: env.queue, resultQueue: env.resultQueue }));
 
       stopService = async () => {
         consumer.stop(); publisher.stop(); server.close(); clearInterval(retentionTimer);

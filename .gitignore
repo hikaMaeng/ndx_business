@@ -6,3 +6,9 @@ coverage/
 *.log
 .env
 !apps/*/docker/env.defaults
+
+# Runtime databases and volumes. Never source.
+apps/*/data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

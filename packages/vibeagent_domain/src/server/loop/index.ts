@@ -50,7 +50,9 @@ export async function runTurn(request: VibeTurnRequest, config: LoopConfig, emit
   // session can never reach another session's files.
   const workspace = path.join(config.workspaceRoot, request.sessionKey);
 
-  emit({ action: VIBE_ACTIONS.turnStarted, sessionKey: request.sessionKey, turnKey: request.turnKey, workspace, prompt: request.prompt });
+  // The workspace path is a server-side detail. The event says which session it
+  // belongs to; where that session's files live is derived, not announced.
+  emit({ action: VIBE_ACTIONS.turnStarted, sessionKey: request.sessionKey, turnKey: request.turnKey, prompt: request.prompt });
 
   const messages: ChatMessage[] = [
     { role: "system", content: SYSTEM_PROMPT },

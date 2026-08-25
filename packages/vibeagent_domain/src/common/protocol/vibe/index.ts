@@ -52,7 +52,7 @@ export interface VibeTurnSubmission {
 
 interface TurnScoped { turnKey: string }
 
-export interface VibeTurnStarted extends TurnScoped { workspace: string; prompt: string; sessionKey: string }
+export interface VibeTurnStarted extends TurnScoped { prompt: string; sessionKey: string }
 export interface VibeIterationStarted extends TurnScoped { iterationIndex: number }
 export interface VibeIterationReasoning extends TurnScoped { iterationIndex: number; reasoning: string }
 export interface VibeIterationMessage extends TurnScoped { iterationIndex: number; message: string }

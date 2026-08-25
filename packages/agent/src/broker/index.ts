@@ -41,5 +41,6 @@ export { ConnectionMailbox } from "./stream/mailbox/index.js";
 export { ReplayBuffer, type ReplayBufferOutcome } from "./stream/replay-buffer/index.js";
 export { attachWebSocketTransport, type GatewayWebSocketTransport, type GatewaySocketPolicy } from "./transport/websocket.js";
 
+export { createInlinePool } from "./worker/inline.js";
 export { createWorkerPool, runWorker, WorkerLostError, type WorkerPool, type WorkerResult, type WorkerProgress } from "./worker/pool.js";
 export { startWorkerEntry, type WorkerExecute, type WorkerEmit } from "./worker/entry.js";

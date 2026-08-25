@@ -21,6 +21,10 @@ test("organization snapshot parser validates appearance tokens", () => {
     ],
     members: [],
     responsibilities: [],
+    // Required since organization inference services landed; the parser rejects
+    // a snapshot without them.
+    inferenceServiceOptions: [],
+    inferenceServices: [],
     access: {
       isMasterAdmin: true,
       canCreateRoot: true,
