@@ -102,6 +102,8 @@ export interface EventBrokerOptions {
   assetDir?: string;
   /** Overrides the environment schema; defaults to `process.env`. */
   env?: AgentEnv;
+  /** Decides whether a user may read a channel. Without it any authenticated user may replay any channel. */
+  authorizeChannel?(channel: string, user: { id: string }): boolean;
   /** Extra HTTP routes this deployment needs. Mounted before the client bundle. */
   extendHttp?(app: RequestListener): RequestListener;
 }
@@ -155,6 +157,8 @@ export function createEventBroker(options: EventBrokerOptions): Service {
       const backend = createWebBackend({
         env, queue, metrics, verifier, accountBaseUrl,
         checkDatabase: async () => { await Promise.all([queue.check(), database.query("SELECT 1")]); },
+        openCursor: (channels, from) => (from === "start" ? eventStore.openChannelCursorAtStart(channels) : eventStore.openChannelCursor(channels)),
+        ...(options.authorizeChannel ? { authorizeChannel: options.authorizeChannel } : {}),
         ...(options.clientDir === undefined ? {} : { clientDir: options.clientDir }),
         ...(options.assetDir === undefined ? {} : { assetDir: options.assetDir }),
       });

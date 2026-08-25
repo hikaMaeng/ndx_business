@@ -56,3 +56,24 @@ test("a failed terminal keeps the error visible", () => {
   assert.equal(turn.phase, "failed");
   assert.equal(turn.error, "worker_failed");
 });
+
+test("a replayed session materialises turns the model never submitted", () => {
+  const instance = new VibeSessionModel();
+  // No startTurn: this is history arriving for a turn this client never sent.
+  instance.apply(progress(VIBE_ACTIONS.turnStarted, { turnKey: "old", sessionKey: "s", prompt: "build a calculator" }));
+  instance.apply(progress(VIBE_ACTIONS.toolStarted, { turnKey: "old", toolCallKey: "c1", command: "cat > index.html" }));
+  instance.apply(progress(VIBE_ACTIONS.toolCompleted, { turnKey: "old", toolCallKey: "c1", exitCode: 0, timedOut: false, durationMs: 12 }));
+  const turn = instance.getSnapshot().turns[0]!;
+  assert.equal(turn.turnKey, "old");
+  assert.equal(turn.prompt, "build a calculator");
+  assert.equal(turn.tools[0]!.exitCode, 0);
+});
+
+test("replayed events that arrive before turn.started still land on the right turn", () => {
+  const instance = new VibeSessionModel();
+  instance.apply(progress(VIBE_ACTIONS.toolStdout, { turnKey: "old", toolCallKey: "c1", chunk: "early\n" }));
+  instance.apply(progress(VIBE_ACTIONS.turnStarted, { turnKey: "old", sessionKey: "s", prompt: "late title" }));
+  const turn = instance.getSnapshot().turns[0]!;
+  assert.equal(turn.prompt, "late title");
+  assert.equal(turn.tools[0]!.stdout, "early\n");
+});

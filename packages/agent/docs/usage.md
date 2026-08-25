@@ -144,10 +144,24 @@ PostgreSQL 계정·정책처럼 **어드민이 설정한 테이블에 걸린 것
 | --- | --- |
 | `POST /api/auth/login` · `/api/auth/signup` | 계정 서비스로 프록시 |
 | `GET /api/auth/me` | 세션 검증 후 현재 사용자 |
+| `POST /api/channels/cursor` | 채널을 처음부터 재생할 커서 발급 |
 | `GET /workspace/...` | 워커 산출물 (설정된 경우) |
 | `GET /health` · `/ready` · `/metrics` | 운영 |
 
 앱 고유의 PG 라우트가 더 필요하면 `extendHttp`로 얹는다.
+
+### 과거 대화를 다시 열기
+
+커서 없이 구독하면 **지금부터** 받는다. 과거 세션을 열려면 먼저 시작 커서를 받아야 한다.
+
+```ts
+const { cursor } = await fetch("/api/channels/cursor", {
+  method: "POST", body: JSON.stringify({ channels: [channel], from: "start" }),
+}).then((r) => r.json());
+new BrokerClient({ initialCursor: cursor, ... }).connect();
+```
+
+누가 어떤 채널을 읽을 수 있는지는 브로커가 모르므로 `authorizeChannel`로 알려 준다. 없으면 인증된 아무나 아무 채널을 재생할 수 있다.
 
 ## 6. 환경값
 

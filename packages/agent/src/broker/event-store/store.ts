@@ -149,6 +149,22 @@ export class EventStore {
     return { token: created, positions: highWater };
   }
 
+  /**
+   * Opens a cursor positioned before the first event instead of at the current
+   * high-water mark.
+   *
+   * A normal subscription starts from now, which is what a live view wants. To
+   * reopen a past conversation the client needs the opposite, and it cannot ask
+   * for it by omitting the token — that is how "start from now" is spelled.
+   * Empty positions make `replayChannels` treat every stream as unread.
+   */
+  async openChannelCursorAtStart(channels: string[]): Promise<{ token: string; positions: Record<string, string> }> {
+    const fingerprint = [...new Set(channels)].sort();
+    const created = randomUUID();
+    await this.pool.query("INSERT INTO event_subscription_cursor (token, channels, positions) VALUES ($1, $2::jsonb, '{}'::jsonb)", [created, JSON.stringify(fingerprint)]);
+    return { token: created, positions: {} };
+  }
+
   async advanceChannelCursor(token: string, positions: Record<string, string>): Promise<void> {
     const updated = await this.pool.query("UPDATE event_subscription_cursor SET positions = $2::jsonb, updated_at = now() WHERE token = $1 RETURNING token", [token, JSON.stringify(positions)]);
     if (!updated.rowCount) throw new Error("channel cursor no longer exists");

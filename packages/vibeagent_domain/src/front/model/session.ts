@@ -65,10 +65,23 @@ export class VibeSessionModel {
     this.commit({ turns: [...this.snapshot.turns, { turnKey, prompt, phase: "running", reasoning: [], messages: [], tools: [], answer: "", error: "" }] });
   }
 
+  /**
+   * Upserts, because a turn can appear two ways.
+   *
+   * Submitting one creates it locally first. Replaying a past session does not:
+   * the events arrive for turns this model has never seen, and the ordering of
+   * a replay is not guaranteed to put `turn.started` first. Dropping events
+   * whose turn is absent would make history invisible, which is exactly what
+   * reopening a session is for.
+   */
   private patchTurn(turnKey: string, patch: (turn: TurnView) => TurnView): void {
-    let found = false;
-    const turns = this.snapshot.turns.map((turn) => { if (turn.turnKey !== turnKey) return turn; found = true; return patch(turn); });
-    if (found) this.commit({ turns });
+    const existing = this.snapshot.turns.find((turn) => turn.turnKey === turnKey);
+    if (!existing) {
+      const created: TurnView = { turnKey, prompt: "", phase: "running", reasoning: [], messages: [], tools: [], answer: "", error: "" };
+      this.commit({ turns: [...this.snapshot.turns, patch(created)] });
+      return;
+    }
+    this.commit({ turns: this.snapshot.turns.map((turn) => (turn.turnKey === turnKey ? patch(turn) : turn)) });
   }
 
   private upsertTool(turn: TurnView, toolCallKey: string, mutate: (tool: ToolRun) => ToolRun): TurnView {
@@ -95,6 +108,9 @@ export class VibeSessionModel {
 
   private applyProgress(event: VibeProgressEvent): void {
     switch (event.action) {
+      case VIBE_ACTIONS.turnStarted:
+        // The only event carrying the prompt, so a replayed turn gets its title here.
+        return this.patchTurn(event.turnKey, (turn) => ({ ...turn, prompt: turn.prompt || event.prompt }));
       case VIBE_ACTIONS.iterationReasoning:
         return this.patchTurn(event.turnKey, (turn) => ({ ...turn, reasoning: [...turn.reasoning, event.reasoning] }));
       case VIBE_ACTIONS.iterationMessage:

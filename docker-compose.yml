@@ -46,7 +46,9 @@ services:
     ports:
       - "${AGENT_HOST_PORT:-18081}:18081"
     volumes:
-      - vibeagent_workspace:/workspace
+      # Projects root. A host path, not a named volume: the browser runs on the
+      # host, so generated files have to be reachable there without docker cp.
+      - ${VIBE_WORKSPACE_HOST_DIR:-./workspace}:/workspace
     networks:
       - ndx-business_internal
   vibeagent-worker:
@@ -68,7 +70,9 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - vibeagent_workspace:/workspace
+      # Projects root. A host path, not a named volume: the browser runs on the
+      # host, so generated files have to be reachable there without docker cp.
+      - ${VIBE_WORKSPACE_HOST_DIR:-./workspace}:/workspace
     networks:
       - ndx-business_internal
   vibeagent-gateway-b:
@@ -116,9 +120,6 @@ services:
 volumes:
   admin_data:
     name: ndx-business_admin_data
-  # Generated sessions. Shared so the Gateway can serve what the Worker wrote.
-  vibeagent_workspace:
-    name: ndx-business_vibeagent_workspace
 
 networks:
   # Project-scoped: no other compose project joins this network. Publishing a

@@ -11,6 +11,11 @@ export interface BrokerClientOptions {
   channels: () => readonly string[];
   onEvent(event: EventEnvelope): void;
   onState?(state: ConnectionState): void;
+  /**
+   * Resume from this cursor instead of starting at the current high-water mark.
+   * Obtained from the broker; how it was positioned is the caller's business.
+   */
+  initialCursor?: string;
   /** Reconnect backoff ceiling. */
   maxRetryMs?: number;
 }
@@ -33,7 +38,7 @@ export class BrokerClient {
   private generation = 0;
   private closed = false;
 
-  constructor(private readonly options: BrokerClientOptions) {}
+  constructor(private readonly options: BrokerClientOptions) { this.cursor = options.initialCursor; }
 
   connect(): void {
     this.closed = false;
