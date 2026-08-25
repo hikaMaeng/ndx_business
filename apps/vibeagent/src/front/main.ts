@@ -13,13 +13,15 @@ const TOKEN_KEY = "vibe.session.token";
 
 let notice = "";
 let signedIn = false;
+// Survives the re-render a failed sign-in causes, so the field is not wiped.
+let authEmail = "";
 
 const token = (): string => sessionStorage.getItem(TOKEN_KEY) ?? "";
 const setToken = (value?: string): void => { if (value) sessionStorage.setItem(TOKEN_KEY, value); else sessionStorage.removeItem(TOKEN_KEY); };
 
 const client = new VibeClient({ token, onChange: () => render() });
 
-const escapeHtml = (value: string): string => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const escapeHtml = (value: string): string => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 function relativeTime(iso: string): string {
   const seconds = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
@@ -27,6 +29,17 @@ function relativeTime(iso: string): string {
   if (seconds < 3600) return `${Math.floor(seconds / 60)}분 전`;
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}시간 전`;
   return `${Math.floor(seconds / 86400)}일 전`;
+}
+
+/**
+ * The account service answers in English, and deliberately does not say which
+ * half was wrong — that ambiguity is an anti-enumeration measure, so the
+ * translation keeps it.
+ */
+function authErrorText(raw: string): string {
+  if (/invalid credentials|not active/i.test(raw)) return "이메일 또는 비밀번호가 맞지 않거나, 아직 활성화되지 않은 계정입니다.";
+  if (/already|exists|registered/i.test(raw)) return "이미 등록된 이메일입니다. 로그인하세요.";
+  return raw || "요청이 실패했습니다.";
 }
 
 async function api(pathname: string, init: RequestInit = {}): Promise<Response> {
@@ -76,7 +89,7 @@ function renderLogin(): string {
       <p class="auth-copy">계정으로 로그인하세요. 신규 계정은 관리자의 가입 정책에 따라 즉시 활성화되거나 승인을 기다립니다.</p>
       ${notice ? `<p class="notice" role="status" data-testid="auth-notice">${escapeHtml(notice)}</p>` : ""}
       <form data-form="login" class="auth-form">
-        <label>이메일<input name="email" type="email" autocomplete="username" required aria-label="Email"/></label>
+        <label>이메일<input name="email" type="email" autocomplete="username" required aria-label="Email" value="${escapeHtml(authEmail)}"/></label>
         <label>비밀번호<input name="password" type="password" autocomplete="current-password" required aria-label="Password"/></label>
         <div class="auth-actions">
           <button class="primary-button" type="submit" name="mode" value="login" data-testid="login-submit">로그인</button>
@@ -156,6 +169,7 @@ function render(): void {
 
 async function enter(userId: string, email: string): Promise<void> {
   signedIn = true;
+  authEmail = "";
   client.setIdentity(userId, email);
   await client.refreshSessions();
   const sessions = client.getSessions();
@@ -174,12 +188,19 @@ async function bootstrap(): Promise<void> {
 
 async function submitAuth(mode: string, email: string, password: string): Promise<void> {
   notice = "";
+  authEmail = email;
   try {
     // Same origin: the broker forwards to the account service, which a browser
     // cannot reach directly.
     const response = await api(`/api/auth/${mode === "signup" ? "signup" : "login"}`, { method: "POST", body: JSON.stringify({ email, password }) });
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) { notice = String(body.error ?? "요청이 실패했습니다."); render(); return; }
+    if (!response.ok) {
+      notice = authErrorText(String(body.error ?? ""));
+      render();
+      // Retyping the email after a typo in the password is pure friction.
+      app?.querySelector<HTMLInputElement>('input[name="password"]')?.focus();
+      return;
+    }
     if (mode === "signup") {
       notice = body.status === "active" ? "계정이 만들어졌습니다. 로그인하세요." : "계정이 만들어졌고 관리자 승인을 기다립니다.";
       render();
