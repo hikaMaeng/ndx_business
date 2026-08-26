@@ -10,6 +10,7 @@ import { EventLogListener } from "../event-store/notify.js";
 import { EventStreamHub } from "../stream/hub.js";
 import { ExecutionStore } from "../idempotency/store.js";
 import { startEventLogTail } from "../loops/log-tail.js";
+import { startFactDispatcher, type ReactionTable } from "../loops/fact-dispatcher.js";
 import { startWorkerConsumer } from "../loops/worker-consumer.js";
 import { attachWebSocketTransport } from "../transport/websocket.js";
 import { createGatewayStandby } from "../gateway/standby/index.js";
@@ -94,6 +95,16 @@ export interface EventBrokerOptions {
   assetDir?: string;
   /** Overrides the environment schema; defaults to `process.env`. */
   env?: AgentEnv;
+  /**
+   * Which queue an accepted client command goes on.
+   *
+   * A broker is not tied to one queue any more than a worker server is: two
+   * kinds of command can land on two queues that two different worker servers
+   * watch. Defaults to the environment's single ingress queue.
+   */
+  ingressQueueFor?(action: string): string;
+  /** Every queue this broker may write to. Ensured at startup so the first send never races creation. */
+  ingressQueues?: readonly string[];
   /** Decides whether a user may read a channel. Without it any authenticated user may replay any channel. */
   authorizeChannel?(channel: string, user: { id: string }): boolean;
   /** Extra HTTP routes this deployment needs. Mounted before the client bundle. */
@@ -128,7 +139,7 @@ export function createEventBroker(options: EventBrokerOptions): Service {
         standby.server.listen(env.port, () => { standby.server.off("error", reject); resolve(); });
       });
 
-      await queue.ensure(env.queue);
+      for (const name of new Set([env.queue, ...(options.ingressQueues ?? [])])) await queue.ensure(name);
 
       const accountBaseUrl = options.accountBaseUrl ?? "http://admin:18080";
       const verifier = createSessionVerifier({ adminBaseUrl: accountBaseUrl, cacheMs: options.sessionCacheMs ?? 5_000 });
@@ -159,6 +170,7 @@ export function createEventBroker(options: EventBrokerOptions): Service {
           allowedActions: options.allowedActions,
           replyChannelFor: options.replyChannelFor ?? ((sessionId) => sessionId),
         }),
+        options.ingressQueueFor,
       );
 
       // Only the broker's own state. Domain history is not its to delete.
@@ -176,6 +188,58 @@ export function createEventBroker(options: EventBrokerOptions): Service {
           releaseOwnership: async () => undefined,
         });
         await queueDatabase.end(); await database.end();
+      };
+    },
+    async stop(): Promise<void> { await stopService?.(); },
+  };
+}
+
+// ========================================================= fact dispatcher ====
+
+export interface FactDispatcherOptions {
+  /** Distinguishes this dispatcher's durable tail position from any other's. */
+  name?: string;
+  /** action → reactor queues. The only place that knows which reaction follows which fact. */
+  table: ReactionTable;
+  env?: AgentEnv;
+}
+
+/**
+ * Turns recorded facts into work for reactors.
+ *
+ * Complete as shipped: it is pure transport and has nothing for an application
+ * to fill in beyond the table, which is configuration. It reads the log, and
+ * for every fact the table names it puts a copy on each listed queue.
+ *
+ * Workers can therefore record what happened and stop, without any of them
+ * knowing what reacts to it — the whole point of keeping the table out here.
+ */
+export function createFactDispatcher(options: FactDispatcherOptions): Service {
+  const env = options.env ?? readEnv();
+  const runtime = createRuntime(env);
+  let stopService: (() => Promise<void>) | undefined;
+
+  return {
+    async start(): Promise<void> {
+      const { queue, metrics, database, queueDatabase } = runtime;
+      const eventStore = new EventStore(database, metrics);
+      const name = options.name ?? "fact-dispatcher";
+
+      await eventStore.ensureSchema();
+      for (const queueName of new Set(Object.values(options.table).flat())) await queue.ensure(queueName);
+
+      const dispatcher = startFactDispatcher({ name, eventStore, queue, table: options.table, metrics, pollMs: env.logTailPollMs, batchSize: env.logTailBatch });
+      const listener = new EventLogListener(env.databaseUrl, () => dispatcher.wake());
+      await listener.start();
+
+      const server = internalHealthServer(runtime);
+      console.log(JSON.stringify({ event: "broker.dispatcher.started", name, actions: Object.keys(options.table) }));
+
+      stopService = async () => {
+        dispatcher.stop(); server.close();
+        await listener.stop();
+        await dispatcher.done;
+        runtime.stopMetrics(); await queueDatabase.end(); await database.end();
       };
     },
     async stop(): Promise<void> { await stopService?.(); },
@@ -203,6 +267,14 @@ export interface WorkerServerOptions {
   execute?: WorkerExecute;
   /** In-flight ceiling for inline execution. Ignored in thread mode. */
   maxConcurrent?: number;
+  /**
+   * The queues this server watches. Defaults to the environment's list.
+   *
+   * A worker server is not tied to one queue: give it several and one process
+   * covers several kinds of work, or give two processes one each and they scale
+   * apart. Nothing about the handler changes either way.
+   */
+  queues?: readonly string[];
   env?: AgentEnv;
 }
 
@@ -230,9 +302,11 @@ export function createWorkerServer(options: WorkerServerOptions): Service {
       const executions = new ExecutionStore(database, env.executionLeaseSeconds);
 
       // The worker writes domain history, so it owns that schema and its retention.
+      const commandQueues = options.queues?.length ? options.queues : env.queues;
+
       await eventStore.ensureSchema();
       await executions.ensureSchema();
-      await queue.ensure(env.queue);
+      for (const name of new Set(commandQueues)) await queue.ensure(name);
 
       const prune = async (): Promise<void> => {
         const expired = await executions.expiredRunningCount();
@@ -250,9 +324,9 @@ export function createWorkerServer(options: WorkerServerOptions): Service {
       const pool = options.execute
         ? createInlinePool(options.execute, maxInFlight)
         : createWorkerPool({ minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, maxQueue: env.maxQueue, workerUrl: options.worker! });
-      const consumer = startWorkerConsumer({ queue, commandQueue: env.queue, eventStore, executions, pool, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, batchSize: env.pollBatchSize, maxInFlight, maxExecutionAttempts: env.maxExecutionAttempts, terminalPersistenceAlertAttempts: env.terminalPersistenceAlertAttempts, terminalPersistenceBackoffMaxSeconds: env.terminalPersistenceBackoffMaxSeconds });
+      const consumer = startWorkerConsumer({ queue, commandQueues, eventStore, executions, pool, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, batchSize: env.pollBatchSize, maxInFlight, maxExecutionAttempts: env.maxExecutionAttempts, terminalPersistenceAlertAttempts: env.terminalPersistenceAlertAttempts, terminalPersistenceBackoffMaxSeconds: env.terminalPersistenceBackoffMaxSeconds });
       const server = internalHealthServer(runtime);
-      console.log(JSON.stringify({ event: "worker.server.started", mode: inline ? "inline" : "threads", maxInFlight, commandQueue: env.queue }));
+      console.log(JSON.stringify({ event: "worker.server.started", mode: inline ? "inline" : "threads", maxInFlight, queues: commandQueues }));
 
       stopService = async () => {
         consumer.stop(); server.close(); clearInterval(retentionTimer);

@@ -73,11 +73,13 @@ export class VibeSessionModel {
   }
 
   /**
-   * A step's terminal result.
+   * One reaction's terminal result.
    *
-   * Only the broker's terminal closes a turn; a final-answer fact does not.
-   * A failed `vibe.session.open` also lands here, which is how a client learns
-   * its folder was refused.
+   * A turn is a chain of reactions now, so a terminal here means one reaction
+   * finished — not the turn. Success is therefore ignored: `turn.final` is what
+   * closes a turn. Failure still has to surface, because a reaction that threw
+   * leaves the chain with nothing to continue it, and a turn that simply stops
+   * would otherwise sit at "running" for ever with no explanation.
    */
   private applyTerminal(envelope: EventEnvelope): void {
     const payload = envelope.payload as { ok?: unknown; value?: unknown; error?: { message?: unknown } };
@@ -90,6 +92,8 @@ export class VibeSessionModel {
     // names one when it has one, and otherwise a turn already on screen under
     // this transaction is the answer — that is the live case, where the client
     // created the turn when it submitted it.
+    if (ok) return;
+
     const belongsToTurn = Boolean(envelope.turnId)
       || Boolean(outcome?.turnKey)
       || this.snapshot.turns.some((turn) => turn.turnKey === envelope.transactionKey);
@@ -99,15 +103,11 @@ export class VibeSessionModel {
     // it has to be surfaced, or a rejected folder would look like nothing
     // happening at all.
     if (!belongsToTurn) {
-      if (!ok) this.commit({ ...this.snapshot, sessionError: error || "세션을 열지 못했습니다." });
+      this.commit({ ...this.snapshot, sessionError: error || "세션을 열지 못했습니다." });
       return;
     }
-    this.commit(patchTurn(this.snapshot, envelope.transactionKey, (turn) => ({
-      ...turn,
-      phase: ok ? "done" : "failed",
-      error: ok ? "" : error,
-      answer: turn.answer || outcome?.answer || "",
-    })));
+    const turnKey = envelope.turnId ?? outcome?.turnKey ?? envelope.transactionKey;
+    this.commit(patchTurn(this.snapshot, turnKey, (turn) => ({ ...turn, phase: "failed", error })));
   }
 }
 

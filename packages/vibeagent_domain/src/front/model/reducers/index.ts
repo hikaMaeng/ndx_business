@@ -1,4 +1,4 @@
-import { VIBE_ACTIONS, type VibeAction, type VibeProgressMap } from "../../../common/index.js";
+import { VIBE_ACTIONS, type VibeClientAction, type VibeProgressMap } from "../../../common/index.js";
 import type { VibeSnapshot } from "../state.js";
 import { sessionOpened } from "./session.js";
 import { turnFinal, turnStarted } from "./turn.js";
@@ -22,9 +22,9 @@ import { toolCompleted, toolFailed, toolStarted, toolStderr, toolStdout } from "
  * | `iteration.ts` | streamed reasoning and messages |
  * | `tool.ts` | one bash call from start to exit code |
  */
-export type Reducer<K extends VibeAction> = (snapshot: VibeSnapshot, event: VibeProgressMap[K]) => VibeSnapshot;
+export type Reducer<K extends VibeClientAction> = (snapshot: VibeSnapshot, event: VibeProgressMap[K]) => VibeSnapshot;
 
-export const REDUCERS: { [K in VibeAction]: Reducer<K> } = {
+export const REDUCERS: { [K in VibeClientAction]: Reducer<K> } = {
   [VIBE_ACTIONS.sessionOpened]: sessionOpened,
   [VIBE_ACTIONS.turnStarted]: turnStarted,
   [VIBE_ACTIONS.iterationStarted]: iterationStarted,

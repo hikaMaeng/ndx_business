@@ -34,7 +34,7 @@ export interface GatewayWebSocketTransport {
  * Subscriptions live in the hub and nowhere else. Nothing routes to this
  * process, so no other process needs to know what it is holding.
  */
-export function attachWebSocketTransport(server: Server, env: AgentEnv, queue: EventQueueTransport, hub: EventStreamHub, eventStore: EventStore, metrics: MetricsRegistry, policy?: GatewaySocketPolicy): GatewayWebSocketTransport {
+export function attachWebSocketTransport(server: Server, env: AgentEnv, queue: EventQueueTransport, hub: EventStreamHub, eventStore: EventStore, metrics: MetricsRegistry, policy?: GatewaySocketPolicy, ingressQueueFor?: (action: string) => string): GatewayWebSocketTransport {
   // Authorisation runs before the handshake completes, so an unauthenticated
   // peer never reaches the subscribe path or the ingress path.
   const contexts = new WeakMap<IncomingMessage, Record<string, unknown>>();
@@ -146,9 +146,12 @@ export function attachWebSocketTransport(server: Server, env: AgentEnv, queue: E
         const allowed = policy?.guardIngress ? policy.guardIngress(proposed, connectionContext) : proposed;
         if (!allowed) { socket.close(1008, "ingress rejected"); return; }
         const event = createIngressEvent(allowed);
-        void queue.send(env.queue, event).then(async (messageId) => {
-          console.log(JSON.stringify({ event: "event.enqueued", transport: "websocket", action: event.action, eventId: event.eventId, transactionKey: event.transactionKey, messageId }));
-        }).catch((error) => console.error(JSON.stringify({ event: "websocket.enqueue.failed", action: event.action, transactionKey: event.transactionKey, error: error instanceof Error ? error.message : String(error) })));
+        // Which queue an accepted command belongs on is the application's call.
+        // The broker asks and does not interpret the answer.
+        const destination = ingressQueueFor ? ingressQueueFor(event.action) : env.queue;
+        void queue.send(destination, event).then(async (messageId) => {
+          console.log(JSON.stringify({ event: "event.enqueued", transport: "websocket", action: event.action, queue: destination, eventId: event.eventId, transactionKey: event.transactionKey, messageId }));
+        }).catch((error) => console.error(JSON.stringify({ event: "websocket.enqueue.failed", action: event.action, queue: destination, transactionKey: event.transactionKey, error: error instanceof Error ? error.message : String(error) })));
       } catch (error) { console.error(JSON.stringify({ event: "websocket.message.failed", error: error instanceof Error ? error.message : String(error) })); socket.close(1008, "invalid subscription"); }
     });
     socket.on("close", () => {

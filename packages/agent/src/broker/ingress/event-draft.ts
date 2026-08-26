@@ -5,12 +5,21 @@ function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-/** Converts the deployed queue contract into the canonical, server-issued event draft. */
+/**
+ * Converts the deployed queue contract into the canonical, server-issued event draft.
+ *
+ * Identity comes from the envelope first and the payload only as a fallback.
+ * That order matters: a message put on a queue by something other than a client
+ * — a dispatched reaction, say — carries its session on the envelope and has no
+ * reason to repeat it inside the payload. Reading the payload first silently
+ * dropped the session and filed the work under a channel stream instead, where
+ * the reactor could no longer find the session it belonged to.
+ */
 export function toEventDraft(event: IngressEvent): EventDraft {
   const payload = event.payload as Record<string, unknown>;
-  const sessionId = optionalString(payload.sessionKey);
-  const runId = optionalString(payload.runKey);
-  const turnId = optionalString(payload.turnKey);
+  const sessionId = event.sessionId ?? optionalString(payload.sessionKey);
+  const runId = event.runId ?? optionalString(payload.runKey);
+  const turnId = event.turnId ?? optionalString(payload.turnKey);
   return {
     eventId: event.eventId,
     eventVersion: 1,
@@ -25,6 +34,7 @@ export function toEventDraft(event: IngressEvent): EventDraft {
     ...(turnId ? { turnId } : {}),
     correlationId: event.transactionKey,
     source: "client",
+    ...(event.audience === undefined ? {} : { audience: event.audience }),
     createdAt: event.createdAt,
     payload,
   };
@@ -50,13 +60,14 @@ export function toResultDraft(request: EventEnvelope, input: { eventId: string; 
  * A mid-execution observation. Progress is derived from the request so it lands
  * in the same stream and reaches the same reply channel as the terminal result.
  */
-export function toProgressDraft(request: EventEnvelope, input: { eventId: string; action: string; payload: Record<string, unknown>; kind?: EventDraft["kind"] }): EventDraft {
+export function toProgressDraft(request: EventEnvelope, input: { eventId: string; action: string; payload: Record<string, unknown>; kind?: EventDraft["kind"]; audience?: EventEnvelope["audience"] }): EventDraft {
   return createDerivedDraft(request, {
     eventId: input.eventId,
     action: input.action,
     kind: input.kind ?? "progress",
     channel: request.replyChannel ?? request.channel,
     source: "worker",
+    ...(input.audience === undefined ? {} : { audience: input.audience }),
     payload: input.payload,
   });
 }

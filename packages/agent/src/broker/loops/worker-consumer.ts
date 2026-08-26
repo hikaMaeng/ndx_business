@@ -29,15 +29,16 @@ export function terminalPersistenceVisibilitySeconds(readCount: number, visibili
  * no other system for the append to get out of step with, and nothing left to
  * bridge.
  */
-export function startWorkerConsumer(input: { queue: EventQueueTransport; commandQueue: string; eventStore: EventStore; executions: ExecutionStore; pool: WorkerPool; metrics: MetricsRegistry; visibilitySeconds: number; pollSeconds: number; batchSize: number; maxInFlight: number; maxExecutionAttempts: number; terminalPersistenceAlertAttempts?: number; terminalPersistenceBackoffMaxSeconds?: number }): BrokerLoop {
+export function startWorkerConsumer(input: { queue: EventQueueTransport; commandQueues: readonly string[]; eventStore: EventStore; executions: ExecutionStore; pool: WorkerPool; metrics: MetricsRegistry; visibilitySeconds: number; pollSeconds: number; batchSize: number; maxInFlight: number; maxExecutionAttempts: number; terminalPersistenceAlertAttempts?: number; terminalPersistenceBackoffMaxSeconds?: number }): BrokerLoop {
   let stopped = false;
   const persistResult = async (draft: Parameters<EventStore["append"]>[0]): Promise<EventEnvelope> => input.eventStore.append(draft);
-  const process = async (message: { id: string; event: IngressEvent; readCount: number }): Promise<void> => {
+  const process = async (message: { id: string; event: IngressEvent; readCount: number; queueName: string }): Promise<void> => {
+    const commandQueue = message.queueName;
     const command = await input.eventStore.append(toEventDraft(message.event));
     const claim = await input.executions.claim(command, randomUUID());
     if (claim.kind === "conflict") {
       await persistResult(toResultDraft(command, { eventId: conflictId(command), action: `${command.action}.conflict`, channel: command.replyChannel ?? command.channel, createdAt: new Date().toISOString(), source: "worker", payload: { ok: false, error: { code: "idempotency_conflict", message: claim.reason } } }));
-      await input.queue.delete(input.commandQueue, message.id);
+      await input.queue.delete(commandQueue, message.id);
       input.metrics.increment("queueDeletes");
       return;
     }
@@ -47,7 +48,7 @@ export function startWorkerConsumer(input: { queue: EventQueueTransport; command
       // the still-running source command. Keeping it lets a later lease expiry
       // reclaim the execution instead of orphaning the transaction.
       if (claim.requestEventId !== command.eventId) {
-        await input.queue.delete(input.commandQueue, message.id);
+        await input.queue.delete(commandQueue, message.id);
         input.metrics.increment("queueDeletes");
       } else await input.executions.recordRedelivery(command.transactionKey);
       return;
@@ -64,7 +65,7 @@ export function startWorkerConsumer(input: { queue: EventQueueTransport; command
           void input.executions.renew(command.transactionKey, claim.attemptId).then((owned) => {
             if (!owned) { leaseLost = true; controller.abort(); }
           }).catch(() => { leaseLost = true; controller.abort(); });
-          void input.queue.extendVisibility(input.commandQueue, message.id, input.visibilitySeconds).catch((error) => {
+          void input.queue.extendVisibility(commandQueue, message.id, input.visibilitySeconds).catch((error) => {
             input.metrics.increment("queueVisibilityRenewFailures");
             console.error(JSON.stringify({ event: "worker.visibility.renew.failed", messageId: message.id, error: error instanceof Error ? error.message : String(error) }));
           });
@@ -88,6 +89,9 @@ export function startWorkerConsumer(input: { queue: EventQueueTransport; command
             eventId: deterministicEventId(`progress:${command.transactionKey}:${command.streamId}:${seq}`),
             action,
             kind: progress.kind === "fact" ? "fact" : "progress",
+            // A handler marks its own worker-to-worker traffic. The broker reads
+            // the mark and still knows nothing about what the action means.
+            ...(progress.audience === "worker" ? { audience: "worker" as const } : {}),
             payload: progress,
           })).catch((error) => console.error(JSON.stringify({ event: "worker.progress.persist.failed", transactionKey: command.transactionKey, error: error instanceof Error ? error.message : String(error) })));
         };
@@ -128,22 +132,24 @@ export function startWorkerConsumer(input: { queue: EventQueueTransport; command
         }
       }
       if (permanentFailure) {
-        await input.queue.archive(input.commandQueue, message.id);
+        await input.queue.archive(commandQueue, message.id);
         input.metrics.increment("processingDlqTotal");
       } else {
-        await input.queue.delete(input.commandQueue, message.id);
+        await input.queue.delete(commandQueue, message.id);
         input.metrics.increment("queueDeletes");
       }
     } catch (error) { throw new TerminalPersistenceError(error instanceof Error ? error.message : String(error)); }
   };
+  // One budget across every watched queue. Two lanes reading two queues must
+  // not each be allowed the full ceiling.
   const inFlight = new Set<Promise<void>>();
-  const schedule = (message: { id: string; event: IngressEvent; readCount: number }): void => {
+  const schedule = (message: { id: string; event: IngressEvent; readCount: number; queueName: string }): void => {
     let task: Promise<void>;
     task = process(message).catch(async (error) => {
       if (error instanceof TerminalPersistenceError) {
         input.metrics.increment("terminalPersistenceRetries");
         const retryAfterSeconds = terminalPersistenceVisibilitySeconds(message.readCount, input.visibilitySeconds, input.terminalPersistenceBackoffMaxSeconds ?? 300);
-        await input.queue.extendVisibility(input.commandQueue, message.id, retryAfterSeconds).catch((visibilityError) => console.error(JSON.stringify({ event: "worker.terminal.retry.backoff.failed", messageId: message.id, error: visibilityError instanceof Error ? visibilityError.message : String(visibilityError) })));
+        await input.queue.extendVisibility(message.queueName, message.id, retryAfterSeconds).catch((visibilityError) => console.error(JSON.stringify({ event: "worker.terminal.retry.backoff.failed", messageId: message.id, error: visibilityError instanceof Error ? visibilityError.message : String(visibilityError) })));
         console.error(JSON.stringify({ event: "worker.terminal.retry", messageId: message.id, error: error.message }));
         if (message.readCount >= (input.terminalPersistenceAlertAttempts ?? 10)) {
           input.metrics.increment("terminalPersistenceAlerts");
@@ -156,18 +162,19 @@ export function startWorkerConsumer(input: { queue: EventQueueTransport; command
     }).finally(() => inFlight.delete(task));
     inFlight.add(task);
   };
-  const lane = async (): Promise<void> => { let backoffMs = 100; while (!stopped) {
+  /** One reading lane per watched queue. They share the in-flight budget above. */
+  const lane = async (queueName: string): Promise<void> => { let backoffMs = 100; while (!stopped) {
     try {
-      const messages = await input.queue.read(input.commandQueue, { visibilityTimeoutSeconds: input.visibilitySeconds, quantity: input.batchSize, pollSeconds: input.pollSeconds });
+      const messages = await input.queue.read(queueName, { visibilityTimeoutSeconds: input.visibilitySeconds, quantity: input.batchSize, pollSeconds: input.pollSeconds });
       input.metrics.increment("queueReads"); input.metrics.increment("queueMessages", messages.length);
       backoffMs = 100;
       for (const message of messages) {
         while (!stopped && inFlight.size >= input.maxInFlight) await Promise.race(inFlight);
         if (stopped) break;
-        schedule({ id: message.id, event: message.event as IngressEvent, readCount: message.readCount });
+        schedule({ id: message.id, event: message.event as IngressEvent, readCount: message.readCount, queueName });
       }
-    } catch (error) { input.metrics.increment("brokerReadFailures"); console.error(JSON.stringify({ event: "worker.consumer.retry", backoffMs, error: error instanceof Error ? error.message : String(error) })); await wait(backoffMs); backoffMs = nextReadBackoff(backoffMs); }
-  } await Promise.allSettled(inFlight); };
-  const done = lane();
+    } catch (error) { input.metrics.increment("brokerReadFailures"); console.error(JSON.stringify({ event: "worker.consumer.retry", queue: queueName, backoffMs, error: error instanceof Error ? error.message : String(error) })); await wait(backoffMs); backoffMs = nextReadBackoff(backoffMs); }
+  } };
+  const done = Promise.all(input.commandQueues.map((queueName) => lane(queueName))).then(async () => { await Promise.allSettled(inFlight); });
   return { stop: () => { stopped = true; }, done };
 }

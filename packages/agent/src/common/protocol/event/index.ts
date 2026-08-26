@@ -1,9 +1,25 @@
 export type EventKind = "command" | "fact" | "result" | "progress" | "failure" | "control";
 
+/**
+ * Who an event is for.
+ *
+ * `client` is the default: the broker tails it and delivers it to whoever
+ * subscribes. `worker` means the event exists only so another worker can react
+ * to it, and the broker never picks it up at all — not filtered late at the
+ * socket, but never read.
+ *
+ * The mark belongs in the envelope rather than in a list of action names,
+ * because the broker must not have a list of action names. It reads one field
+ * and still knows nothing about the domain.
+ */
+export type EventAudience = "client" | "worker";
+
 export interface IngressCommand {
   action: string;
   transactionKey: string;
   channel: string;
+  /** Defaults to `client`. `worker` keeps the record out of every client-facing read. */
+  audience?: EventAudience;
   replyChannel?: string;
   sessionId?: string;
   runId?: string;
@@ -28,6 +44,8 @@ export interface EventEnvelope<TPayload extends Record<string, unknown> = Record
   causationEventId?: string;
   correlationId: string;
   source: "client" | "server" | "worker" | "scheduler";
+  /** Defaults to `client`. `worker` keeps the event out of every client-facing read. */
+  audience?: EventAudience;
   createdAt: string;
   payload: TPayload;
 }
@@ -64,6 +82,7 @@ export function createDerivedDraft(cause: EventEnvelope, input: {
   source?: EventEnvelope["source"];
   channel?: string;
   createdAt?: string;
+  audience?: EventAudience;
 }): EventDraft {
   return {
     eventId: input.eventId,
@@ -80,6 +99,7 @@ export function createDerivedDraft(cause: EventEnvelope, input: {
     causationEventId: cause.eventId,
     correlationId: cause.correlationId,
     source: input.source ?? "server",
+    ...(input.audience === undefined ? {} : { audience: input.audience }),
     createdAt: input.createdAt ?? new Date().toISOString(),
     payload: input.payload,
   };

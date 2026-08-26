@@ -42,20 +42,31 @@ test("an event without a turn key is dropped rather than guessed at", () => {
   assert.equal(toolsOf(instance.getSnapshot().turns[0]!).length, 0);
 });
 
-test("only the terminal result closes a turn", () => {
+test("the domain closes a turn, not a reaction's terminal", () => {
   const instance = model();
-  instance.apply(progress(VIBE_ACTIONS.turnFinal, { turnKey: "t1", answer: "done" }));
-  assert.equal(instance.getSnapshot().turns[0]!.phase, "running");
+  // A turn is a chain of reactions and each has its own terminal, so a
+  // successful one means that reaction finished — never that the turn did.
   instance.apply(terminal(true, { answer: "done" }));
-  assert.equal(instance.getSnapshot().turns[0]!.phase, "done");
+  assert.equal(instance.getSnapshot().turns[0]!.phase, "running");
+
+  instance.apply(progress(VIBE_ACTIONS.turnFinal, { turnKey: "t1", answer: "done", stoppedBy: "final" }));
+  const turn = instance.getSnapshot().turns[0]!;
+  assert.equal(turn.phase, "done");
+  assert.equal(turn.answer, "done");
 });
 
-test("a failed terminal keeps the error visible", () => {
+test("a failed reaction still surfaces, or the chain would stop silently", () => {
   const instance = model();
   instance.apply(terminal(false, undefined, "worker_failed"));
   const turn = instance.getSnapshot().turns[0]!;
   assert.equal(turn.phase, "failed");
   assert.equal(turn.error, "worker_failed");
+});
+
+test("the iteration budget closes a turn as done, not as a failure", () => {
+  const instance = model();
+  instance.apply(progress(VIBE_ACTIONS.turnFinal, { turnKey: "t1", answer: "gave up", stoppedBy: "iteration_budget" }));
+  assert.equal(instance.getSnapshot().turns[0]!.phase, "done");
 });
 
 test("a replayed session materialises turns the model never submitted", () => {

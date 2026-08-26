@@ -4,13 +4,26 @@ import type { EventDraft, EventEnvelope } from "../../common/index.js";
 import type { MetricsRegistry } from "../metrics/registry.js";
 import { EVENT_LOG_NOTIFY_CHANNEL } from "./notify.js";
 
-const COLUMNS = "event_id,stream_id,sequence,action,transaction_key,event_version,kind,channel,reply_channel,session_id,run_id,turn_id,causation_event_id,correlation_id,source,payload,created_at";
+const COLUMNS = "event_id,stream_id,sequence,action,transaction_key,event_version,kind,channel,reply_channel,session_id,run_id,turn_id,causation_event_id,correlation_id,source,audience,payload,created_at";
+/** Client-facing reads never see worker-to-worker traffic. Applied in SQL, not after the fact. */
+const CLIENT_ONLY = "audience <> 'worker'";
+/**
+ * A dispatcher reacts to what happened, never to the record of a reaction
+ * being handed out.
+ *
+ * A consumer writes a `command` row for every message it picks up, including
+ * the ones a dispatcher just sent it. Those rows carry the same action as the
+ * fact that caused them, so a dispatcher that read them would answer its own
+ * dispatch and do it again, for ever. Facts are what reactors record; commands
+ * are bookkeeping.
+ */
+const FACTS_ONLY = "kind <> 'command'";
 const QUALIFIED_COLUMNS = COLUMNS.split(",").map((column) => `event_store.${column}`).join(",");
 
 type StoredEventRow = {
   event_id: string; stream_id: string; sequence: string | number; action: string; transaction_key: string;
   kind: EventEnvelope["kind"]; channel: string; reply_channel: string | null; correlation_id: string;
-  causation_event_id: string | null; source: EventEnvelope["source"]; event_version: 1;
+  causation_event_id: string | null; source: EventEnvelope["source"]; audience: "client" | "worker" | null; event_version: 1;
   session_id: string | null; run_id: string | null; turn_id: string | null;
   payload: Record<string, unknown>; created_at: string | Date;
 };
@@ -25,6 +38,7 @@ function fromRow(row: StoredEventRow): EventEnvelope {
     ...(row.turn_id === null ? {} : { turnId: row.turn_id }),
     ...(row.causation_event_id === null ? {} : { causationEventId: row.causation_event_id }),
     correlationId: row.correlation_id, source: row.source, eventVersion: 1,
+    ...(row.audience === null || row.audience === "client" ? {} : { audience: row.audience }),
     createdAt: new Date(row.created_at).toISOString(), payload: row.payload,
   };
 }
@@ -38,13 +52,14 @@ export class EventStore {
       action text NOT NULL, transaction_key text NOT NULL, event_version integer NOT NULL DEFAULT 1, kind text NOT NULL,
       channel text NOT NULL, reply_channel text, correlation_id text NOT NULL,
       session_id text, run_id text, turn_id text, causation_event_id text,
-      source text NOT NULL, payload jsonb NOT NULL, created_at timestamptz NOT NULL,
+      source text NOT NULL, audience text NOT NULL DEFAULT 'client', payload jsonb NOT NULL, created_at timestamptz NOT NULL,
       stored_at timestamptz NOT NULL DEFAULT now(), UNIQUE (stream_id, sequence))`);
     await this.pool.query("ALTER TABLE event_store ADD COLUMN IF NOT EXISTS event_version integer NOT NULL DEFAULT 1");
     await this.pool.query("ALTER TABLE event_store ADD COLUMN IF NOT EXISTS session_id text");
     await this.pool.query("ALTER TABLE event_store ADD COLUMN IF NOT EXISTS run_id text");
     await this.pool.query("ALTER TABLE event_store ADD COLUMN IF NOT EXISTS turn_id text");
     await this.pool.query("ALTER TABLE event_store ADD COLUMN IF NOT EXISTS causation_event_id text");
+    await this.pool.query("ALTER TABLE event_store ADD COLUMN IF NOT EXISTS audience text NOT NULL DEFAULT 'client'");
     await this.backfillIdentity();
     await this.pool.query("CREATE INDEX IF NOT EXISTS event_store_stream_sequence_idx ON event_store (stream_id, sequence)");
     await this.pool.query("CREATE INDEX IF NOT EXISTS event_store_channel_stream_sequence_idx ON event_store (channel, stream_id, sequence)");
@@ -59,6 +74,10 @@ export class EventStore {
       ON CONFLICT (stream_id) DO UPDATE SET last_sequence = GREATEST(event_stream_sequence.last_sequence, EXCLUDED.last_sequence)`);
     await this.pool.query(`CREATE TABLE IF NOT EXISTS event_subscription_cursor (
       token uuid PRIMARY KEY, channels jsonb NOT NULL, positions jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())`);
+    // A named, durable tail position. A dispatcher restarting must not replay
+    // the whole log, and must not skip what it had not reached.
+    await this.pool.query(`CREATE TABLE IF NOT EXISTS event_reader_cursor (
+      name text PRIMARY KEY, positions jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())`);
   }
 
   /**
@@ -103,9 +122,9 @@ export class EventStore {
           ON CONFLICT (stream_id) DO UPDATE SET last_sequence = event_stream_sequence.last_sequence + 1, updated_at = now() RETURNING last_sequence AS sequence`, [event.streamId]);
         const sequence = String(next.rows[0].sequence);
         const inserted = await client.query<StoredEventRow>(`INSERT INTO event_store (${COLUMNS})
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb,$17)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,$18)
           ON CONFLICT (event_id) DO NOTHING
-          RETURNING ${COLUMNS}`, [event.eventId, event.streamId, sequence, event.action, event.transactionKey, event.eventVersion, event.kind, event.channel, event.replyChannel ?? null, event.sessionId ?? null, event.runId ?? null, event.turnId ?? null, event.causationEventId ?? null, event.correlationId, event.source, JSON.stringify(event.payload), event.createdAt]);
+          RETURNING ${COLUMNS}`, [event.eventId, event.streamId, sequence, event.action, event.transactionKey, event.eventVersion, event.kind, event.channel, event.replyChannel ?? null, event.sessionId ?? null, event.runId ?? null, event.turnId ?? null, event.causationEventId ?? null, event.correlationId, event.source, event.audience ?? "client", JSON.stringify(event.payload), event.createdAt]);
         if (!inserted.rowCount) throw new Error(`event store insert returned no row for ${event.eventId}`);
         persisted.push(fromRow(inserted.rows[0]));
       }
@@ -125,19 +144,57 @@ export class EventStore {
 
   async channelHighWater(channels: string[]): Promise<Record<string, string>> {
     const result = await this.pool.query<{ stream_id: string; sequence: string | number }>(`SELECT stream_id, max(sequence)::text AS sequence
-      FROM event_store WHERE channel = ANY($1::text[]) GROUP BY stream_id`, [channels]);
+      FROM event_store WHERE channel = ANY($1::text[]) AND ${CLIENT_ONLY} GROUP BY stream_id`, [channels]);
     return Object.fromEntries(result.rows.map((row) => [row.stream_id, String(row.sequence)]));
   }
 
   /** High-water per stream, grouped by channel, so a tail can seed one channel without disturbing others. */
   async channelHighWaterByChannel(channels: string[]): Promise<Record<string, Record<string, string>>> {
     const result = await this.pool.query<{ channel: string; stream_id: string; sequence: string | number }>(`SELECT channel, stream_id, max(sequence)::text AS sequence
-      FROM event_store WHERE channel = ANY($1::text[]) GROUP BY channel, stream_id`, [channels]);
+      FROM event_store WHERE channel = ANY($1::text[]) AND ${CLIENT_ONLY} GROUP BY channel, stream_id`, [channels]);
     const grouped: Record<string, Record<string, string>> = {};
     for (const row of result.rows) (grouped[row.channel] ??= {})[row.stream_id] = String(row.sequence);
     return grouped;
   }
 
+  /**
+   * The tail of the log for a set of actions, rather than a set of channels.
+   *
+   * A dispatcher watches what *happened*, not who is listening, so it reads by
+   * action. The position key is still `(stream_id, sequence)` for the same
+   * reason the channel tail uses it: sequences are issued under the stream's
+   * row lock, so within a stream commit order is sequence order and a reader
+   * cannot step over a row that is about to appear.
+   */
+  async actionHighWater(actions: readonly string[]): Promise<Record<string, string>> {
+    const result = await this.pool.query<{ stream_id: string; sequence: string | number }>(`SELECT stream_id, max(sequence)::text AS sequence
+      FROM event_store WHERE action = ANY($1::text[]) AND ${FACTS_ONLY} GROUP BY stream_id`, [actions]);
+    return Object.fromEntries(result.rows.map((row) => [row.stream_id, String(row.sequence)]));
+  }
+
+  async readActions(actions: readonly string[], positions: Record<string, string>, highWater: Record<string, string>, limit: number): Promise<{ events: EventEnvelope[]; complete: boolean }> {
+    const result = await this.pool.query<StoredEventRow>(`WITH bounds AS (
+        SELECT high_water.key AS stream_id,
+          COALESCE(($2::jsonb ->> high_water.key)::bigint, 0) AS position,
+          high_water.value::bigint AS high_water
+        FROM jsonb_each_text($3::jsonb) AS high_water
+      )
+      SELECT ${QUALIFIED_COLUMNS} FROM bounds JOIN event_store ON event_store.stream_id = bounds.stream_id
+      WHERE action = ANY($1::text[]) AND ${FACTS_ONLY} AND sequence > bounds.position AND sequence <= bounds.high_water
+      ORDER BY event_store.stream_id, event_store.sequence LIMIT $4`, [actions, JSON.stringify(positions), JSON.stringify(highWater), limit + 1]);
+    return { events: result.rows.slice(0, limit).map(fromRow), complete: result.rows.length <= limit };
+  }
+
+  /** Where a named reader got to. Durable, so a restart does not replay the whole log. */
+  async readerPosition(name: string): Promise<Record<string, string>> {
+    const result = await this.pool.query<{ positions: Record<string, string> }>("SELECT positions FROM event_reader_cursor WHERE name = $1", [name]);
+    return result.rows[0]?.positions ?? {};
+  }
+
+  async saveReaderPosition(name: string, positions: Record<string, string>): Promise<void> {
+    await this.pool.query(`INSERT INTO event_reader_cursor (name, positions) VALUES ($1, $2::jsonb)
+      ON CONFLICT (name) DO UPDATE SET positions = EXCLUDED.positions, updated_at = now()`, [name, JSON.stringify(positions)]);
+  }
   async replayChannels(channels: string[], positions: Record<string, string>, highWater: Record<string, string>, limit: number): Promise<{ events: EventEnvelope[]; complete: boolean }> {
     const result = await this.pool.query<StoredEventRow>(`WITH bounds AS (
         SELECT high_water.key AS stream_id,
@@ -146,7 +203,7 @@ export class EventStore {
         FROM jsonb_each_text($3::jsonb) AS high_water
       )
       SELECT ${QUALIFIED_COLUMNS} FROM bounds JOIN event_store ON event_store.stream_id = bounds.stream_id
-      WHERE channel = ANY($1::text[]) AND sequence > bounds.position AND sequence <= bounds.high_water
+      WHERE channel = ANY($1::text[]) AND ${CLIENT_ONLY} AND sequence > bounds.position AND sequence <= bounds.high_water
       ORDER BY event_store.stream_id, event_store.sequence LIMIT $4`, [channels, JSON.stringify(positions), JSON.stringify(highWater), limit + 1]);
     return { events: result.rows.slice(0, limit).map(fromRow), complete: result.rows.length <= limit };
   }

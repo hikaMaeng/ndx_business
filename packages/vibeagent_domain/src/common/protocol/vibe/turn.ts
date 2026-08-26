@@ -32,8 +32,12 @@ export interface VibeTurnSubmission {
  */
 export interface TurnScoped { turnKey: string; seq: number }
 
+/** A step inside a turn. Everything after the prompt happens in one. */
+export interface IterationScoped extends TurnScoped { iterationIndex: number }
+
+export interface VibeTurnRequested extends TurnScoped { sessionKey: string; prompt: string }
 export interface VibeTurnStarted extends TurnScoped { prompt: string; sessionKey: string }
-export interface VibeIterationStarted extends TurnScoped { iterationIndex: number }
+export interface VibeIterationStarted extends IterationScoped {}
 
 /**
  * A slice of the model's chain of thought, not the whole of it.
@@ -42,20 +46,38 @@ export interface VibeIterationStarted extends TurnScoped { iterationIndex: numbe
  * concatenates them per `iterationIndex` — the same shape as a stdout chunk. A
  * single whole-text event is just the degenerate case of one slice.
  */
-export interface VibeIterationReasoning extends TurnScoped { iterationIndex: number; reasoning: string }
+export interface VibeIterationReasoning extends IterationScoped { reasoning: string }
 
 /** A slice of the model's reply. Concatenated per `iterationIndex`, like reasoning. */
-export interface VibeIterationMessage extends TurnScoped { iterationIndex: number; message: string }
+export interface VibeIterationMessage extends IterationScoped { message: string }
+
+/**
+ * The model answered.
+ *
+ * Its message is already in the session history — this fact says so, it does
+ * not carry it. `toolCalls` is a count, not the calls: whoever decides what
+ * happens next reads them from the history, so this fact stays small.
+ */
+export interface VibeModelReplied extends IterationScoped { toolCalls: number; answered: boolean }
+
+/** The model asked for exactly one command. One fact per call. */
+export interface VibeToolRequested extends IterationScoped { toolCallKey: string; toolCallId: string; command: string }
 
 export interface VibeToolStarted extends TurnScoped { toolCallKey: string; command: string }
 export interface VibeToolChunk extends TurnScoped { toolCallKey: string; chunk: string }
-export interface VibeToolCompleted extends TurnScoped { toolCallKey: string; exitCode: number | null; timedOut: boolean; durationMs: number }
-export interface VibeToolFailed extends TurnScoped { toolCallKey: string; error: string }
+
+/** This one command finished and its result is recorded in the session history. */
+export interface VibeToolCompleted extends IterationScoped { toolCallKey: string; exitCode: number | null; timedOut: boolean; durationMs: number }
+export interface VibeToolFailed extends IterationScoped { toolCallKey: string; error: string }
+
+/** Every tool call this iteration asked for now has a result. Nothing more is claimed. */
+export interface VibeIterationReady extends IterationScoped { toolCalls: number }
+
 export interface VibeTurnFinal extends TurnScoped { answer: string; stoppedBy?: VibeStopReason }
 
 export type VibeStopReason = "final" | "iteration_budget" | "error";
 
-/** `payload.value` of the broker's terminal result for a turn. */
+/** `payload.value` of the broker's terminal result for one reactor's work. */
 export interface VibeTurnOutcome {
   sessionKey: string;
   turnKey: string;
@@ -77,4 +99,14 @@ export function parseVibeTurnRequest(value: unknown): VibeTurnRequest | null {
   const prompt = text("prompt");
   if (!sessionKey || !turnKey || !userId || !prompt) return null;
   return { sessionKey, turnKey, userId, prompt };
+}
+
+/** The instruction a reactor needs: which turn, which iteration. Everything else is in the database. */
+export function parseIterationScope(value: unknown): { turnKey: string; iterationIndex: number } | null {
+  if (!value || typeof value !== "object") return null;
+  const input = value as Record<string, unknown>;
+  const turnKey = typeof input.turnKey === "string" && input.turnKey ? input.turnKey : null;
+  const iterationIndex = typeof input.iterationIndex === "number" && Number.isInteger(input.iterationIndex) && input.iterationIndex >= 0 ? input.iterationIndex : null;
+  if (!turnKey || iterationIndex === null) return null;
+  return { turnKey, iterationIndex };
 }

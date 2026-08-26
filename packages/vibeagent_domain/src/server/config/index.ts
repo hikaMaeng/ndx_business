@@ -1,4 +1,18 @@
-import type { LoopConfig } from "../loop/index.js";
+import type { LlmConfig } from "../llm/index.js";
+
+/**
+ * Everything a reactor needs from configuration.
+ *
+ * One object, because reactors are handed their state rather than reaching for
+ * it, and this is the half of that state every session shares.
+ */
+export interface LoopConfig extends LlmConfig {
+  workspaceRoot: string;
+  maxIterations: number;
+  toolTimeoutMs: number;
+  maxToolOutputBytes: number;
+  systemPrompt: string;
+}
 
 function required(source: NodeJS.ProcessEnv, name: string): string {
   const value = source[name];
@@ -21,6 +35,28 @@ function ratio(source: NodeJS.ProcessEnv, name: string, fallback: number): numbe
   if (!Number.isFinite(value) || value < 0 || value > 2) throw new Error(`${name} must be between 0 and 2`);
   return value;
 }
+
+/** Written once per session, when its history is still empty. */
+const SYSTEM_PROMPT = [
+  "You are a coding agent working inside a Linux workspace.",
+  "",
+  "You have exactly one tool: bash. Every action — creating directories, writing files,",
+  "reading them back, running checks — happens through a bash command. There is no",
+  "file-write tool; write files with a quoted heredoc, for example:",
+  "",
+  "  cat > index.html <<QUOTED_EOF",
+  "  ...contents...",
+  "  QUOTED_EOF",
+  "",
+  "using a real quoted delimiter such as single-quoted EOF.",
+  "",
+  "Rules:",
+  "- The working directory is already the session workspace. Use relative paths.",
+  "- Quote the heredoc delimiter so the shell does not expand $ or backticks in the file.",
+  "- After writing a file, read it back with cat to verify it landed correctly.",
+  "- Keep each command small and check its output before the next one.",
+  "- When the task is done and verified, reply with a short plain-text summary and no tool call.",
+].join("\n");
 
 /**
  * Inference defaults are tuned for code generation, not chat:
@@ -50,5 +86,6 @@ export function readLoopConfig(source: NodeJS.ProcessEnv = process.env): LoopCon
     maxIterations: positive(source, "VIBE_MAX_ITERATIONS", 24),
     toolTimeoutMs: positive(source, "VIBE_TOOL_TIMEOUT_MS", 120_000),
     maxToolOutputBytes: positive(source, "VIBE_TOOL_MAX_OUTPUT_BYTES", 200_000),
+    systemPrompt: source.VIBE_SYSTEM_PROMPT ?? SYSTEM_PROMPT,
   };
 }

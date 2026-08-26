@@ -1,15 +1,20 @@
 import express from "express";
 import { Pool } from "pg";
-import { readEnv, createEventBroker, createWorkerServer, runService, requireSession, createSessionVerifier, type AuthedRequest } from "agent/broker";
+import { readEnv, createEventBroker, createFactDispatcher, createWorkerServer, runService, requireSession, createSessionVerifier, type AuthedRequest } from "agent/broker";
 import { VIBE_COMMAND_ACTIONS, normaliseWorkspacePath } from "vibeagent_domain/common";
-import { createVibeWorker, ensureWorkspaceDirectory, listVibeSessions, listWorkspaceFolders, ownsVibeChannel } from "vibeagent_domain/server";
+import { createVibeWorker, ensureSessionSchema, ensureWorkspaceDirectory, listVibeSessions, listWorkspaceFolders, ownsVibeChannel } from "vibeagent_domain/server";
+import { REACTIONS, REACTOR_QUEUES, QUEUES, ingressQueueFor } from "./reactions.js";
 
 /**
- * vibeagent runs two services from one image, chosen by `AGENT_ROLE`.
+ * vibeagent runs three kinds of service from one image, chosen by `AGENT_ROLE`.
  *
- * The event broker arrives finished — this file connects it and launches it.
- * The worker server arrives as a frame, and the hole is filled with this
- * project's own router.
+ * The broker and the fact dispatcher arrive finished — this file connects them
+ * and launches them. The worker server arrives as a frame, and the hole is
+ * filled with this project's reactors.
+ *
+ * A worker server watches a list of queues, so one process can cover every
+ * reactor on a small deployment and a busy kind can be split onto its own
+ * process by naming only its queue. Nothing in a reactor changes either way.
  */
 const env = readEnv();
 const accountBaseUrl = process.env.VIBE_ACCOUNT_BASE_URL ?? "http://admin:18080";
@@ -19,29 +24,30 @@ if (env.role === "worker") {
   /**
    * Inline, not a thread pool.
    *
-   * A vibe turn is almost entirely waiting: an inference call, then a child
-   * process, then the next inference call. There is no CPU work to keep off the
-   * event loop, so a worker thread would only cap concurrency at `cpus × 2`
-   * while holding a V8 isolate per idle turn.
-   *
-   * The handler is a router with its own pool: a session's working folder is a
-   * fact in the log, so resolving it is a query.
+   * A reactor is almost entirely waiting: an inference call, or a child
+   * process. There is no CPU work to keep off the event loop, so a worker
+   * thread would only cap concurrency at `cpus × 2` while holding a V8 isolate
+   * per idle reaction.
    */
-  const workerPool = new Pool({ connectionString: env.databaseUrl, max: 6 });
+  const workerPool = new Pool({ connectionString: env.databaseUrl, max: 8 });
+  const watched = process.env.AGENT_QUEUES ? env.queues : REACTOR_QUEUES;
   await runService(createWorkerServer({
     execute: createVibeWorker(workerPool),
+    queues: watched,
     maxConcurrent: Number(process.env.VIBE_MAX_CONCURRENT_TURNS ?? 256),
   }));
+} else if (env.role === "dispatcher") {
+  await runService(createFactDispatcher({ name: "vibe", table: REACTIONS }));
 } else {
-  // Listing sessions and folders is domain work over this app's own storage, so
-  // it belongs here rather than in the broker. Its own small pool keeps it off
-  // the broker's connection budget.
   const readPool = new Pool({ connectionString: env.databaseUrl, max: 4 });
+  await ensureSessionSchema(readPool);
   const verifier = createSessionVerifier({ adminBaseUrl: accountBaseUrl, cacheMs: Number(process.env.VIBE_SESSION_CACHE_MS ?? 5_000) });
 
   await runService(createEventBroker({
     // Configuration, not implementation: the broker never learns what these do.
     allowedActions: VIBE_COMMAND_ACTIONS,
+    ingressQueueFor,
+    ingressQueues: [QUEUES.intake],
     accountBaseUrl,
     sessionCacheMs: Number(process.env.VIBE_SESSION_CACHE_MS ?? 5_000),
     replyChannelFor: (sessionId) => `vibe.${sessionId}`,

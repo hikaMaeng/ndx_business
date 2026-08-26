@@ -29,5 +29,11 @@ test("the log tail has an explicit fallback interval and batch size", () => {
 });
 
 test("router is no longer a role", () => {
-  assert.throws(() => readEnv({ AGENT_ROLE: "router" }), /AGENT_ROLE must be gateway or worker/);
+  assert.throws(() => readEnv({ AGENT_ROLE: "router" }), /AGENT_ROLE must be gateway, worker or dispatcher/);
+});
+
+test("a worker server is given a list of queues to watch, not one name", () => {
+  assert.deepEqual(readEnv({ AGENT_QUEUES: "a, b ,c" }).queues, ["a", "b", "c"]);
+  assert.deepEqual(readEnv({ AGENT_QUEUE: "solo" }).queues, ["solo"]);
+  assert.deepEqual(readEnv({}).queues, ["agent_requests"]);
 });

@@ -9,12 +9,13 @@
 export { createWebBackend, type WebBackendInput } from "./http/app.js";
 export { createSessionVerifier, requireSession, readBearer, type AuthenticatedUser, type AuthedRequest } from "./auth/index.js";
 export { createSocketPolicy, type SocketPolicyInput } from "./policy/index.js";
-export { createEventBroker, createWorkerServer, runService, type Service, type EventBrokerOptions, type WorkerServerOptions } from "./service/index.js";
+export { createEventBroker, createFactDispatcher, createWorkerServer, runService, type Service, type EventBrokerOptions, type FactDispatcherOptions, type WorkerServerOptions } from "./service/index.js";
 export { createDatabasePool, snapshotDatabasePool, type DatabasePoolSnapshot } from "./database.js";
 export { readEnv, type AgentEnv } from "./env.js";
 
 export { nextReadBackoff, wait } from "./loops/backoff.js";
 export { startEventLogTail, type BrokerLoop } from "./loops/log-tail.js";
+export { startFactDispatcher, type ReactionTable } from "./loops/fact-dispatcher.js";
 export { startWorkerConsumer, terminalPersistenceVisibilitySeconds } from "./loops/worker-consumer.js";
 
 export { CoalescedWakeup } from "./loops/notifier.js";

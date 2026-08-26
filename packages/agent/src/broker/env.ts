@@ -1,10 +1,19 @@
 import { cpus } from "node:os";
 
 export interface AgentEnv {
-  role: "gateway" | "worker";
+  role: "gateway" | "worker" | "dispatcher";
   port: number;
   databaseUrl: string;
+  /** Where client ingress is written. */
   queue: string;
+  /**
+   * The queues a worker server watches.
+   *
+   * A list, not a name: one process can watch several, and scaling a busy kind
+   * of work means running another process that watches only that one. Which
+   * queues exist and what they mean is the application's business.
+   */
+  queues: readonly string[];
   /** Instance label for logs and metrics only. Brokers are interchangeable, so it grants nothing. */
   gatewayId: string;
   visibilityTimeoutSeconds: number;
@@ -37,7 +46,7 @@ function positive(source: NodeJS.ProcessEnv, name: string, fallback: number, all
 
 export function readEnv(source = process.env): AgentEnv {
   const role = source.AGENT_ROLE ?? "gateway";
-  if (role !== "gateway" && role !== "worker") throw new Error("AGENT_ROLE must be gateway or worker");
+  if (role !== "gateway" && role !== "worker" && role !== "dispatcher") throw new Error("AGENT_ROLE must be gateway, worker or dispatcher");
   const cpuCount = cpus().length;
   const maxWorkerThreads = positive(source, "AGENT_MAX_THREADS", cpuCount * 2, false);
   const minWorkerThreads = positive(source, "AGENT_MIN_THREADS", maxWorkerThreads);
@@ -49,6 +58,8 @@ export function readEnv(source = process.env): AgentEnv {
     port: positive(source, "PORT", 18081),
     databaseUrl: source.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/ndx_business",
     queue: source.AGENT_QUEUE ?? "agent_requests",
+    queues: (source.AGENT_QUEUES ?? source.AGENT_QUEUE ?? "agent_requests")
+      .split(",").map((name) => name.trim()).filter((name) => name.length > 0),
     gatewayId: source.AGENT_GATEWAY_ID ?? source.HOSTNAME ?? globalThis.crypto.randomUUID(),
     visibilityTimeoutSeconds,
     // The execution fence must outlive a single PGMQ visibility lease so a visibility probe

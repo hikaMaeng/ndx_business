@@ -10,3 +10,5 @@ vibeagent는 bash 하나만 도구로 쓰는 코딩 에이전트 서비스다. �
 | 재시도·중복·구독 처리 원리 | [내부 동작](docs/internals.md) |
 | 테스트와 운영 검증 기준 | [테스트](docs/testing.md) |
 | 코딩 에이전트 도메인 이벤트 설계 | [코딩 에이전트 이벤트](docs/coding-agent-events.md) |
+| 제어 없는 반응기 분해와 반응표 | [이벤트 머신](docs/event-machine.md) |
+| 한 턴이 이벤트로 오가는 순서 | [턴 시퀀스](docs/turn-sequence.md) |

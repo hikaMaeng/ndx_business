@@ -75,6 +75,27 @@ services:
       - ${VIBE_WORKSPACE_HOST_DIR:-./workspace}:/workspace
     networks:
       - ndx-business_internal
+  # Turns recorded facts into work for reactors, per the reaction table.
+  # It is the only thing that knows which reaction follows which fact; the
+  # workers and the broker read nothing of it.
+  vibeagent-dispatcher:
+    build:
+      context: .
+      dockerfile: apps/vibeagent/docker/Dockerfile
+    image: ndx-business-vibeagent:latest
+    init: true
+    restart: unless-stopped
+    env_file:
+      - path: apps/vibeagent/docker/.env
+        required: false
+    environment:
+      AGENT_ROLE: dispatcher
+    depends_on:
+      admin:
+        condition: service_healthy
+    networks:
+      - ndx-business_internal
+
   # A second broker, to show they are interchangeable: it claims nothing, is
   # granted nothing, and tails the same log as the first.
   vibeagent-gateway-b:

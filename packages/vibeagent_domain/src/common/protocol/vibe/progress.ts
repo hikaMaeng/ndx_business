@@ -1,4 +1,4 @@
-import { VIBE_ACTIONS, VIBE_SESSION_SCOPED_ACTIONS, isVibeAction, type VibeAction } from "./actions.js";
+import { VIBE_ACTIONS, VIBE_SESSION_SCOPED_ACTIONS, isVibeClientAction, type VibeClientAction } from "./actions.js";
 import type { VibeSessionOpened } from "./session.js";
 import type {
   VibeIterationMessage, VibeIterationReasoning, VibeIterationStarted,
@@ -6,7 +6,13 @@ import type {
   VibeTurnFinal, VibeTurnStarted,
 } from "./turn.js";
 
-/** Every fact the worker appends, keyed by its action. One map, both sides. */
+/**
+ * Every fact a client renders, keyed by its action. One map, both sides.
+ *
+ * Worker-to-worker facts are deliberately absent. A client cannot receive one —
+ * the broker never reads them — so requiring it to know their shape would be
+ * asking it to prepare for something that cannot happen.
+ */
 export interface VibeProgressMap {
   [VIBE_ACTIONS.sessionOpened]: VibeSessionOpened;
   [VIBE_ACTIONS.turnStarted]: VibeTurnStarted;
@@ -22,7 +28,7 @@ export interface VibeProgressMap {
 }
 
 /** A fact as it appears on the wire: its action plus that action's payload. */
-export type VibeProgressEvent = { [K in VibeAction]: { action: K } & VibeProgressMap[K] }[VibeAction];
+export type VibeProgressEvent = { [K in VibeClientAction]: { action: K } & VibeProgressMap[K] }[VibeClientAction];
 
 /**
  * Narrows a received event to the agreed shape.
@@ -32,7 +38,7 @@ export type VibeProgressEvent = { [K in VibeAction]: { action: K } & VibeProgres
  * are exempt from that check.
  */
 export function parseVibeProgressEvent(action: string, payload: Record<string, unknown>): VibeProgressEvent | null {
-  if (!isVibeAction(action)) return null;
+  if (!isVibeClientAction(action)) return null;
   if (VIBE_SESSION_SCOPED_ACTIONS.has(action)) return { ...payload, action } as VibeProgressEvent;
   if (typeof payload.turnKey !== "string" || !payload.turnKey) return null;
   return { ...payload, action } as VibeProgressEvent;
