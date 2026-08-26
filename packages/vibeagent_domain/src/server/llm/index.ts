@@ -1,10 +1,15 @@
 /**
- * Minimal OpenAI-compatible chat client.
+ * Minimal OpenAI-compatible chat client, streaming.
  *
  * Written against the deployed endpoint's actual behaviour rather than the
  * generic spec: this model is a reasoning model that returns its chain in a
  * separate `reasoning_content` field and leaves `content` empty on a tool call.
  * Treating an empty `content` as "no answer" would end every turn early.
+ *
+ * It streams because inference is where a turn spends most of its wall clock.
+ * A non-streaming call makes the whole model response one silent block — the
+ * turn loop emits bash output while a command runs, then goes quiet for the
+ * far longer stretch it spends waiting on the model. Deltas close that gap.
  */
 
 export interface ChatToolCall {
@@ -24,6 +29,14 @@ export interface ChatReply {
   reasoning: string;
   toolCalls: ChatToolCall[];
   finishReason: string;
+  /** False when the endpoint answered in one block, so the caller can emit the whole text itself. */
+  streamed: boolean;
+}
+
+/** A coalesced slice of the model's output. Never a whole message. */
+export interface ChatDelta {
+  content?: string;
+  reasoning?: string;
 }
 
 export interface LlmConfig {
@@ -35,10 +48,23 @@ export interface LlmConfig {
   topP: number;
   maxTokens: number;
   requestTimeoutMs: number;
+  /**
+   * How long deltas accumulate before one is emitted.
+   *
+   * Per-token events would be the most responsive and the most expensive: every
+   * one becomes a durable row and a socket frame. This buys back most of the
+   * responsiveness at a fraction of the volume.
+   */
+  streamFlushMs: number;
 }
 
-interface RawChoice {
-  finish_reason?: string;
+interface StreamChoice {
+  finish_reason?: string | null;
+  delta?: {
+    content?: string | null;
+    reasoning_content?: string | null;
+    tool_calls?: Array<{ index?: number; id?: string; type?: string; function?: { name?: string; arguments?: string } }> | null;
+  };
   message?: { content?: string | null; reasoning_content?: string | null; tool_calls?: ChatToolCall[] | null };
 }
 
@@ -46,13 +72,20 @@ function textOf(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-export async function chat(config: LlmConfig, messages: ChatMessage[], tools: unknown[], signal?: AbortSignal): Promise<ChatReply> {
+export async function chat(
+  config: LlmConfig,
+  messages: ChatMessage[],
+  tools: unknown[],
+  signal?: AbortSignal,
+  onDelta?: (delta: ChatDelta) => void,
+): Promise<ChatReply> {
   const timeout = AbortSignal.timeout(config.requestTimeoutMs);
   const composed = signal ? AbortSignal.any([signal, timeout]) : timeout;
   const response = await fetch(`${config.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
+      accept: "text/event-stream",
       ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}),
     },
     body: JSON.stringify({
@@ -62,7 +95,7 @@ export async function chat(config: LlmConfig, messages: ChatMessage[], tools: un
       temperature: config.temperature,
       top_p: config.topP,
       max_tokens: config.maxTokens,
-      stream: false,
+      stream: true,
     }),
     signal: composed,
   });
@@ -71,15 +104,100 @@ export async function chat(config: LlmConfig, messages: ChatMessage[], tools: un
     const body = await response.text().catch(() => "");
     throw new Error(`inference endpoint returned ${response.status}: ${body.slice(0, 500)}`);
   }
+  if (!response.body) throw new Error("inference endpoint returned no body");
 
-  const payload = await response.json() as { choices?: RawChoice[] };
-  const choice = payload.choices?.[0];
-  if (!choice) throw new Error("inference endpoint returned no choices");
+  let content = "";
+  let reasoning = "";
+  let finishReason = "";
+  let streamed = false;
+  // Tool calls arrive as fragments identified by index; arguments accumulate.
+  const toolCalls = new Map<number, ChatToolCall>();
+
+  let pendingContent = "";
+  let pendingReasoning = "";
+  let lastFlush = Date.now();
+  const flush = (force: boolean): void => {
+    if (!pendingContent && !pendingReasoning) return;
+    if (!force && Date.now() - lastFlush < config.streamFlushMs) return;
+    if (onDelta) {
+      onDelta({
+        ...(pendingContent ? { content: pendingContent } : {}),
+        ...(pendingReasoning ? { reasoning: pendingReasoning } : {}),
+      });
+      streamed = true;
+    }
+    pendingContent = "";
+    pendingReasoning = "";
+    lastFlush = Date.now();
+  };
+
+  const applyChoice = (choice: StreamChoice): void => {
+    if (choice.finish_reason) finishReason = choice.finish_reason;
+    // A server that ignores `stream` answers with a whole message instead.
+    if (choice.message) {
+      content += textOf(choice.message.content);
+      reasoning += textOf(choice.message.reasoning_content);
+      if (Array.isArray(choice.message.tool_calls)) {
+        choice.message.tool_calls.forEach((call, index) => toolCalls.set(index, call));
+      }
+      return;
+    }
+    const delta = choice.delta;
+    if (!delta) return;
+    const contentPart = textOf(delta.content);
+    const reasoningPart = textOf(delta.reasoning_content);
+    if (contentPart) { content += contentPart; pendingContent += contentPart; }
+    if (reasoningPart) { reasoning += reasoningPart; pendingReasoning += reasoningPart; }
+    for (const part of delta.tool_calls ?? []) {
+      const index = typeof part.index === "number" ? part.index : 0;
+      const existing = toolCalls.get(index) ?? { id: "", type: "function" as const, function: { name: "", arguments: "" } };
+      toolCalls.set(index, {
+        id: part.id ?? existing.id,
+        type: "function",
+        function: {
+          name: part.function?.name ?? existing.function.name,
+          arguments: existing.function.arguments + (part.function?.arguments ?? ""),
+        },
+      });
+    }
+  };
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      // Each SSE `data:` line here carries one complete JSON frame, so lines are
+      // a sufficient boundary; the trailing partial stays in the buffer.
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const raw of lines) {
+        const line = raw.trim();
+        if (!line.startsWith("data:")) continue;
+        const data = line.slice(5).trim();
+        if (!data || data === "[DONE]") continue;
+        let frame: { choices?: StreamChoice[] };
+        try { frame = JSON.parse(data) as { choices?: StreamChoice[] }; } catch { continue; }
+        const choice = frame.choices?.[0];
+        if (choice) applyChoice(choice);
+      }
+      flush(false);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  flush(true);
+
+  if (!content && !reasoning && !toolCalls.size) throw new Error("inference endpoint returned no choices");
 
   return {
-    content: textOf(choice.message?.content),
-    reasoning: textOf(choice.message?.reasoning_content),
-    toolCalls: Array.isArray(choice.message?.tool_calls) ? choice.message!.tool_calls! : [],
-    finishReason: textOf(choice.finish_reason),
+    content,
+    reasoning,
+    toolCalls: [...toolCalls.entries()].sort(([left], [right]) => left - right).map(([, call]) => call),
+    finishReason,
+    streamed,
   };
 }

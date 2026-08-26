@@ -73,6 +73,13 @@ export function startWorkerConsumer(input: { queue: EventQueueTransport; command
         // a client that reconnects mid-execution replays it from the event store.
         // Progress is best-effort: losing one must not fail an otherwise healthy
         // execution, so the append error is logged and swallowed.
+        //
+        // These appends run in parallel and are deliberately not ordered here.
+        // Commit order does not agree with emit order — each append races for
+        // the `event_stream_sequence` row — and nothing downstream needs it to.
+        // A handler that emits a burst numbers it, and each reader puts a late
+        // arrival back in place. Serialising the writes to buy an ordering
+        // guarantee no one relies on would only add latency to a stream.
         let progressSeq = 0;
         const onProgress = (progress: Record<string, unknown>): void => {
           const seq = progressSeq++;

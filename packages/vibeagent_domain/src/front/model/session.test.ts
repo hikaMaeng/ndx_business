@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { EventEnvelope } from "agent/common";
 import { VibeSessionModel } from "./session.js";
+import { textOf, toolsOf } from "./state.js";
 import { VIBE_ACTIONS } from "../../common/index.js";
 
 let seq = 0;
@@ -22,9 +23,9 @@ test("tool output accumulates across streamed chunks", () => {
   instance.apply(progress(VIBE_ACTIONS.toolStarted, { turnKey: "t1", toolCallKey: "c1", command: "ls" }));
   instance.apply(progress(VIBE_ACTIONS.toolStdout, { turnKey: "t1", toolCallKey: "c1", chunk: "one\n" }));
   instance.apply(progress(VIBE_ACTIONS.toolStdout, { turnKey: "t1", toolCallKey: "c1", chunk: "two\n" }));
-  const tool = instance.getSnapshot().turns[0]!.tools[0]!;
+  const tool = toolsOf(instance.getSnapshot().turns[0]!)[0]!;
   assert.equal(tool.command, "ls");
-  assert.equal(tool.stdout, "one\ntwo\n");
+  assert.equal(textOf(tool.stdout), "one\ntwo\n");
 });
 
 test("a redelivered event is absorbed instead of doubling the transcript", () => {
@@ -32,13 +33,13 @@ test("a redelivered event is absorbed instead of doubling the transcript", () =>
   const chunk = progress(VIBE_ACTIONS.toolStdout, { turnKey: "t1", toolCallKey: "c1", chunk: "once\n" }, "same-id");
   instance.apply(chunk);
   instance.apply(chunk);
-  assert.equal(instance.getSnapshot().turns[0]!.tools[0]!.stdout, "once\n");
+  assert.equal(textOf(toolsOf(instance.getSnapshot().turns[0]!)[0]!.stdout), "once\n");
 });
 
 test("an event without a turn key is dropped rather than guessed at", () => {
   const instance = model();
   instance.apply(progress(VIBE_ACTIONS.toolStdout, { toolCallKey: "c1", chunk: "orphan" }));
-  assert.equal(instance.getSnapshot().turns[0]!.tools.length, 0);
+  assert.equal(toolsOf(instance.getSnapshot().turns[0]!).length, 0);
 });
 
 test("only the terminal result closes a turn", () => {
@@ -66,7 +67,7 @@ test("a replayed session materialises turns the model never submitted", () => {
   const turn = instance.getSnapshot().turns[0]!;
   assert.equal(turn.turnKey, "old");
   assert.equal(turn.prompt, "build a calculator");
-  assert.equal(turn.tools[0]!.exitCode, 0);
+  assert.equal(toolsOf(turn)[0]!.exitCode, 0);
 });
 
 test("replayed events that arrive before turn.started still land on the right turn", () => {
@@ -75,5 +76,5 @@ test("replayed events that arrive before turn.started still land on the right tu
   instance.apply(progress(VIBE_ACTIONS.turnStarted, { turnKey: "old", sessionKey: "s", prompt: "late title" }));
   const turn = instance.getSnapshot().turns[0]!;
   assert.equal(turn.prompt, "late title");
-  assert.equal(turn.tools[0]!.stdout, "early\n");
+  assert.equal(textOf(toolsOf(turn)[0]!.stdout), "early\n");
 });

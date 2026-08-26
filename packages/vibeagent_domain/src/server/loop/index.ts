@@ -1,4 +1,3 @@
-import path from "node:path";
 import { VIBE_ACTIONS, type VibeTurnOutcome, type VibeTurnRequest } from "../../common/index.js";
 import { chat, type ChatMessage, type LlmConfig } from "../llm/index.js";
 import { BASH_TOOL_SCHEMA, runBash } from "../tools/bash/index.js";
@@ -11,6 +10,18 @@ export interface LoopConfig extends LlmConfig {
 }
 
 export type Emit = (payload: Record<string, unknown>) => void;
+
+/**
+ * Where this turn works.
+ *
+ * Passed in rather than derived, because a session's folder is an independent
+ * property fixed when the session opened. `relative` is what the transcript
+ * records; `directory` is the resolved path and stays on the server.
+ */
+export interface TurnWorkspace {
+  relative: string;
+  directory: string;
+}
 
 const SYSTEM_PROMPT = [
   "You are a coding agent working inside a Linux workspace.",
@@ -45,13 +56,9 @@ function summariseForModel(result: { exitCode: number | null; stdout: string; st
  * Every observation is emitted as a durable broker event, so a client that
  * reconnects mid-turn replays the whole transcript instead of seeing a gap.
  */
-export async function runTurn(request: VibeTurnRequest, config: LoopConfig, emit: Emit, signal: AbortSignal): Promise<VibeTurnOutcome> {
-  // One directory per session so consecutive turns build on each other, and a
-  // session can never reach another session's files.
-  const workspace = path.join(config.workspaceRoot, request.sessionKey);
-
-  // The workspace path is a server-side detail. The event says which session it
-  // belongs to; where that session's files live is derived, not announced.
+export async function runTurn(request: VibeTurnRequest, config: LoopConfig, workspace: TurnWorkspace, emit: Emit, signal: AbortSignal): Promise<VibeTurnOutcome> {
+  // The absolute path stays on the server. The event names the session; which
+  // folder it works in was fixed when the session opened.
   emit({ action: VIBE_ACTIONS.turnStarted, sessionKey: request.sessionKey, turnKey: request.turnKey, prompt: request.prompt });
 
   const messages: ChatMessage[] = [
@@ -66,20 +73,27 @@ export async function runTurn(request: VibeTurnRequest, config: LoopConfig, emit
     if (signal.aborted) throw new Error("turn aborted");
     emit({ action: VIBE_ACTIONS.iterationStarted, turnKey: request.turnKey, iterationIndex: iteration });
 
-    const reply = await chat(config, messages, [BASH_TOOL_SCHEMA], signal);
+    // Inference is where a turn spends most of its wall clock, so its output
+    // is emitted as it arrives rather than after it finishes. Each delta is a
+    // slice, not a whole message — the client concatenates per iteration, the
+    // same way it already concatenates bash stdout.
+    const reply = await chat(config, messages, [BASH_TOOL_SCHEMA], signal, (delta) => {
+      if (delta.reasoning) emit({ action: VIBE_ACTIONS.iterationReasoning, turnKey: request.turnKey, iterationIndex: iteration, reasoning: delta.reasoning });
+      if (delta.content) emit({ action: VIBE_ACTIONS.iterationMessage, turnKey: request.turnKey, iterationIndex: iteration, message: delta.content });
+    });
 
-    if (reply.reasoning.trim()) {
-      emit({ action: VIBE_ACTIONS.iterationReasoning, turnKey: request.turnKey, iterationIndex: iteration, reasoning: reply.reasoning });
-    }
-    if (reply.content.trim()) {
-      emit({ action: VIBE_ACTIONS.iterationMessage, turnKey: request.turnKey, iterationIndex: iteration, message: reply.content });
+    // An endpoint that ignored `stream` answered in one block; emit it whole so
+    // the transcript is the same either way.
+    if (!reply.streamed) {
+      if (reply.reasoning.trim()) emit({ action: VIBE_ACTIONS.iterationReasoning, turnKey: request.turnKey, iterationIndex: iteration, reasoning: reply.reasoning });
+      if (reply.content.trim()) emit({ action: VIBE_ACTIONS.iterationMessage, turnKey: request.turnKey, iterationIndex: iteration, message: reply.content });
     }
 
     // No tool call means the model is answering, which is the only clean exit.
     if (!reply.toolCalls.length) {
       const answer = reply.content.trim() || reply.reasoning.trim();
       emit({ action: VIBE_ACTIONS.turnFinal, turnKey: request.turnKey, answer });
-      return { sessionKey: request.sessionKey, turnKey: request.turnKey, iterations: iteration + 1, toolCalls, answer, stoppedBy: "final" };
+      return { sessionKey: request.sessionKey, turnKey: request.turnKey, workspace: workspace.relative, iterations: iteration + 1, toolCalls, answer, stoppedBy: "final" };
     }
 
     messages.push({ role: "assistant", content: reply.content, tool_calls: reply.toolCalls });
@@ -103,7 +117,7 @@ export async function runTurn(request: VibeTurnRequest, config: LoopConfig, emit
       emit({ action: VIBE_ACTIONS.toolStarted, turnKey: request.turnKey, toolCallKey, command });
 
       const result = await runBash(command, {
-        workspace,
+        workspace: workspace.directory,
         timeoutMs: config.toolTimeoutMs,
         maxOutputBytes: config.maxToolOutputBytes,
         signal,
@@ -122,5 +136,5 @@ export async function runTurn(request: VibeTurnRequest, config: LoopConfig, emit
 
   const answer = "Stopped: reached the iteration budget before the model produced a final answer.";
   emit({ action: VIBE_ACTIONS.turnFinal, turnKey: request.turnKey, answer, stoppedBy: "iteration_budget" });
-  return { sessionKey: request.sessionKey, turnKey: request.turnKey, iterations: iteration, toolCalls, answer, stoppedBy: "iteration_budget" };
+  return { sessionKey: request.sessionKey, turnKey: request.turnKey, workspace: workspace.relative, iterations: iteration, toolCalls, answer, stoppedBy: "iteration_budget" };
 }

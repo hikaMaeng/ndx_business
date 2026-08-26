@@ -32,6 +32,9 @@ function ratio(source: NodeJS.ProcessEnv, name: string, fallback: number): numbe
  * - `maxTokens 8192` — this is a reasoning model; it spends tokens on
  *   `reasoning_content` before emitting a tool call, so a small budget truncates
  *   mid-thought and returns nothing usable.
+ * - `streamFlushMs 120` — deltas are coalesced before they become events. Per
+ *   token would be the most responsive and the most expensive, since every one
+ *   becomes a durable row and a socket frame.
  */
 export function readLoopConfig(source: NodeJS.ProcessEnv = process.env): LoopConfig {
   return {
@@ -42,6 +45,7 @@ export function readLoopConfig(source: NodeJS.ProcessEnv = process.env): LoopCon
     topP: ratio(source, "VIBE_INFERENCE_TOP_P", 0.9),
     maxTokens: positive(source, "VIBE_INFERENCE_MAX_TOKENS", 8192),
     requestTimeoutMs: positive(source, "VIBE_INFERENCE_TIMEOUT_MS", 300_000),
+    streamFlushMs: positive(source, "VIBE_INFERENCE_STREAM_FLUSH_MS", 120),
     workspaceRoot: source.VIBE_WORKSPACE_ROOT ?? "/workspace",
     maxIterations: positive(source, "VIBE_MAX_ITERATIONS", 24),
     toolTimeoutMs: positive(source, "VIBE_TOOL_TIMEOUT_MS", 120_000),

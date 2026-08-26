@@ -1,50 +1,29 @@
 import type { EventEnvelope } from "agent/common";
-import { VIBE_ACTIONS, parseVibeProgressEvent, type VibeProgressEvent, type VibeTurnOutcome } from "../../common/index.js";
-
-export type TurnPhase = "idle" | "running" | "done" | "failed";
-
-export interface ToolRun {
-  toolCallKey: string;
-  command: string;
-  stdout: string;
-  stderr: string;
-  exitCode: number | null;
-  timedOut: boolean;
-  durationMs: number;
-  done: boolean;
-}
-
-export interface TurnView {
-  turnKey: string;
-  prompt: string;
-  phase: TurnPhase;
-  reasoning: string[];
-  messages: string[];
-  tools: ToolRun[];
-  answer: string;
-  error: string;
-}
-
-export interface VibeSnapshot {
-  sessionId: string;
-  userEmail: string;
-  turns: TurnView[];
-}
+import { parseVibeProgressEvent, type VibeTurnOutcome } from "../../common/index.js";
+import { REDUCERS, patchTurn } from "./reducers/index.js";
+import { EMPTY_SNAPSHOT, emptyTurn, type VibeSnapshot } from "./state.js";
 
 type Listener = () => void;
 
 /**
- * Folds the vibe coding event stream into what a screen shows.
+ * The impure half of the client.
  *
- * This is domain work, not transport: the broker hands over envelopes and has
- * no opinion about turns, tools or answers. Every field here comes from an
- * event defined in `common/protocol/vibe`, the same file the worker emits
- * against, so the two cannot drift without a compile error.
+ * It owns the things a reducer must never touch — the current snapshot, the
+ * listeners to notify, and the set of events already seen — and does one thing
+ * with an arriving envelope: look up its reducer and apply it.
+ *
+ * Interpretation lives in `reducers/`, one pure function per event. This class
+ * is the context they run in.
  */
 export class VibeSessionModel {
-  private snapshot: VibeSnapshot = { sessionId: "", userEmail: "", turns: [] };
+  private snapshot: VibeSnapshot = EMPTY_SNAPSHOT;
   private readonly listeners = new Set<Listener>();
   private readonly seenEventIds = new Set<string>();
+  /**
+   * Stands in for `seq` on events recorded before emitters numbered them.
+   * Arrival order is the best guess available for those, and only for those.
+   */
+  private legacySeq = 0;
 
   getSnapshot(): VibeSnapshot { return this.snapshot; }
 
@@ -53,41 +32,24 @@ export class VibeSessionModel {
     return () => { this.listeners.delete(listener); };
   }
 
-  private commit(next: Partial<VibeSnapshot>): void {
-    this.snapshot = { ...this.snapshot, ...next };
+  private commit(next: VibeSnapshot): void {
+    if (next === this.snapshot) return;
+    this.snapshot = next;
     this.listeners.forEach((listener) => listener());
   }
 
-  setIdentity(sessionId: string, userEmail: string): void { this.commit({ sessionId, userEmail }); }
-  reset(): void { this.seenEventIds.clear(); this.commit({ sessionId: "", userEmail: "", turns: [] }); }
+  setIdentity(sessionId: string, userEmail: string): void { this.commit({ ...this.snapshot, sessionId, userEmail }); }
+  setWorkspace(workspace: string): void { this.commit({ ...this.snapshot, workspace, sessionError: "" }); }
 
+  reset(): void {
+    this.seenEventIds.clear();
+    this.legacySeq = 0;
+    this.commit(EMPTY_SNAPSHOT);
+  }
+
+  /** Shows a submitted turn immediately, before its first event comes back. */
   startTurn(turnKey: string, prompt: string): void {
-    this.commit({ turns: [...this.snapshot.turns, { turnKey, prompt, phase: "running", reasoning: [], messages: [], tools: [], answer: "", error: "" }] });
-  }
-
-  /**
-   * Upserts, because a turn can appear two ways.
-   *
-   * Submitting one creates it locally first. Replaying a past session does not:
-   * the events arrive for turns this model has never seen, and the ordering of
-   * a replay is not guaranteed to put `turn.started` first. Dropping events
-   * whose turn is absent would make history invisible, which is exactly what
-   * reopening a session is for.
-   */
-  private patchTurn(turnKey: string, patch: (turn: TurnView) => TurnView): void {
-    const existing = this.snapshot.turns.find((turn) => turn.turnKey === turnKey);
-    if (!existing) {
-      const created: TurnView = { turnKey, prompt: "", phase: "running", reasoning: [], messages: [], tools: [], answer: "", error: "" };
-      this.commit({ turns: [...this.snapshot.turns, patch(created)] });
-      return;
-    }
-    this.commit({ turns: this.snapshot.turns.map((turn) => (turn.turnKey === turnKey ? patch(turn) : turn)) });
-  }
-
-  private upsertTool(turn: TurnView, toolCallKey: string, mutate: (tool: ToolRun) => ToolRun): TurnView {
-    const existing = turn.tools.find((tool) => tool.toolCallKey === toolCallKey);
-    const next = mutate(existing ?? { toolCallKey, command: "", stdout: "", stderr: "", exitCode: null, timedOut: false, durationMs: 0, done: false });
-    return { ...turn, tools: existing ? turn.tools.map((tool) => (tool.toolCallKey === toolCallKey ? next : tool)) : [...turn.tools, next] };
+    this.commit({ ...this.snapshot, turns: [...this.snapshot.turns, emptyTurn(turnKey, prompt)] });
   }
 
   /**
@@ -103,46 +65,49 @@ export class VibeSessionModel {
 
     if (envelope.kind === "result" || envelope.kind === "failure") { this.applyTerminal(envelope); return; }
     const event = parseVibeProgressEvent(envelope.action, envelope.payload);
-    if (event) this.applyProgress(event);
+    if (!event) return;
+    const positioned = typeof (event as { seq?: unknown }).seq === "number" ? event : { ...event, seq: this.legacySeq };
+    this.legacySeq += 1;
+    const reduce = REDUCERS[event.action] as (snapshot: VibeSnapshot, payload: unknown) => VibeSnapshot;
+    this.commit(reduce(this.snapshot, positioned));
   }
 
-  private applyProgress(event: VibeProgressEvent): void {
-    switch (event.action) {
-      case VIBE_ACTIONS.turnStarted:
-        // The only event carrying the prompt, so a replayed turn gets its title here.
-        return this.patchTurn(event.turnKey, (turn) => ({ ...turn, prompt: turn.prompt || event.prompt }));
-      case VIBE_ACTIONS.iterationReasoning:
-        return this.patchTurn(event.turnKey, (turn) => ({ ...turn, reasoning: [...turn.reasoning, event.reasoning] }));
-      case VIBE_ACTIONS.iterationMessage:
-        return this.patchTurn(event.turnKey, (turn) => ({ ...turn, messages: [...turn.messages, event.message] }));
-      case VIBE_ACTIONS.toolStarted:
-        return this.patchTurn(event.turnKey, (turn) => this.upsertTool(turn, event.toolCallKey, (tool) => ({ ...tool, command: event.command })));
-      case VIBE_ACTIONS.toolStdout:
-        return this.patchTurn(event.turnKey, (turn) => this.upsertTool(turn, event.toolCallKey, (tool) => ({ ...tool, stdout: tool.stdout + event.chunk })));
-      case VIBE_ACTIONS.toolStderr:
-        return this.patchTurn(event.turnKey, (turn) => this.upsertTool(turn, event.toolCallKey, (tool) => ({ ...tool, stderr: tool.stderr + event.chunk })));
-      case VIBE_ACTIONS.toolCompleted:
-        return this.patchTurn(event.turnKey, (turn) => this.upsertTool(turn, event.toolCallKey, (tool) => ({ ...tool, done: true, exitCode: event.exitCode, timedOut: event.timedOut, durationMs: event.durationMs })));
-      case VIBE_ACTIONS.toolFailed:
-        return this.patchTurn(event.turnKey, (turn) => this.upsertTool(turn, event.toolCallKey, (tool) => ({ ...tool, done: true, stderr: `${tool.stderr}${event.error}\n` })));
-      case VIBE_ACTIONS.turnFinal:
-        return this.patchTurn(event.turnKey, (turn) => ({ ...turn, answer: event.answer }));
-      default:
-        return;
-    }
-  }
-
-  /** Only the broker's terminal result closes a turn; a final-answer progress event does not. */
+  /**
+   * A step's terminal result.
+   *
+   * Only the broker's terminal closes a turn; a final-answer fact does not.
+   * A failed `vibe.session.open` also lands here, which is how a client learns
+   * its folder was refused.
+   */
   private applyTerminal(envelope: EventEnvelope): void {
     const payload = envelope.payload as { ok?: unknown; value?: unknown; error?: { message?: unknown } };
     const ok = payload.ok === true;
-    const outcome = ok ? payload.value as VibeTurnOutcome | undefined : undefined;
+    const outcome = ok ? payload.value as Partial<VibeTurnOutcome> | undefined : undefined;
     const error = typeof payload.error?.message === "string" ? payload.error.message : "";
-    this.patchTurn(envelope.transactionKey, (turn) => ({
+    if (outcome?.workspace) this.setWorkspace(outcome.workspace);
+
+    // Which turn does this close? The envelope says so when it can, the outcome
+    // names one when it has one, and otherwise a turn already on screen under
+    // this transaction is the answer — that is the live case, where the client
+    // created the turn when it submitted it.
+    const belongsToTurn = Boolean(envelope.turnId)
+      || Boolean(outcome?.turnKey)
+      || this.snapshot.turns.some((turn) => turn.turnKey === envelope.transactionKey);
+
+    // A session-open result belongs to no turn. Success is already carried by
+    // the `session.opened` fact, so only a refusal needs surfacing here — and
+    // it has to be surfaced, or a rejected folder would look like nothing
+    // happening at all.
+    if (!belongsToTurn) {
+      if (!ok) this.commit({ ...this.snapshot, sessionError: error || "세션을 열지 못했습니다." });
+      return;
+    }
+    this.commit(patchTurn(this.snapshot, envelope.transactionKey, (turn) => ({
       ...turn,
       phase: ok ? "done" : "failed",
       error: ok ? "" : error,
       answer: turn.answer || outcome?.answer || "",
-    }));
+    })));
   }
 }
+
