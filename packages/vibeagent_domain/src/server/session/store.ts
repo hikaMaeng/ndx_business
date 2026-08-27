@@ -122,9 +122,16 @@ export class SessionStore {
 
       for (const message of messages) {
         ordinal += 1;
+        // `DO NOTHING`, not an upsert: if this message is already here, a
+        // previous attempt at this same step wrote it and everything
+        // downstream has already read that version. The first write is the one
+        // the conversation was built on, so the retry defers to it rather than
+        // replacing it. Skipping leaves a gap in `ordinal`, which costs
+        // nothing — ordinals are compared, not counted.
         await client.query(
           `INSERT INTO vibe_session_message (session_key, ordinal, turn_key, iteration_index, role, content, tool_calls, tool_call_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8)`,
+           VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8)
+           ON CONFLICT DO NOTHING`,
           [
             sessionKey, ordinal, message.turnKey ?? null, message.iterationIndex ?? null,
             message.role, message.content ?? "",
@@ -136,6 +143,24 @@ export class SessionStore {
       await client.query("COMMIT");
     } catch (error) { await client.query("ROLLBACK"); throw error; }
     finally { client.release(); }
+  }
+
+  /**
+   * Claims the right to declare one iteration finished. True at most once.
+   *
+   * Every reactor that answers a tool call goes on to ask whether the iteration
+   * is complete, and with parallel calls more than one of them can correctly
+   * see that it is. Only the one whose insert survives may say so. The loser
+   * has done its job and stops, which is the right outcome — the iteration is
+   * ready exactly once no matter how many reactors noticed.
+   */
+  async claimIterationReady(sessionKey: string, turnKey: string, iterationIndex: number): Promise<boolean> {
+    const result = await this.pool.query(
+      `INSERT INTO vibe_iteration_ready (session_key, turn_key, iteration_index)
+       VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+      [sessionKey, turnKey, iterationIndex],
+    );
+    return result.rowCount === 1;
   }
 
   /**
