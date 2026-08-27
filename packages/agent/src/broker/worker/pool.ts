@@ -4,16 +4,18 @@ import type { EventEnvelope } from "../../common/index.js";
 
 export interface WorkerResult { value: unknown; workerId: string; }
 export type WorkerProgress = (payload: Record<string, unknown>) => void;
-export interface WorkerPool { run(event: EventEnvelope, signal?: AbortSignal, onAssigned?: (workerId: string) => Promise<void>, onProgress?: WorkerProgress, queue?: string): Promise<WorkerResult>; destroy(): Promise<void>; snapshot?(): { workers: number; busy: number; queued: number }; }
+/** Answers whether the calling attempt still owns the execution, renewing it in passing. */
+export type WorkerFence = () => Promise<boolean>;
+export interface WorkerPool { run(event: EventEnvelope, signal?: AbortSignal, onAssigned?: (workerId: string) => Promise<void>, onProgress?: WorkerProgress, queue?: string, fence?: WorkerFence): Promise<WorkerResult>; destroy(): Promise<void>; snapshot?(): { workers: number; busy: number; queued: number }; }
 
 /** A process-level worker loss is retryable; action failures are returned by the worker itself. */
 export class WorkerLostError extends Error {
   constructor(message: string) { super(message); this.name = "WorkerLostError"; }
 }
 
-export function runWorker(pool: WorkerPool, event: EventEnvelope, signal?: AbortSignal, onAssigned?: (workerId: string) => Promise<void>, onProgress?: WorkerProgress, queue?: string): Promise<WorkerResult> { return pool.run(event, signal, onAssigned, onProgress, queue); }
+export function runWorker(pool: WorkerPool, event: EventEnvelope, signal?: AbortSignal, onAssigned?: (workerId: string) => Promise<void>, onProgress?: WorkerProgress, queue?: string, fence?: WorkerFence): Promise<WorkerResult> { return pool.run(event, signal, onAssigned, onProgress, queue, fence); }
 
-interface PendingTask { id: string; event: EventEnvelope; queue: string; signal?: AbortSignal; onAssigned?: (workerId: string) => Promise<void>; onProgress?: WorkerProgress; resolve: (result: WorkerResult) => void; reject: (error: Error) => void; abort?: () => void; }
+interface PendingTask { id: string; event: EventEnvelope; queue: string; fence?: WorkerFence; signal?: AbortSignal; onAssigned?: (workerId: string) => Promise<void>; onProgress?: WorkerProgress; resolve: (result: WorkerResult) => void; reject: (error: Error) => void; abort?: () => void; }
 interface WorkerSlot { worker: Worker; workerId: string; busy: boolean; retired: boolean; task?: PendingTask; }
 
 /**
@@ -55,11 +57,22 @@ export function createWorkerPool(options: { minWorkerThreads: number; maxWorkerT
   const createSlot = (): WorkerSlot => {
     const worker = new Worker(workerUrl);
     const slot: WorkerSlot = { worker, workerId: randomUUID(), busy: false, retired: false };
-    worker.on("message", (message: { id: string; ok: boolean; value?: unknown; error?: string; type?: string; payload?: Record<string, unknown> }) => {
+    worker.on("message", (message: { id: string; ok: boolean; value?: unknown; error?: string; type?: string; payload?: Record<string, unknown>; fenceId?: string }) => {
       if (!slot.task || slot.task.id !== message.id) return;
       // Progress is an observation, not a completion: the slot stays busy and
       // the task is not resolved.
       if (message.type === "progress") { slot.task.onProgress?.(message.payload ?? {}); return; }
+      // The lease lives out here, so a thread has to ask. A pool with no fence
+      // configured answers "yours", which is the same thing an unfenced inline
+      // handler is told.
+      if (message.type === "fence") {
+        const task = slot.task;
+        const answer = task.fence ? task.fence() : Promise.resolve(true);
+        void answer
+          .catch(() => false)
+          .then((owned) => { if (!slot.retired) worker.postMessage({ type: "fence-result", id: task.id, fenceId: message.fenceId, owned }); });
+        return;
+      }
       const task = slot.task;
       slot.task = undefined;
       slot.busy = false;
@@ -104,9 +117,9 @@ export function createWorkerPool(options: { minWorkerThreads: number; maxWorkerT
   void dispatch();
 
   return {
-    run(event: EventEnvelope, signal?: AbortSignal, onAssigned?: (workerId: string) => Promise<void>, onProgress?: WorkerProgress, from = ""): Promise<WorkerResult> {
+    run(event: EventEnvelope, signal?: AbortSignal, onAssigned?: (workerId: string) => Promise<void>, onProgress?: WorkerProgress, from = "", fence?: WorkerFence): Promise<WorkerResult> {
       if (queue.length >= options.maxQueue) return Promise.reject(new Error("Agent worker queue is full"));
-      return new Promise<WorkerResult>((resolve, reject) => { queue.push({ id: randomUUID(), event, queue: from, signal, onAssigned, onProgress, resolve, reject }); void dispatch(); });
+      return new Promise<WorkerResult>((resolve, reject) => { queue.push({ id: randomUUID(), event, queue: from, fence, signal, onAssigned, onProgress, resolve, reject }); void dispatch(); });
     },
     async destroy(): Promise<void> {
       for (const task of queue.splice(0)) task.reject(new Error("Worker pool stopped"));

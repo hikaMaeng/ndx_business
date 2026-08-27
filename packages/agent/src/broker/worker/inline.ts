@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { EventEnvelope } from "../../common/index.js";
 import type { WorkerExecute } from "./entry.js";
-import type { WorkerPool, WorkerProgress, WorkerResult } from "./pool.js";
+import type { WorkerFence, WorkerPool, WorkerProgress, WorkerResult } from "./pool.js";
+
+/** With no lease to ask about, a handler is always the owner. */
+const ALWAYS_OWNED: WorkerFence = async () => true;
 
 /**
  * Runs handlers on the main thread instead of in a worker thread.
@@ -23,7 +26,7 @@ export function createInlinePool(execute: WorkerExecute, maxConcurrent: number):
   const running = new Map<string, AbortController>();
 
   return {
-    run(event: EventEnvelope, signal?: AbortSignal, onAssigned?: (workerId: string) => Promise<void>, onProgress?: WorkerProgress, queue = ""): Promise<WorkerResult> {
+    run(event: EventEnvelope, signal?: AbortSignal, onAssigned?: (workerId: string) => Promise<void>, onProgress?: WorkerProgress, queue = "", fence: WorkerFence = ALWAYS_OWNED): Promise<WorkerResult> {
       if (running.size >= maxConcurrent) return Promise.reject(new Error("inline worker pool is at capacity"));
       const workerId = randomUUID();
       const controller = new AbortController();
@@ -43,7 +46,7 @@ export function createInlinePool(execute: WorkerExecute, maxConcurrent: number):
       return (async () => {
         await onAssigned?.(workerId);
         try {
-          const value = await execute(event, controller.signal, (payload) => onProgress?.(payload), queue);
+          const value = await execute(event, controller.signal, (payload) => onProgress?.(payload), { queue, fence });
           return { value, workerId };
         } finally {
           finish();

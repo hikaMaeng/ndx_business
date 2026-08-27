@@ -119,9 +119,32 @@ export function startWorkerConsumer(input: { queue: EventQueueTransport; command
             payload: progress,
           })).catch((error) => console.error(JSON.stringify({ event: "worker.progress.persist.failed", transactionKey: command.transactionKey, error: error instanceof Error ? error.message : String(error) })));
         };
+        /**
+         * The authoritative answer to "is this still mine?".
+         *
+         * The heartbeat asks the same question on a timer, and the abort signal
+         * carries its answer — but only as of the last tick. A handler about to
+         * do something it cannot take back should not act on a stale yes, so it
+         * can ask now and get the current truth, which also renews the lease it
+         * is about to need.
+         */
+        const fence = async (): Promise<boolean> => {
+          if (leaseLost) return false;
+          try {
+            const owned = await input.executions.renew(command.transactionKey, claim.attemptId);
+            if (!owned) { leaseLost = true; controller.abort(); }
+            return owned;
+          } catch {
+            // Unreachable database means unproven ownership, and an unproven
+            // owner must not proceed as though it were the owner.
+            leaseLost = true;
+            controller.abort();
+            return false;
+          }
+        };
         try {
           // The lane is passed on: a worker watching several queues routes on it.
-          const worker = await runWorker(input.pool, command, controller.signal, undefined, onProgress, commandQueue);
+          const worker = await runWorker(input.pool, command, controller.signal, undefined, onProgress, commandQueue, fence);
           if (leaseLost) throw new WorkerLostError("worker lost the execution lease");
           payload = { ok: true, value: worker.value };
         }

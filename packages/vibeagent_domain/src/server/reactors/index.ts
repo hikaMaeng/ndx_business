@@ -1,6 +1,6 @@
 import type { Pool } from "pg";
 import type { EventEnvelope } from "agent/common";
-import type { WorkerEmit } from "agent/broker/worker";
+import type { WorkerEmit, WorkerExecute } from "agent/broker/worker";
 import { VIBE_ACTIONS, VIBE_SESSION_OPEN_ACTION, VIBE_TURN_ACTION } from "../../common/index.js";
 import { readLoopConfig } from "../config/index.js";
 import { SessionStore, ensureSessionSchema } from "../session/index.js";
@@ -46,6 +46,15 @@ export interface ReactorInput {
   signal: AbortSignal;
   queue: string;
   /**
+   * Confirms this attempt still owns the execution, and renews it.
+   *
+   * Only worth asking before something that cannot be taken back. Everything
+   * recorded here carries an identity and collapses if written twice, so for
+   * those the answer changes nothing — but a command that has already run has
+   * already run.
+   */
+  fence(): Promise<boolean>;
+  /**
    * This session's handle, loaded on first ask and not before.
    *
    * Lazy because taking one costs a block of positions off the session row, and
@@ -86,7 +95,7 @@ export const VIBE_REACTOR_GROUPS: Readonly<Record<string, ReactorGroup>> = {
     [VIBE_ACTIONS.modelReplied]: async ({ globals, event, emit, session }) => decideReply(globals, await session(), event, emit),
   },
   tool: {
-    [VIBE_ACTIONS.toolRequested]: async ({ globals, event, emit, signal, session }) => runTool(globals, await session(), event, emit, signal),
+    [VIBE_ACTIONS.toolRequested]: async ({ globals, event, emit, signal, session, fence }) => runTool(globals, await session(), event, emit, signal, fence),
   },
   join: {
     [VIBE_ACTIONS.toolCompleted]: async ({ globals, event, emit, session }) => joinTools(globals, await session(), event, emit),
@@ -114,15 +123,16 @@ export const VIBE_REACTOR_GROUPS: Readonly<Record<string, ReactorGroup>> = {
 export function createVibeWorker(
   pool: Pool,
   groups: Readonly<Record<string, ReactorGroup>>,
-): (event: EventEnvelope, signal: AbortSignal, emit: WorkerEmit, queue: string) => Promise<unknown> {
+): WorkerExecute {
   const globals: ReactorGlobals = {
     pool, config: readLoopConfig(), sessions: new SessionStore(pool), view: new ViewStore(pool),
   };
   const schema = Promise.all([ensureSessionSchema(pool), ensureViewSchema(pool)]);
 
-  return async (event, signal, emit, queue) => {
+  return async (event, signal, emit, context) => {
     await schema;
 
+    const { queue, fence } = context;
     const group = groups[queue];
     if (!group) throw new Error(`this worker does not answer on ${queue || "(no queue)"}`);
 
@@ -141,7 +151,7 @@ export function createVibeWorker(
       return loaded;
     };
 
-    return react({ globals, event, emit, signal, queue, session });
+    return react({ globals, event, emit, signal, queue, session, fence });
   };
 }
 

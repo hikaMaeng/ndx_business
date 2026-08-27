@@ -30,6 +30,7 @@ export async function runTool(
   event: EventEnvelope,
   emit: WorkerEmit,
   signal: AbortSignal,
+  fence: () => Promise<boolean>,
 ): Promise<{ toolCallKey: string; exitCode: number | null }> {
   const scope = parseIterationScope(event.payload);
   const payload = event.payload as Record<string, unknown>;
@@ -78,6 +79,20 @@ export async function runTool(
     });
     return { toolCallKey, exitCode: answered.exitCode };
   }
+
+  /**
+   * The last thing checked before the one action that cannot be undone.
+   *
+   * Every record this machine writes carries an identity, so writing one twice
+   * costs nothing. A command is not a record. If the lease has moved to another
+   * worker, that worker is already running this command, and running it here as
+   * well would be two writes to the same files — which no amount of
+   * deduplication afterwards can take back.
+   *
+   * Asking is also a renewal, so the command starts with a fresh lease rather
+   * than whatever was left of the last heartbeat's.
+   */
+  if (!await fence()) throw new Error(`refusing to run ${toolCallKey}: the execution lease has moved to another worker`);
 
   emit({ action: VIBE_ACTIONS.toolStarted, seq: session.sequence.next(), key: `tool.started:${toolCallKey}`, turnKey: scope.turnKey, toolCallKey, command });
 
