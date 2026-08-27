@@ -7,7 +7,7 @@
  * | `reducers/` | one pure function per event |
  * | `session.ts` | the impure context those reducers run in |
  */
-export { VibeSessionModel } from "./session.js";
+export { VibeSessionModel, type TurnDigest } from "./session.js";
 export {
   EMPTY_SNAPSHOT, emptyTurn, emptyTool, textOf, blocksOf, toolsOf,
   type VibeSnapshot, type TurnView, type TurnBlock, type ToolBlock, type TextBlock, type TextSlice, type TurnPhase,

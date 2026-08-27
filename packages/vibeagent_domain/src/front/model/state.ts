@@ -47,6 +47,24 @@ export interface TurnView {
   blocks: TurnBlock[];
   answer: string;
   error: string;
+  /**
+   * What the turn did, known without holding what it said.
+   *
+   * These come from the read model and survive `blocks` being thrown away, so a
+   * collapsed turn can still be described — "4 iterations, 3 commands" — while
+   * costing nothing to keep. They are counts of the same facts the blocks are
+   * folded from, not a second opinion about them.
+   */
+  iterations: number;
+  toolCalls: number;
+  /**
+   * Whether `blocks` is the turn's content or an empty placeholder.
+   *
+   * A finished turn's bodies are dropped once it scrolls out of the way and
+   * fetched again if it is reopened. Without this flag an emptied turn and a
+   * turn that genuinely did nothing look identical.
+   */
+  bodiesLoaded: boolean;
 }
 
 export interface VibeSnapshot {
@@ -66,7 +84,7 @@ export interface VibeSnapshot {
 export const EMPTY_SNAPSHOT: VibeSnapshot = { sessionId: "", userEmail: "", workspace: "", sessionError: "", turns: [] };
 
 export function emptyTurn(turnKey: string, prompt = ""): TurnView {
-  return { turnKey, prompt, phase: "running", blocks: [], answer: "", error: "" };
+  return { turnKey, prompt, phase: "running", blocks: [], answer: "", error: "", iterations: 0, toolCalls: 0, bodiesLoaded: true };
 }
 
 export function emptyTool(toolCallKey: string, seq: number): ToolBlock {

@@ -31,6 +31,24 @@ GROUP BY 1, 2, 3 ORDER BY 1, 2;
 - `audience = 'worker'` 인 행이 클라이언트 채널 읽기에 섞이면 안 된다
 - `iteration.started` 가 실제 도구 호출 횟수와 맞아야 한다. 크게 벌어지면 반응기가 자기 dispatch에 반응하고 있다는 뜻이고, 그대로 두면 무한히 돈다
 
+## 읽기 모델 검증
+
+프로젝션은 로그의 접기일 뿐이므로, 검증도 "로그와 같은 것을 말하는가"로 한다.
+
+```sql
+SELECT 'delta events', count(*) FROM event_store e
+  JOIN vibe_session s ON s.session_key = e.session_id
+ WHERE s.workspace = 'view-fold'
+   AND e.action IN ('vibe.iteration.reasoning','vibe.iteration.message','vibe.tool.stdout','vibe.tool.stderr')
+UNION ALL
+SELECT 'view block rows', count(*) FROM vibe_block_view b
+  JOIN vibe_session s USING (session_key) WHERE s.workspace = 'view-fold';
+```
+
+- 접기 비율이 실제로 나와야 한다. 델타 수백 건이 블록 한 자리 수로 줄지 않으면 프로젝션이 안 돈 것이다
+- `vibe_turn_view.iterations` / `tool_calls` 가 실제 이터레이션·도구 호출 수와 같아야 한다. 크면 재전달이 카운트를 부풀린 것이다
+- 프로젝션 테이블을 **지우고** 세션을 다시 열어 같은 화면이 나오는지 본다. 안 나오면 "버려도 되는 테이블"이라는 주장이 거짓이다
+
 ## 통과 기준
 
 에이전트의 자기 보고는 증거가 아니다. 다음이 전부 참이어야 한다.
@@ -39,4 +57,6 @@ GROUP BY 1, 2, 3 ORDER BY 1, 2;
 - 생성된 파일이 `/workspace/<프로젝트 폴더>/`에서 실제로 서빙될 것. 세션이 아니라 프로젝트가 폴더를 정한다
 - 그 페이지를 브라우저에서 열어 **실제로 조작했을 때 올바른 값이 나올 것**
 - 위 연쇄 집계가 짝이 맞고 폭주가 없을 것
-- 최근 실측과 재현 절차는 [브라우저 검증 리포트](../tests/reports/)에 남긴다. 반응기 분해 검증은 [`reactor-decomposition/`](../tests/reports/reactor-decomposition/)
+- 되연 세션이 리플레이 없이 복원될 것. 접힌 턴은 수치를, 펼친 턴은 본문을 보일 것
+- 스트리밍 중 화면이 바닥에 붙어 있을 것. 단 위로 스크롤한 상태에서는 끌려가지 않을 것
+- 최근 실측과 재현 절차는 [브라우저 검증 리포트](../tests/reports/)에 남긴다. 반응기 분해 검증은 [`reactor-decomposition/`](../tests/reports/reactor-decomposition/), 읽기 모델은 [`read-model/`](../tests/reports/read-model/)

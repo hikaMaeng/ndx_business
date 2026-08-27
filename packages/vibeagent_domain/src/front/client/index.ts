@@ -1,6 +1,40 @@
 import { BrokerClient, type ConnectionState } from "agent/front";
 import { VIBE_SESSION_OPEN_ACTION, VIBE_TURN_ACTION, normaliseWorkspacePath } from "../../common/index.js";
-import { VibeSessionModel } from "../model/index.js";
+import { VibeSessionModel, type TurnDigest } from "../model/index.js";
+import type { TurnBlock } from "../model/state.js";
+
+/** One folded block as the read model serves it. */
+interface BlockPayload {
+  seq: number;
+  kind: "reasoning" | "message" | "tool";
+  iterationIndex: number;
+  toolCallKey: string;
+  command: string;
+  body: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  durationMs: number;
+}
+
+/**
+ * A folded block becomes the same shape a live one has.
+ *
+ * The screen must not be able to tell them apart: a turn watched as it happened
+ * and the same turn reloaded an hour later are the same transcript, and any
+ * difference here would show up as one rendering path for fresh turns and
+ * another for old ones. A fold is a single slice at the block's own position.
+ */
+function toBlock(row: BlockPayload): TurnBlock {
+  if (row.kind === "tool") {
+    return {
+      kind: "tool", seq: row.seq, toolCallKey: row.toolCallKey, command: row.command,
+      stdout: row.body ? [{ seq: row.seq, text: row.body }] : [], stderr: [],
+      exitCode: row.exitCode, timedOut: row.timedOut, durationMs: row.durationMs,
+      done: true, failure: "",
+    };
+  }
+  return { kind: row.kind, seq: row.seq, iterationIndex: row.iterationIndex, slices: [{ seq: row.seq, text: row.body }] };
+}
 
 export interface VibeSessionListItem {
   sessionId: string;
@@ -51,6 +85,15 @@ export class VibeClient {
   private loadingHistory = false;
   /** The folder a brand-new session must be opened with, held until the socket is up. */
   private pendingOpen: string | undefined;
+  /**
+   * Turns whose bodies are on their way.
+   *
+   * The screen repaints many times while one request is out — the paint that
+   * asked for it, and every event that lands meanwhile — and each of those
+   * paints would ask again. This is what makes "fetch it if it is missing" safe
+   * to say on every frame.
+   */
+  private readonly fetching = new Set<string>();
 
   constructor(private readonly options: VibeClientOptions) {
     this.model.subscribe(() => this.options.onChange());
@@ -160,33 +203,62 @@ export class VibeClient {
   }
 
   /**
-   * Reopens a past session and replays it from the beginning.
+   * Reopens a past session from the read model, and subscribes for what happens next.
    *
-   * A plain subscription starts at the current high-water mark, which would
-   * show an empty transcript. Asking the broker for a start cursor first is
-   * what makes history visible — and it is also how the folder comes back,
-   * since `session.opened` is the first event in the stream.
+   * It used to replay the channel from the beginning. That is correct and
+   * unaffordable: a finished session is mostly reasoning deltas, so replaying it
+   * meant shipping tens of thousands of events to rebuild paragraphs a worker
+   * had already folded once. Now the transcript arrives as a list of turns with
+   * no bodies, and the socket starts at the current position — history from the
+   * projection, the future from the log.
+   *
+   * The folder comes from the session list rather than from replayed
+   * `session.opened`, which is the one thing the old path got for free.
    */
   async openExisting(sessionId: string): Promise<void> {
     this.pendingOpen = undefined;
     this.loadingHistory = true;
     this.options.onChange();
     try {
-      const response = await this.api("/api/channels/cursor", {
-        method: "POST",
-        body: JSON.stringify({ channels: [`vibe.${sessionId}`], from: "start" }),
-      });
-      const cursor = response.ok ? (await response.json() as { cursor?: string }).cursor : undefined;
-      this.attach(sessionId, cursor);
-      // The list already knows the folder; showing it before replay reaches
-      // `session.opened` avoids a flash of "not open yet".
+      this.attach(sessionId, undefined);
       const known = this.sessions.find((item) => item.sessionId === sessionId)?.workspace;
       if (known) this.model.setWorkspace(known);
+
+      const response = await this.api(`/api/vibe/sessions/${encodeURIComponent(sessionId)}/turns`);
+      if (response.ok) {
+        const body = await response.json() as { turns?: TurnDigest[] };
+        // Guard against a slow answer for a session the person has already left.
+        if (this.sessionId === sessionId) this.model.hydrate(body.turns ?? []);
+      }
     } finally {
       this.loadingHistory = false;
       this.options.onChange();
     }
   }
+
+  /**
+   * Fetches one turn's bodies, because somebody opened it.
+   *
+   * Nothing is fetched twice: a turn already holding its bodies is left alone.
+   */
+  async expandTurn(turnKey: string): Promise<void> {
+    const turn = this.model.getSnapshot().turns.find((candidate) => candidate.turnKey === turnKey);
+    if (!turn || turn.bodiesLoaded || this.fetching.has(turnKey)) return;
+    const sessionId = this.sessionId;
+    this.fetching.add(turnKey);
+    try {
+      const response = await this.api(`/api/vibe/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnKey)}`);
+      if (!response.ok || this.sessionId !== sessionId) return;
+      const body = await response.json() as { blocks?: BlockPayload[] };
+      this.model.loadBlocks(turnKey, (body.blocks ?? []).map(toBlock));
+    } finally {
+      this.fetching.delete(turnKey);
+    }
+  }
+
+  /** Throws one turn's bodies away. Reopening it costs one request. */
+  collapseTurn(turnKey: string): void { this.model.dropBlocks(turnKey); }
+
 
   private attach(sessionId: string, cursor: string | undefined): void {
     this.sessionId = sessionId;

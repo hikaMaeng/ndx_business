@@ -7,4 +7,4 @@
  * | `ownership.ts` | who may replay a channel |
  */
 export { listVibeSessions, type VibeSessionSummary } from "./list.js";
-export { ownsVibeChannel } from "./ownership.js";
+export { ownsVibeChannel, ownsVibeSession } from "./ownership.js";

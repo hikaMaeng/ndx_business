@@ -1,7 +1,21 @@
 import type { EventEnvelope } from "agent/common";
 import { parseVibeProgressEvent, type VibeTurnOutcome } from "../../common/index.js";
 import { REDUCERS, patchTurn } from "./reducers/index.js";
-import { EMPTY_SNAPSHOT, emptyTurn, type VibeSnapshot } from "./state.js";
+import { EMPTY_SNAPSHOT, emptyTurn, type TurnBlock, type TurnPhase, type TurnView, type VibeSnapshot } from "./state.js";
+
+/** A turn as the read model describes it: everything except what it said. */
+export interface TurnDigest {
+  turnKey: string;
+  prompt: string;
+  phase: string;
+  answer: string;
+  error: string;
+  iterations: number;
+  toolCalls: number;
+}
+
+const PHASES: ReadonlySet<string> = new Set(["idle", "running", "done", "failed"]);
+const asPhase = (value: string): TurnPhase => (PHASES.has(value) ? value as TurnPhase : "done");
 
 type Listener = () => void;
 
@@ -50,6 +64,58 @@ export class VibeSessionModel {
   /** Shows a submitted turn immediately, before its first event comes back. */
   startTurn(turnKey: string, prompt: string): void {
     this.commit({ ...this.snapshot, turns: [...this.snapshot.turns, emptyTurn(turnKey, prompt)] });
+  }
+
+  /**
+   * Seeds the transcript from the read model.
+   *
+   * This is not a second kind of truth. The projection folded the same facts
+   * this class folds; the only difference is that it did the work once, on the
+   * way in, instead of on every reader's screen. What arrives here is a list of
+   * turns with no bodies — those are fetched one at a time, if anyone opens them.
+   *
+   * A turn already on screen is left alone. Reopening a session while its last
+   * turn is still streaming must not replace the live one with a stale digest.
+   */
+  hydrate(digests: readonly TurnDigest[]): void {
+    const live = new Map(this.snapshot.turns.map((turn) => [turn.turnKey, turn]));
+    const turns: TurnView[] = digests.map((digest) => live.get(digest.turnKey) ?? {
+      turnKey: digest.turnKey,
+      prompt: digest.prompt,
+      phase: asPhase(digest.phase),
+      blocks: [],
+      answer: digest.answer,
+      error: digest.error,
+      iterations: digest.iterations,
+      toolCalls: digest.toolCalls,
+      bodiesLoaded: false,
+    });
+    // A turn submitted in this session but not yet projected still belongs on
+    // screen; the projection is behind, not authoritative about what exists.
+    for (const turn of this.snapshot.turns) if (!digests.some((digest) => digest.turnKey === turn.turnKey)) turns.push(turn);
+    this.commit({ ...this.snapshot, turns });
+  }
+
+  /** Fills in one turn's bodies, fetched because somebody opened it. */
+  loadBlocks(turnKey: string, blocks: readonly TurnBlock[]): void {
+    this.commit(patchTurn(this.snapshot, turnKey, (turn) => ({ ...turn, blocks: [...blocks], bodiesLoaded: true })));
+  }
+
+  /**
+   * Throws one turn's bodies away.
+   *
+   * This is the point of the whole arrangement: a long session's cost is the
+   * transcript it is holding, and a turn nobody is looking at should not be
+   * one. The facts are still in the log and the fold is still in the read
+   * model, so reopening it costs one request.
+   *
+   * A running turn is never dropped — its bodies are arriving, and there is
+   * nothing to fetch them back from yet.
+   */
+  dropBlocks(turnKey: string): void {
+    const turn = this.snapshot.turns.find((candidate) => candidate.turnKey === turnKey);
+    if (!turn || turn.phase === "running" || !turn.bodiesLoaded) return;
+    this.commit(patchTurn(this.snapshot, turnKey, (existing) => ({ ...existing, blocks: [], bodiesLoaded: false })));
   }
 
   /**

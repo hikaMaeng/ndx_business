@@ -1,7 +1,8 @@
 import type { Pool } from "pg";
 import type { EventEnvelope } from "agent/common";
 import type { LoopConfig } from "../config/index.js";
-import { SessionStore } from "../session/index.js";
+import type { SessionStore } from "../session/index.js";
+import type { ViewStore } from "../view/index.js";
 
 /**
  * What a reactor is given.
@@ -15,6 +16,8 @@ export interface ReactorGlobals {
   pool: Pool;
   config: LoopConfig;
   sessions: SessionStore;
+  /** The read model. Only the projection touches it; everyone else ignores it. */
+  view: ViewStore;
 }
 
 /** How many positions a reactor reserves before it starts emitting. */
