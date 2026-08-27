@@ -1,0 +1,7 @@
+[
+  { "action": "goto", "url": "/" },
+  { "action": "assertRole", "role": "main" },
+  { "action": "click", "role": "button", "name": "Load sample flow" },
+  { "action": "assertText", "text": "order.created" },
+  { "action": "screenshot", "name": "agent-stream-sample-flow" }
+]
