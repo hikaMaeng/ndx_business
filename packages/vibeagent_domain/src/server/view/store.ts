@@ -187,6 +187,28 @@ export class ViewStore {
   }
 
   /**
+   * How many turns the log says this session has.
+   *
+   * The projection is compared against this before it is trusted. "Is it
+   * empty?" is the wrong question — a session half-projected by a dispatcher
+   * that restarted mid-turn is not empty, and it would otherwise show a
+   * transcript that simply stops, with nothing to indicate anything is missing.
+   *
+   * Counted from `turn.started` because that is the fact that says a turn
+   * exists at all. `kind = 'progress'` excludes the dispatcher's copies, which
+   * are the same fact addressed to a queue and would double every count.
+   */
+  async loggedTurnCount(sessionKey: string): Promise<number> {
+    const result = await this.pool.query<{ turns: string }>(
+      `SELECT count(DISTINCT payload->>'turnKey')::text AS turns
+         FROM event_store
+        WHERE session_id = $1 AND action = $2 AND kind = 'progress'`,
+      [sessionKey, VIBE_ACTIONS.turnStarted],
+    );
+    return Number(result.rows[0]?.turns ?? 0);
+  }
+
+  /**
    * Folds a whole session out of the log.
    *
    * The schema calls these tables disposable; this is the method that makes

@@ -88,11 +88,18 @@ if (env.role === "worker") {
         if (!ownsVibeSession(sessionKey, request.sessionUser!.id)) { response.status(404).json({ error: "no such session" }); return; }
         try {
           let turns = await view.turns(sessionKey);
-          // Cold projection: a session older than the projection itself, or one
-          // whose facts were stranded by a restart. The fold is deterministic
-          // and the log still has everything, so do it now rather than show an
-          // empty transcript for a session that plainly is not empty.
-          if (!turns.length) { await view.rebuild(sessionKey); turns = await view.turns(sessionKey); }
+          // Incomplete projection: a session older than the projection itself,
+          // or one whose facts were stranded by a dispatcher restart. The fold
+          // is deterministic and the log still has everything, so do it now.
+          //
+          // The comparison is against the log rather than against zero. A
+          // half-projected session is not empty, and showing a transcript that
+          // silently stops partway is worse than showing none — it looks like
+          // the session, and it is not.
+          if (turns.length < await view.loggedTurnCount(sessionKey)) {
+            await view.rebuild(sessionKey);
+            turns = await view.turns(sessionKey);
+          }
           response.json({ turns });
         }
         catch (error) { response.status(503).json({ error: error instanceof Error ? error.message : "transcript unavailable" }); }

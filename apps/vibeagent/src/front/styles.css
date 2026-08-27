@@ -114,7 +114,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .turn { display: grid; gap: .6rem; max-width: 60rem; margin: 0 auto 1.6rem; }
 .bubble { padding: .75rem .9rem; border: 1px solid var(--line); border-radius: .5rem; }
 .bubble.user { justify-self: end; max-width: 80%; border-color: var(--line-strong); background: var(--surface-3); }
-.bubble.user p { margin: 0; white-space: pre-wrap; }
+.bubble.user .markdown { font-size: .88rem; }
 .bubble.agent { background: var(--surface); }
 
 .phase-pill { display: inline-block; margin-bottom: .5rem; padding: .1rem .45rem; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--text-dim); font-size: .62rem; letter-spacing: .1em; text-transform: uppercase; }
@@ -141,7 +141,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .block-live { padding: .05rem .35rem; border-radius: 999px; background: var(--surface-3); color: var(--text-dim); font-size: .6rem; animation: pulse 1.2s ease-in-out infinite; }
 .block-sub { margin: .35rem 0 .2rem; }
 .block.reasoning summary { display: flex; align-items: center; gap: .4rem; cursor: pointer; }
-.block.reasoning pre { max-height: 16rem; margin: .4rem 0 0; overflow: auto; color: var(--text-faint); font-family: var(--mono); font-size: .72rem; white-space: pre-wrap; }
+.reasoning-body { max-height: 20rem; margin: .4rem 0 0; overflow: auto; color: var(--text-dim); font-size: .78rem; }
 .block.tool .tool-command { display: block; padding: .4rem .55rem; border: 1px solid var(--line); border-radius: .3rem; background: var(--surface-2); }
 .tool-failure { margin: .35rem 0 0; color: var(--text); font-size: .78rem; }
 
@@ -154,7 +154,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .tool-meta { flex: 0 0 auto; color: var(--text-faint); font-size: .68rem; }
 .tool-output { max-height: 18rem; margin: 0; padding: .6rem; overflow: auto; background: var(--bg); color: var(--text-dim); font-family: var(--mono); font-size: .72rem; line-height: 1.55; white-space: pre-wrap; }
 
-.answer { margin-top: .6rem; padding: .7rem; border: 1px solid var(--line-strong); border-radius: .4rem; background: var(--surface-2); line-height: 1.6; white-space: pre-wrap; }
+.answer { margin-top: .6rem; padding: .7rem; border: 1px solid var(--line-strong); border-radius: .4rem; background: var(--surface-2); line-height: 1.6; }
 .turn-error { margin-top: .6rem; padding: .7rem; border: 1px solid var(--text-dim); border-radius: .4rem; background: var(--surface-3); color: var(--text); font-family: var(--mono); font-size: .78rem; }
 
 /* ----------------------------------------------------------- composer ---- */
@@ -165,3 +165,124 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .conversation > .notice { margin: 0 1.25rem; }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+
+
+/* ----------------------------------------------------------- markdown ----
+ * The agent answers in markdown because that is how it was trained to answer.
+ * Rendering it monochrome means the usual job of colour — telling a heading
+ * from a quote from a command — falls to weight, rule and inset instead.
+ *
+ * Everything that can be wider than the column scrolls inside its own box.
+ * A transcript whose page scrolls sideways because one command was long is
+ * unusable, and that is exactly what a wall of agent output produces.
+ */
+/*
+ * A grid item's automatic minimum size is its content's minimum size, so one
+ * wide child — a table, a fenced command, a diagram — makes the whole bubble
+ * wider than the column it sits in, and the transcript scrolls sideways. It is
+ * the streamed turns that show it: a fence arrives mid-word and is briefly as
+ * wide as the line it landed on.
+ *
+ * The bubble is therefore allowed to be narrower than what it holds. Nothing
+ * is lost, because everything that can outgrow the column already scrolls
+ * inside its own box.
+ */
+.turn > .bubble { min-width: 0; }
+.bubble > *, .block, .block > * { min-width: 0; max-width: 100%; }
+
+.markdown { font-size: .88rem; line-height: 1.65; overflow-wrap: anywhere; }
+.markdown > :first-child { margin-top: 0; }
+.markdown > :last-child { margin-bottom: 0; }
+.markdown p { margin: .5rem 0; }
+.markdown h1, .markdown h2, .markdown h3, .markdown h4, .markdown h5, .markdown h6 {
+  margin: 1.1rem 0 .5rem; font-weight: 700; line-height: 1.35;
+}
+.markdown h1 { font-size: 1.15rem; padding-bottom: .3rem; border-bottom: 1px solid var(--line-strong); }
+.markdown h2 { font-size: 1.02rem; padding-bottom: .25rem; border-bottom: 1px solid var(--line); }
+.markdown h3 { font-size: .95rem; }
+.markdown h4, .markdown h5, .markdown h6 { font-size: .88rem; color: var(--text-dim); }
+.markdown ul, .markdown ol { margin: .5rem 0; padding-left: 1.35rem; }
+.markdown li { margin: .22rem 0; }
+.markdown li::marker { color: var(--text-faint); }
+.markdown blockquote {
+  margin: .6rem 0; padding: .1rem .9rem; border-left: 2px solid var(--line-strong);
+  color: var(--text-dim);
+}
+.markdown hr { margin: 1rem 0; border: 0; border-top: 1px solid var(--line); }
+.markdown a { color: var(--text); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--text-faint); }
+.markdown a:hover { text-decoration-color: var(--text); }
+.markdown img { max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: .3rem; }
+.markdown strong { font-weight: 700; }
+.markdown del { color: var(--text-faint); }
+
+/* Inline code sits inside a sentence, so it gets a box but no block spacing. */
+.markdown :not(pre) > code {
+  padding: .1rem .3rem; border: 1px solid var(--line); border-radius: .25rem;
+  background: var(--bg); font-family: var(--mono); font-size: .82em;
+}
+
+.markdown .md-code {
+  position: relative; max-height: 26rem; margin: .6rem 0; padding: .65rem .7rem;
+  overflow: auto; border: 1px solid var(--line); border-radius: .4rem;
+  background: var(--bg); font-family: var(--mono); font-size: .74rem; line-height: 1.6;
+  white-space: pre; tab-size: 2;
+}
+.markdown .md-code code { font: inherit; }
+/* The language is worth stating and not worth reading twice, so it sits in the
+   corner at the weight of a footnote. */
+.markdown .md-code-lang {
+  position: sticky; top: 0; float: right; padding-left: .5rem;
+  color: var(--text-faint); font-size: .62rem; letter-spacing: .1em; text-transform: uppercase;
+}
+
+.markdown table {
+  display: block; width: max-content; max-width: 100%; margin: .7rem 0;
+  overflow-x: auto; border-collapse: collapse; font-size: .82rem;
+}
+.markdown th, .markdown td { padding: .35rem .6rem; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+.markdown thead th { background: var(--surface-2); font-weight: 700; }
+.markdown tbody tr:nth-child(even) { background: rgba(255, 255, 255, .02); }
+
+/* -------------------------------------------------------------- mermaid ---- */
+.markdown .md-diagram { margin: .7rem 0; overflow-x: auto; text-align: center; }
+.markdown .md-diagram:empty { display: none; }
+.markdown .md-diagram svg { max-width: 100%; height: auto; }
+.md-diagram-failed p { margin: 0 0 .35rem; color: var(--text-dim); font-size: .78rem; }
+
+/* --------------------------------------------------------- highlighting ----
+ * Monochrome, so the axis is weight and dimness rather than hue: what a reader
+ * skims (keywords, strings) stays bright, what they skip (comments, brackets)
+ * recedes. It reads as one screen with the rest of the app instead of a
+ * rainbow pasted into it.
+ */
+.hljs-comment, .hljs-quote { color: var(--text-faint); font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-doctag, .hljs-name, .hljs-built_in { color: #fff; font-weight: 600; }
+.hljs-string, .hljs-regexp, .hljs-addition, .hljs-attribute, .hljs-meta .hljs-string { color: #d4d4d4; }
+.hljs-number, .hljs-symbol, .hljs-bullet, .hljs-link, .hljs-variable, .hljs-template-variable { color: #c2c2c2; }
+.hljs-title, .hljs-section, .hljs-class .hljs-title, .hljs-type { color: #f2f2f2; font-weight: 600; }
+.hljs-attr, .hljs-selector-id, .hljs-selector-class, .hljs-property { color: #b8b8b8; }
+.hljs-deletion { color: var(--text-faint); text-decoration: line-through; }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 700; }
+
+/* ---------------------------------------------------------- folded turns -- */
+/*
+ * A finished turn keeps its question and its answer and folds the work away.
+ * The control is quiet on purpose: the reason to open an old turn is to check
+ * how something was done, which is a deliberate act, not something to be
+ * invited into on every turn on the screen.
+ */
+.turn-folded { display: flex; align-items: center; gap: 12px; margin: 6px 0 2px; }
+.turn-toggle {
+  align-self: flex-start;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text-faint);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 12px;
+}
+.turn-toggle:hover { border-color: var(--text-faint); color: var(--text); }
+.turn-counts { color: var(--text-faint); font-size: 12px; }

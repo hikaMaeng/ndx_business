@@ -1,4 +1,4 @@
-import { VibeClient, blocksOf, textOf, type ToolBlock, type TurnBlock, type TurnView, type VibeProject, type VibeSessionListItem } from "vibeagent_domain/front";
+import { VibeClient, blocksOf, hydrateMarkdown, renderMarkdown, textOf, type ToolBlock, type TurnBlock, type TurnView, type VibeProject, type VibeSessionListItem } from "vibeagent_domain/front";
 import "./styles.css";
 
 /**
@@ -25,12 +25,38 @@ let addingProject = false;
 let projectError = "";
 const collapsed = new Set<string>();
 
+/**
+ * Finished turns the reader has asked to see again.
+ *
+ * Closed is the default. A long session is mostly turns nobody is looking at,
+ * and every one of them costs markdown parsing, a sanitizer pass and a stretch
+ * of DOM on every single streamed delta — so a turn that is neither running nor
+ * newest is folded away and its bodies are dropped from memory entirely.
+ * Opening one fetches it back from the read model.
+ */
+const opened = new Set<string>();
+
 const token = (): string => sessionStorage.getItem(TOKEN_KEY) ?? "";
 const setToken = (value?: string): void => { if (value) sessionStorage.setItem(TOKEN_KEY, value); else sessionStorage.removeItem(TOKEN_KEY); };
 
-const client = new VibeClient({ token, onChange: () => render() });
+const client = new VibeClient({ token, onChange: () => schedulePaint() });
 
 const escapeHtml = (value: string): string => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+/**
+ * Prose the model wrote, as the model meant it to look.
+ *
+ * Everything the agent says back is markdown — it writes tables, headings and
+ * fenced code because that is how it was trained to answer, and reading that as
+ * escaped plain text means reading the punctuation instead of the content. The
+ * only text that stays verbatim is a command's stdout, which is not markdown
+ * and must not be reflowed as though it were.
+ *
+ * `live` keeps a half-arrived fence from being treated as a finished diagram,
+ * and `whenReady` is how an async diagram gets a second chance: it asks for the
+ * same re-render an incoming event would.
+ */
+const markdown = (text: string, live = false): string => renderMarkdown(text, { live, whenReady: () => render() });
 
 function relativeTime(iso: string): string {
   if (!iso) return "";
@@ -97,7 +123,7 @@ function renderTextBlock(block: Extract<TurnBlock, { kind: "reasoning" | "messag
   if (!reasoning) {
     return `<section class="block message" data-testid="block-message">
       <header class="block-head"><span class="block-kind kind-message" data-testid="block-kind">${label}</span>${streaming}</header>
-      <p class="assistant-note">${escapeHtml(text)}</p>
+      <div class="assistant-note markdown" data-testid="markdown">${markdown(text, live)}</div>
     </section>`;
   }
   // Open while it is still being written, folded away once it is finished:
@@ -105,23 +131,56 @@ function renderTextBlock(block: Extract<TurnBlock, { kind: "reasoning" | "messag
   return `<section class="block reasoning" data-testid="block-reasoning">
     <details data-testid="reasoning"${live ? " open" : ""}>
       <summary><span class="block-kind kind-reasoning" data-testid="block-kind">${label}</span><span class="block-note">iteration ${block.iterationIndex}</span>${streaming}</summary>
-      <pre>${escapeHtml(text.slice(-6000))}</pre>
+      <div class="markdown reasoning-body" data-testid="markdown">${markdown(text, live)}</div>
     </details>
   </section>`;
 }
 
-function renderTurn(turn: TurnView): string {
-  const blocks = blocksOf(turn);
-  const last = blocks[blocks.length - 1];
+/**
+ * Is this turn showing its working?
+ *
+ * A running turn always is — it is the thing being watched. So is the newest,
+ * because that is the one just answered. Everything older is folded unless it
+ * was opened by hand.
+ *
+ * The answer is never folded away, only the process that produced it. What a
+ * reader scrolling back wants is what the agent concluded; what it thought on
+ * the way there is available on request.
+ */
+function isShowing(turn: TurnView, index: number, total: number): boolean {
+  return turn.phase === "running" || index === total - 1 || opened.has(turn.turnKey);
+}
+
+/** What a folded turn says about itself: enough to decide whether to open it. */
+function renderFolded(turn: TurnView): string {
+  const counts = [
+    turn.iterations ? `이터레이션 ${turn.iterations}` : "",
+    turn.toolCalls ? `도구 ${turn.toolCalls}` : "",
+  ].filter(Boolean).join(" · ");
+  return `<div class="turn-folded">
+    <button class="turn-toggle" data-toggle-turn="${turn.turnKey}" data-testid="turn-toggle" aria-expanded="false">▸ 과정 펼치기</button>
+    ${counts ? `<span class="turn-counts" data-testid="turn-counts">${counts}</span>` : ""}
+  </div>`;
+}
+
+function renderTurn(turn: TurnView, index: number, total: number): string {
+  const showing = isShowing(turn, index, total);
   const running = turn.phase === "running";
-  return `<article class="turn" data-testid="turn" data-turn-key="${turn.turnKey}" data-phase="${turn.phase}">
-    <div class="bubble user"><p>${escapeHtml(turn.prompt)}</p></div>
+  const foldable = !running && index !== total - 1;
+  const blocks = showing ? blocksOf(turn) : [];
+  const last = blocks[blocks.length - 1];
+
+  return `<article class="turn" data-testid="turn" data-turn-key="${turn.turnKey}" data-phase="${turn.phase}" data-showing="${showing}">
+    <div class="bubble user"><div class="markdown" data-testid="markdown">${markdown(turn.prompt)}</div></div>
     <div class="bubble agent">
       <span class="phase-pill ${turn.phase}" data-testid="turn-phase">${turn.phase}</span>
+      ${foldable && showing ? `<button class="turn-toggle" data-toggle-turn="${turn.turnKey}" data-testid="turn-toggle" aria-expanded="true">▾ 과정 접기</button>` : ""}
+      ${showing && !turn.bodiesLoaded ? `<p class="loading" data-testid="turn-loading">과정을 불러오는 중…</p>` : ""}
       ${blocks.map((block) => (block.kind === "tool"
         ? renderTool(block, running && !block.done)
         : renderTextBlock(block, running && block === last))).join("")}
-      ${turn.answer ? `<div class="answer" data-testid="turn-answer"><span class="block-kind kind-answer">최종 답변</span>${escapeHtml(turn.answer)}</div>` : ""}
+      ${showing ? "" : renderFolded(turn)}
+      ${turn.answer ? `<div class="answer" data-testid="turn-answer"><span class="block-kind kind-answer">최종 답변</span><div class="markdown" data-testid="markdown">${markdown(turn.answer)}</div></div>` : ""}
       ${turn.error ? `<div class="turn-error" data-testid="turn-error">${escapeHtml(turn.error)}</div>` : ""}
     </div>
   </article>`;
@@ -230,7 +289,7 @@ function renderWorkspace(): string {
         ${client.isLoadingHistory() ? `<p class="loading" data-testid="loading-history">기록을 불러오는 중…</p>` : ""}
         ${empty && !client.isLoadingHistory()
           ? `<div class="empty-state"><span class="empty-orbit">◎</span><h3>${active ? "무엇을 만들까요?" : "프로젝트를 고르세요"}</h3><p>${active ? "에이전트는 bash 하나만으로 작업합니다." : "왼쪽에서 프로젝트를 추가하고 그 안에 세션을 만드세요."}</p></div>`
-          : snapshot.turns.map(renderTurn).join("")}
+          : snapshot.turns.map((turn, index) => renderTurn(turn, index, snapshot.turns.length)).join("")}
       </div>
 
       ${notice ? `<p class="notice" role="status" data-testid="workspace-notice">${escapeHtml(notice)}</p>` : ""}
@@ -243,15 +302,107 @@ function renderWorkspace(): string {
   </div>`;
 }
 
-function render(): void {
+/**
+ * Makes memory match what is on screen, in both directions.
+ *
+ * Folding a turn hides it; dropping its bodies is what makes folding worth
+ * anything. A session with forty turns then costs about what a session with one
+ * costs, and nothing is lost — the facts are in the log and the fold is in the
+ * read model.
+ *
+ * The other direction matters just as much. A reopened session arrives as
+ * summaries with no bodies at all, so the turn that is showing has to ask for
+ * its own content. Saying it here rather than only on a click means one rule
+ * covers both: whatever is showing is loaded, whatever is not is released.
+ */
+function reconcileBodies(): void {
+  const turns = client.model.getSnapshot().turns;
+  turns.forEach((turn, index) => {
+    if (isShowing(turn, index, turns.length)) {
+      // Showing and empty means it came from the read model as a summary — the
+      // newest turn of a reopened session, most often. Ask for it.
+      if (!turn.bodiesLoaded) void client.expandTurn(turn.turnKey);
+    } else {
+      client.collapseTurn(turn.turnKey);
+    }
+  });
+}
+
+/** How close to the bottom still counts as being at the bottom. */
+const STICK_MARGIN_PX = 80;
+
+/**
+ * Go to the bottom on the next paint whatever the scroll says.
+ *
+ * Following the stream is inferred from where the reader is; this is for the
+ * cases where they have said it. Sending a prompt and opening a session are
+ * both requests to look at the newest thing, and honouring the old scroll
+ * position there means submitting a turn and watching nothing happen because
+ * the answer is arriving two thousand pixels below the fold.
+ */
+let pinBottom = false;
+const pinToBottom = (): void => { pinBottom = true; };
+
+function paint(): void {
   if (!app) return;
+  reconcileBodies();
+
+  // Measured before the HTML is replaced, because replacing it resets the
+  // scroll to the top and the answer to "were we at the bottom?" is gone.
+  const before = app.querySelector<HTMLElement>('[data-testid="transcript"]');
+  const stick = pinBottom || !before || before.scrollHeight - before.scrollTop - before.clientHeight <= STICK_MARGIN_PX;
+  const keepScroll = before?.scrollTop ?? 0;
+
   const focused = document.activeElement as HTMLTextAreaElement | null;
   const keepPrompt = focused?.dataset?.testid === "prompt-input" ? focused.value : undefined;
   app.innerHTML = token() && signedIn ? renderWorkspace() : renderLogin();
+  // Diagrams and highlighted code are put in against the real document, in the
+  // same frame the HTML lands, so a re-render never blanks one that was already
+  // on screen.
+  hydrateMarkdown(app);
+
+  // After hydration, so a diagram that just appeared is included in the height.
+  // Following the stream means the bottom; reading something further up means
+  // exactly where you were, which is why this is not simply "scroll to bottom".
+  const after = app.querySelector<HTMLElement>('[data-testid="transcript"]');
+  if (after) after.scrollTop = stick ? after.scrollHeight : keepScroll;
+
+  // The pin survives paints that had nothing to scroll. Opening a session
+  // empties the transcript first and fills it a moment later, so a pin consumed
+  // by that empty paint would leave the reader at the top of the conversation
+  // they just opened.
+  if (pinBottom && after && after.scrollHeight > after.clientHeight) pinBottom = false;
+
   if (keepPrompt !== undefined) {
     const box = app.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]');
     if (box) { box.value = keepPrompt; box.focus(); }
   }
+}
+
+let frame = 0;
+
+/**
+ * Paints at most once a frame.
+ *
+ * A turn arrives as thousands of events — one per token of reasoning — and the
+ * model commits on every one of them. Painting each would mean rebuilding the
+ * document, re-parsing markdown and re-running the sanitizer a thousand times a
+ * second to show text nobody can read that fast. Collapsing the burst into one
+ * paint per frame changes nothing about what is shown and everything about what
+ * it costs.
+ *
+ * Only the event stream goes through here. A click or a keystroke calls
+ * `render` and repaints immediately, because a delayed response to a person is
+ * a different thing from a delayed response to a stream.
+ */
+function schedulePaint(): void {
+  if (frame) return;
+  frame = requestAnimationFrame(() => { frame = 0; paint(); });
+}
+
+function render(): void {
+  if (frame) { cancelAnimationFrame(frame); frame = 0; }
+  paint();
 }
 
 // ----------------------------------------------------------------- flows ----
@@ -329,6 +480,9 @@ app?.addEventListener("submit", (event) => {
   if (form.dataset.form === "turn") {
     const prompt = String(data.get("prompt") ?? "");
     const turnKey = client.submit(prompt);
+    // Sending is a request to watch the answer, wherever the reader had
+    // scrolled to while writing it.
+    if (turnKey) pinToBottom();
     notice = turnKey ? "" : client.isOpen() ? "연결되어 있지 않습니다. 재연결 중…" : "먼저 프로젝트 아래에서 세션을 여세요.";
     render();
     // Clearing has to happen after the render, not before: `submit` shows the
@@ -344,10 +498,29 @@ app?.addEventListener("submit", (event) => {
 });
 
 app?.addEventListener("click", (event) => {
-  const target = (event.target as HTMLElement).closest<HTMLElement>("[data-action],[data-session],[data-new-session],[data-toggle-project]");
+  const target = (event.target as HTMLElement).closest<HTMLElement>("[data-action],[data-session],[data-new-session],[data-toggle-project],[data-toggle-turn]");
   if (!target) return;
 
-  if (target.dataset.session) { void client.openExisting(target.dataset.session); return; }
+  if (target.dataset.toggleTurn) {
+    const key = target.dataset.toggleTurn;
+    if (opened.has(key)) {
+      // The bodies are not dropped here. `paint` does it, once, for every turn
+      // that ends up folded — including the one that just stopped being newest.
+      opened.delete(key);
+    } else {
+      opened.add(key);
+      // Fetched only now, and only for this turn. Painting first shows that
+      // something is happening while the request is out.
+      void client.expandTurn(key);
+    }
+    render();
+    return;
+  }
+
+  // Opening a conversation means its most recent exchange, the way any chat
+  // client behaves. Pinned before the request so the hydrate that follows lands
+  // at the bottom rather than at whatever the previous session was scrolled to.
+  if (target.dataset.session) { pinToBottom(); void client.openExisting(target.dataset.session); return; }
 
   if (target.dataset.newSession) {
     // The folder comes from the project the session is created under, which is
