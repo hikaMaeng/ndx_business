@@ -39,8 +39,6 @@ export type VibeCommandAction = (typeof VIBE_COMMAND_ACTIONS)[number];
 export const VIBE_ACTIONS = {
   sessionOpened: "vibe.session.opened",
 
-  /** The client asked for a turn. Recorded by the broker as it arrives. */
-  turnRequested: "vibe.turn.requested",
   /** The prompt is in the session's history and the turn is under way. */
   turnStarted: "vibe.turn.started",
 
@@ -77,7 +75,6 @@ export type VibeAction = (typeof VIBE_ACTIONS)[keyof typeof VIBE_ACTIONS];
  * for something it will never receive.
  */
 export const VIBE_WORKER_ACTIONS = [
-  VIBE_ACTIONS.turnRequested,
   VIBE_ACTIONS.modelReplied,
   VIBE_ACTIONS.toolRequested,
   VIBE_ACTIONS.iterationReady,
