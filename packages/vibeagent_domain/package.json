@@ -7,13 +7,29 @@
   "module": "./dist/common/index.js",
   "types": "./dist/common/index.d.ts",
   "exports": {
-    ".": { "types": "./dist/common/index.d.ts", "import": "./dist/common/index.js" },
-    "./common": { "types": "./dist/common/index.d.ts", "import": "./dist/common/index.js" },
-    "./server": { "types": "./dist/server/index.d.ts", "import": "./dist/server/index.js" },
-    "./front": { "types": "./dist/front/index.d.ts", "import": "./dist/front/index.js" },
+    ".": {
+      "types": "./dist/common/index.d.ts",
+      "import": "./dist/common/index.js"
+    },
+    "./common": {
+      "types": "./dist/common/index.d.ts",
+      "import": "./dist/common/index.js"
+    },
+    "./server": {
+      "types": "./dist/server/index.d.ts",
+      "import": "./dist/server/index.js"
+    },
+    "./front": {
+      "types": "./dist/front/index.d.ts",
+      "import": "./dist/front/index.js"
+    },
     "./package.json": "./package.json"
   },
-  "files": ["dist", "README.md", "docs"],
+  "files": [
+    "dist",
+    "README.md",
+    "docs"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "node ../../scripts/run-tests.mjs src",
@@ -21,6 +37,10 @@
   },
   "dependencies": {
     "agent": "*",
+    "dompurify": "3.4.14",
+    "highlight.js": "11.11.1",
+    "marked": "18.0.11",
+    "mermaid": "11.17.2",
     "pg": "8.23.0"
   },
   "devDependencies": {

@@ -8,4 +8,5 @@ vibeagent_domain은 bash 하나만 도구로 쓰는 코딩 에이전트의 도�
 | 실행과 환경값 | [사용법](docs/usage.md) |
 | 지켜야 할 실행 규칙 | [제약](docs/constraints.md) |
 | 에이전트 루프의 원리 | [내부 동작](docs/internals.md) |
+| 답변을 마크다운으로 그리는 법 | [마크다운 렌더링](docs/markdown.md) |
 | 검증 방법 | [테스트](docs/testing.md) |
