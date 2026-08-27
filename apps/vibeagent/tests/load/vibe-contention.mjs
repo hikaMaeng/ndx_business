@@ -22,6 +22,7 @@
  *   node apps/vibeagent/tests/load/vibe-contention.mjs [accounts] [sessionsPerAccount] [turnsPerSession]
  */
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import WebSocket from "ws";
 
 const gatewayUrl = process.env.VIBE_GATEWAY_URL ?? "http://localhost:18081";
@@ -34,7 +35,18 @@ const stamp = Date.now().toString(36);
 
 const started = Date.now();
 const at = () => String(Date.now() - started).padStart(7);
-const log = (...parts) => console.log(`${at()}ms`, ...parts);
+
+/**
+ * Written synchronously, on purpose.
+ *
+ * Node buffers stdout when it is a file rather than a terminal, and an
+ * uncaught assertion exits before that buffer is flushed — so the run that
+ * fails is exactly the run whose diagnostics disappear. These lines are read
+ * after the fact from a redirected log, so they have to survive the exit that
+ * reports the failure.
+ */
+const emit = (line) => { try { fs.writeSync(1, line + "\n"); } catch { console.log(line); } };
+const log = (...parts) => emit(`${at()}ms ${parts.join(" ")}`);
 
 const post = async (path, body, token) => {
   const response = await fetch(`${gatewayUrl}${path}`, {
@@ -192,7 +204,7 @@ const settled = await Promise.allSettled(plan.map(({ owner, s }) => runSession(o
 const failures = settled.filter((r) => r.status === "rejected");
 const records = settled.filter((r) => r.status === "fulfilled").map((r) => r.value);
 log(`finished: ${records.length} ok, ${failures.length} failed (${Date.now() - started}ms)`);
-for (const failure of failures) console.error("  FAILED:", failure.reason?.message ?? failure.reason);
+for (const failure of failures) emit(`  FAILED: ${failure.reason?.message ?? failure.reason}`);
 
 // ------------------------------------------------------------ assertions ----
 
@@ -239,21 +251,21 @@ for (const record of records) {
   for (const turn of record.turns) check(keys.has(turn.turnKey), `${record.marker}: turn ${turn.turnKey} missing from read model`);
 }
 
-console.log("");
-console.log(`accounts            ${accountCount}`);
-console.log(`sessions            ${records.length}/${plan.length}`);
-console.log(`turns               ${records.reduce((sum, r) => sum + r.turns.length, 0)}`);
-console.log(`tool calls          ${records.reduce((sum, r) => sum + r.toolCalls, 0)}`);
-console.log(`iterations          ${records.reduce((sum, r) => sum + r.iterations, 0)}`);
-console.log(`cross-talk events   ${records.reduce((sum, r) => sum + r.foreignEvents.length, 0)}`);
-console.log(`elapsed             ${Date.now() - started}ms`);
-console.log(`workspace root      contention-${stamp}/`);
-console.log("");
+emit("");
+emit(`accounts            ${accountCount}`);
+emit(`sessions            ${records.length}/${plan.length}`);
+emit(`turns               ${records.reduce((sum, r) => sum + r.turns.length, 0)}`);
+emit(`tool calls          ${records.reduce((sum, r) => sum + r.toolCalls, 0)}`);
+emit(`iterations          ${records.reduce((sum, r) => sum + r.iterations, 0)}`);
+emit(`cross-talk events   ${records.reduce((sum, r) => sum + r.foreignEvents.length, 0)}`);
+emit(`elapsed             ${Date.now() - started}ms`);
+emit(`workspace root      contention-${stamp}/`);
+emit("");
 
 if (problems.length) {
-  console.error(`${problems.length} problem(s):`);
-  for (const problem of problems) console.error(`  - ${problem}`);
+  emit(`${problems.length} problem(s):`);
+  for (const problem of problems) emit(`  - ${problem}`);
 }
 assert.equal(failures.length, 0, `${failures.length} session(s) failed`);
 assert.deepEqual(problems, [], `${problems.length} contention problem(s)`);
-console.log("contention checks passed");
+emit("contention checks passed");

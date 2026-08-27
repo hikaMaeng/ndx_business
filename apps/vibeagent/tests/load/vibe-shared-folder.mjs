@@ -26,6 +26,7 @@
  *   scenario: shared-folder | same-session   (default: shared-folder)
  */
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import WebSocket from "ws";
 
 const gatewayUrl = process.env.VIBE_GATEWAY_URL ?? "http://localhost:18081";
@@ -36,6 +37,16 @@ const count = Number(process.argv[3] ?? 4);
 const timeoutMs = Number(process.env.VIBE_TIMEOUT_MS ?? 900_000);
 
 const started = Date.now();
+/**
+ * Written synchronously, on purpose.
+ *
+ * Node buffers stdout when it is a file rather than a terminal, and an
+ * uncaught assertion exits before that buffer is flushed — so the run that
+ * fails is exactly the run whose diagnostics disappear. These lines are read
+ * after the fact from a redirected log, so they have to survive the exit that
+ * reports the failure.
+ */
+const emit = (line) => { try { fs.writeSync(1, line + "\n"); } catch { console.log(line); } };
 const log = (...parts) => console.log(`${String(Date.now() - started).padStart(7)}ms`, ...parts);
 
 const post = async (path, body, token) => {
@@ -227,8 +238,8 @@ assert.ok(chosen, `unknown scenario ${scenario}; expected ${Object.keys(scenario
 
 log(`scenario: ${scenario}`);
 const result = await chosen();
-console.log("");
-console.log(`scenario  ${scenario}`);
-console.log(`result    ${JSON.stringify(result)}`);
-console.log(`elapsed   ${Date.now() - started}ms`);
-console.log("passed");
+emit("");
+emit(`scenario  ${scenario}`);
+emit(`result    ${JSON.stringify(result)}`);
+emit(`elapsed   ${Date.now() - started}ms`);
+emit("passed");

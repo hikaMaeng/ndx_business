@@ -29,6 +29,7 @@
  *   scenario: dispatcher-gap | worker-restart | both   (default: dispatcher-gap)
  */
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import WebSocket from "ws";
@@ -45,7 +46,17 @@ const workerName = process.env.VIBE_WORKER ?? "ndx-business-vibeagent-worker-1";
 
 const started = Date.now();
 const at = () => String(Date.now() - started).padStart(7);
-const log = (...parts) => console.log(`${at()}ms`, ...parts);
+/**
+ * Written synchronously, on purpose.
+ *
+ * Node buffers stdout when it is a file rather than a terminal, and an
+ * uncaught assertion exits before that buffer is flushed — so the run that
+ * fails is exactly the run whose diagnostics disappear. These lines are read
+ * after the fact from a redirected log, so they have to survive the exit that
+ * reports the failure.
+ */
+const emit = (line) => { try { fs.writeSync(1, line + "\n"); } catch { console.log(line); } };
+const log = (...parts) => emit(`${at()}ms ${parts.join(" ")}`);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const docker = async (...args) => { await run("docker", args); };
 
@@ -254,8 +265,8 @@ const result = await chosen();
 // against a stack that is half down.
 await docker("start", dispatcherName).catch(() => {});
 await docker("start", workerName).catch(() => {});
-console.log("");
-console.log(`scenario   ${scenario}`);
-console.log(`result     ${JSON.stringify(result)}`);
-console.log(`elapsed    ${Date.now() - started}ms`);
-console.log("chaos checks passed");
+emit("");
+emit(`scenario   ${scenario}`);
+emit(`result     ${JSON.stringify(result)}`);
+emit(`elapsed    ${Date.now() - started}ms`);
+emit("chaos checks passed");
