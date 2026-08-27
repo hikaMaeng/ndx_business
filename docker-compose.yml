@@ -90,6 +90,13 @@ services:
         required: false
     environment:
       AGENT_ROLE: dispatcher
+      # The recovery sweep. It finds facts nothing reacted to — the ones behind
+      # the cursor after a restart — and sends them again. The grace period must
+      # exceed the longest legitimate reaction, or slow work gets re-driven;
+      # that is absorbed by the claim but wastes an inference call. Overridable
+      # so a contention test can watch recovery happen without waiting minutes.
+      AGENT_RECONCILE_GRACE_SECONDS: ${AGENT_RECONCILE_GRACE_SECONDS:-600}
+      AGENT_RECONCILE_MS: ${AGENT_RECONCILE_MS:-60000}
     depends_on:
       admin:
         condition: service_healthy

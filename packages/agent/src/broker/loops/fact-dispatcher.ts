@@ -36,6 +36,14 @@ export function startFactDispatcher(input: {
   metrics: MetricsRegistry;
   pollMs: number;
   batchSize: number;
+  /** Tells a reaction that finished from one that never ran. Without it, nothing is recovered. */
+  executions?: { settled(keys: readonly string[]): Promise<Set<string>> };
+  /** How long a reaction is given before its absence counts as a failure to react. */
+  reconcileGraceSeconds?: number;
+  /** How far back to keep looking. Older than this is history, not a backlog. */
+  reconcileLookbackSeconds?: number;
+  /** How often to sweep. Zero switches it off. */
+  reconcileMs?: number;
 }): BrokerLoop & { wake(action?: string): void } {
   const actions = Object.keys(input.table);
   const notifier = new CoalescedWakeup();
@@ -123,6 +131,54 @@ export function startFactDispatcher(input: {
     return batch.complete;
   };
 
+  /**
+   * Finds facts that nothing ever reacted to, and sends them again.
+   *
+   * The cursor is the reason this is needed. It only moves forward, and a
+   * dispatcher that starts with no saved position begins at the end of the log
+   * — so a fact recorded while it was down sits behind the cursor permanently,
+   * and the turn waiting on that reaction simply stops. Nothing is broken and
+   * nothing reports an error; the machine is just quietly missing a step.
+   *
+   * Position cannot find those, because position is what failed. Age can. A
+   * fact old enough that its reaction should long since have settled, with no
+   * settled execution to show for it, was dropped.
+   *
+   * Re-sending is safe in every case this can misjudge. A reaction still
+   * running has a live claim and the copy is absorbed; one that finished is
+   * skipped by its recorded result; one that never happened is precisely what
+   * this is for. So the grace period buys efficiency, not correctness.
+   */
+  const reconcile = async (): Promise<void> => {
+    if (!input.executions || !actions.length) return;
+    const candidates = await input.eventStore.settledCandidates(
+      actions,
+      input.reconcileGraceSeconds ?? 600,
+      input.reconcileLookbackSeconds ?? 86_400,
+      input.batchSize,
+    );
+    if (!candidates.length) return;
+
+    const wanted = new Map<string, { fact: EventEnvelope; queueName: string }>();
+    for (const fact of candidates) {
+      for (const queueName of input.table[fact.action] ?? []) {
+        wanted.set(deterministicEventId(`react:${queueName}:${fact.eventId}`), { fact, queueName });
+      }
+    }
+
+    const settled = await input.executions.settled([...wanted.keys()]);
+    let resent = 0;
+    for (const [identity, { fact, queueName }] of wanted) {
+      if (settled.has(identity)) continue;
+      await input.queue.send(queueName, work(fact, queueName));
+      input.metrics.increment("factDispatchRecovered");
+      resent += 1;
+    }
+    if (resent) {
+      console.log(JSON.stringify({ event: "broker.fact.dispatch.recovered", dispatcher: input.name, resent, examined: wanted.size }));
+    }
+  };
+
   const run = async (): Promise<void> => {
     let backoffMs = 100;
     while (!stopped) {
@@ -139,6 +195,24 @@ export function startFactDispatcher(input: {
     }
   };
 
-  const done = run();
+  /**
+   * The sweep runs on its own timer rather than inside the drain loop, because
+   * the drain loop sleeps until something happens and the whole point of this
+   * is to notice that nothing did.
+   */
+  const sweepMs = input.reconcileMs ?? 60_000;
+  const sweep = async (): Promise<void> => {
+    while (!stopped && sweepMs > 0) {
+      await wait(sweepMs);
+      if (stopped) return;
+      try { await reconcile(); }
+      catch (error) {
+        input.metrics.increment("factDispatchFailures");
+        console.error(JSON.stringify({ event: "broker.fact.reconcile.failed", dispatcher: input.name, error: error instanceof Error ? error.message : String(error) }));
+      }
+    }
+  };
+
+  const done = Promise.all([run(), sweep()]).then(() => undefined);
   return { stop: () => { stopped = true; notifier.notify(); }, done, wake };
 }

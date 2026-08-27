@@ -18,6 +18,9 @@ export interface AgentEnv {
   gatewayId: string;
   visibilityTimeoutSeconds: number;
   executionLeaseSeconds: number;
+  reconcileGraceSeconds: number;
+  reconcileLookbackSeconds: number;
+  reconcileMs: number;
   maxExecutionAttempts: number;
   terminalPersistenceAlertAttempts: number;
   terminalPersistenceBackoffMaxSeconds: number;
@@ -65,6 +68,17 @@ export function readEnv(source = process.env): AgentEnv {
     // The execution fence must outlive a single PGMQ visibility lease so a visibility probe
     // can distinguish queue redelivery from a database ownership reclaim.
     executionLeaseSeconds: positive(source, "AGENT_EXECUTION_LEASE_SECONDS", visibilityTimeoutSeconds * 2),
+    /**
+     * How long a reaction is given before its absence counts as a failure.
+     *
+     * Must exceed the longest legitimate reaction, or the sweep re-sends work
+     * that is merely slow. Being wrong is not harmful — the claim absorbs the
+     * duplicate — but it is wasted inference.
+     */
+    reconcileGraceSeconds: positive(source, "AGENT_RECONCILE_GRACE_SECONDS", 600),
+    /** Older than this is history, not a backlog worth re-driving. */
+    reconcileLookbackSeconds: positive(source, "AGENT_RECONCILE_LOOKBACK_SECONDS", 86_400),
+    reconcileMs: positive(source, "AGENT_RECONCILE_MS", 60_000),
     maxExecutionAttempts: positive(source, "AGENT_MAX_EXECUTION_ATTEMPTS", 5),
     terminalPersistenceAlertAttempts: positive(source, "AGENT_TERMINAL_PERSISTENCE_ALERT_ATTEMPTS", 10),
     terminalPersistenceBackoffMaxSeconds: positive(source, "AGENT_TERMINAL_PERSISTENCE_BACKOFF_MAX_SECONDS", 300),

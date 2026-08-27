@@ -30,9 +30,14 @@ const userId = login.user.id;
 const started = Date.now();
 const at = () => Date.now() - started;
 
+const runStamp = Date.now().toString(36);
+
 function runSession(index) {
   const sessionId = `${userId}-${crypto.randomUUID()}`;
   const turnKey = crypto.randomUUID();
+  // Each session works in its own folder. A session has no folder of its own
+  // until it is opened with one, so this is a precondition, not a decoration.
+  const workspace = `concurrent-${runStamp}/s${index}`;
   const record = { index, sessionId, turnKey, submittedAt: 0, firstEventAt: 0, finishedAt: 0, toolCalls: 0, ok: false };
 
   return new Promise((resolve, reject) => {
@@ -44,6 +49,10 @@ function runSession(index) {
     socket.on("message", (raw) => {
       const frame = JSON.parse(String(raw));
       if (frame.type === "subscribed") {
+        socket.send(JSON.stringify({ type: "event", action: "vibe.session.open", transactionKey: `open:${sessionId}`, sessionId, payload: { sessionKey: sessionId, workspace } }));
+        return;
+      }
+      if (frame.type === "event" && frame.event.action.endsWith(".session.opened")) {
         record.submittedAt = at();
         socket.send(JSON.stringify({ type: "event", action: "vibe.turn.run", transactionKey: turnKey, sessionId, payload: { sessionKey: sessionId, turnKey, prompt } }));
         return;
@@ -52,9 +61,21 @@ function runSession(index) {
       const { action, payload, kind } = frame.event;
       if (!record.firstEventAt) record.firstEventAt = at();
       if (action.endsWith(".tool.started")) record.toolCalls += 1;
-      if (kind === "result" || kind === "failure") {
+      // A turn ends at turn.final. A `result` is one reaction's terminal —
+      // the chain has several, and the first is the session opening, so
+      // resolving on any result would time every session at a few hundred ms
+      // and then call the run serial.
+      if (action.endsWith(".turn.final")) {
         record.finishedAt = at();
-        record.ok = payload.ok === true;
+        record.ok = true;
+        clearTimeout(timer);
+        socket.close();
+        resolve(record);
+        return;
+      }
+      if (kind === "failure" || (kind === "result" && payload?.ok === false)) {
+        record.finishedAt = at();
+        record.ok = false;
         clearTimeout(timer);
         socket.close();
         resolve(record);

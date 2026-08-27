@@ -29,6 +29,16 @@ const userId = login.body.user.id;
 const sessionKey = `${userId}-${crypto.randomUUID()}`;
 const replyChannel = `vibe.${sessionKey}`;
 const turnKey = crypto.randomUUID();
+// A session cannot exist without a folder, so the folder is made first and the
+// session is opened in it. Submitting a turn against an unopened session is
+// refused, which is the rule this script has to follow like any other client.
+const workspace = process.env.VIBE_WORKSPACE ?? `e2e-${Date.now().toString(36)}`;
+const folder = await fetch(`${gatewayUrl}/api/vibe/workspaces`, {
+  method: "POST",
+  headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+  body: JSON.stringify({ workspace }),
+});
+assert.ok(folder.ok, `could not create ${workspace}: ${await folder.text()}`);
 
 const socket = new WebSocket(`${gatewayUrl.replace(/^http/, "ws")}/ws?session=${encodeURIComponent(token)}`);
 const started = Date.now();
@@ -43,22 +53,40 @@ const done = new Promise((resolve, reject) => {
   socket.on("open", () => {
     socket.send(JSON.stringify({ type: "subscribe", channels: [replyChannel] }));
   });
+  let opened = false;
   socket.on("message", (raw) => {
     const frame = JSON.parse(String(raw));
     if (frame.type === "subscribed") {
-      // Submit only after the subscription exists, so no progress is missed.
-      socket.send(JSON.stringify({ type: "event", action: "vibe.turn.run", transactionKey: turnKey, sessionId: sessionKey, payload: { sessionKey, turnKey, prompt } }));
+      // Open only after the subscription exists, so no progress is missed.
+      socket.send(JSON.stringify({ type: "event", action: "vibe.session.open", transactionKey: `open:${sessionKey}`, sessionId: sessionKey, payload: { sessionKey, workspace } }));
       return;
     }
     if (frame.type !== "event") return;
     const { action, payload, kind } = frame.event;
+    if (action.endsWith(".session.opened") && !opened) {
+      opened = true;
+      console.log(`${String(Date.now() - started).padStart(6)}ms opened     ${workspace}`);
+      socket.send(JSON.stringify({ type: "event", action: "vibe.turn.run", transactionKey: turnKey, sessionId: sessionKey, payload: { sessionKey, turnKey, prompt } }));
+      return;
+    }
     const at = `${String(Date.now() - started).padStart(6)}ms`;
     if (action.endsWith(".reasoning")) console.log(`${at} reasoning  ${String(payload.reasoning).replace(/\s+/g, " ").slice(0, 140)}`);
     else if (action.endsWith(".iteration.started")) { iterations += 1; console.log(`${at} iteration  #${payload.iterationIndex}`); }
     else if (action.endsWith(".tool.started")) { tools.set(payload.toolCallKey, payload.command); console.log(`${at} bash       ${String(payload.command).replace(/\n/g, " ⏎ ").slice(0, 160)}`); }
     else if (action.endsWith(".tool.completed")) console.log(`${at} exit ${payload.exitCode}   (${payload.durationMs}ms)`);
     else if (action.endsWith(".turn.final")) { answer = String(payload.answer ?? ""); console.log(`${at} final      ${answer.replace(/\s+/g, " ").slice(0, 200)}`); }
-    if (kind === "result" || kind === "failure") {
+    // The turn ends at turn.final. A `result` is one reaction's terminal, not
+    // the turn's — a turn is a chain of them now, and the first to arrive is
+    // the session opening, which is why waiting on any result ended instantly.
+    if (action.endsWith(".turn.final")) {
+      clearTimeout(timer);
+      terminal = { ok: true, value: { turnKey, stoppedBy: payload.stoppedBy ?? "final" } };
+      resolve();
+      return;
+    }
+    // A reaction that threw leaves the chain with nothing to continue it, so a
+    // failed result still has to end the wait rather than time out.
+    if (kind === "failure" || (kind === "result" && payload?.ok === false)) {
       clearTimeout(timer);
       terminal = payload;
       resolve();
@@ -83,5 +111,6 @@ console.log(JSON.stringify({
   toolCalls: tools.size,
   stoppedBy: terminal.value?.stoppedBy,
   answer: (answer || terminal.value?.answer || "").slice(0, 400),
-  workspaceUrl: `${gatewayUrl}/workspace/${sessionKey}/`,
+  workspace,
+  workspaceUrl: `${gatewayUrl}/workspace/${workspace.split("/").map(encodeURIComponent).join("/")}/`,
 }, null, 2));

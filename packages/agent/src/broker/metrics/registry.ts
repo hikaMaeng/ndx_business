@@ -23,6 +23,8 @@ export interface MetricsSnapshot {
   factDispatchReads: number;
   factDispatchSends: number;
   factDispatchFailures: number;
+  /** Facts nothing ever reacted to, found by age and sent again. Should stay at zero. */
+  factDispatchRecovered: number;
   processingDlqTotal: number;
   queueVisibilityRenewFailures: number;
   terminalPersistenceRetries: number;
@@ -48,7 +50,7 @@ export class MetricsRegistry {
     queueReads: 0, queueMessages: 0, queueDeletes: 0,
     appendTotal: 0, appendDuplicates: 0, appendFailures: 0, appendLatencyMsTotal: 0,
     workerStarted: 0, workerCompleted: 0, workerFailed: 0, processingFailures: 0, processingJoined: 0,
-    ingressAccepted: 0, brokerReadFailures: 0, logTailReads: 0, logTailEvents: 0, logTailFailures: 0, factDispatchReads: 0, factDispatchSends: 0, factDispatchFailures: 0, processingDlqTotal: 0, queueVisibilityRenewFailures: 0,
+    ingressAccepted: 0, brokerReadFailures: 0, logTailReads: 0, logTailEvents: 0, logTailFailures: 0, factDispatchReads: 0, factDispatchSends: 0, factDispatchFailures: 0, factDispatchRecovered: 0, processingDlqTotal: 0, queueVisibilityRenewFailures: 0,
     terminalPersistenceRetries: 0, terminalPersistenceAlerts: 0, expiredExecutionLeases: 0,
     websocketConnections: 0, websocketMailboxQueued: 0, websocketDelivered: 0, websocketProgressDropped: 0, websocketSlowConsumerClosed: 0, websocketReplayOverflow: 0, websocketSendFailures: 0,
     databasePoolTotal: 0, databasePoolIdle: 0, databasePoolWaiting: 0,

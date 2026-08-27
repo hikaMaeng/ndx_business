@@ -172,6 +172,23 @@ export class EventStore {
     return Object.fromEntries(result.rows.map((row) => [row.stream_id, String(row.sequence)]));
   }
 
+  /**
+   * Facts old enough that whatever should have reacted to them has had its
+   * chance, newest first.
+   *
+   * The dispatcher's cursor only ever moves forward, so a fact recorded while
+   * it was down is behind the cursor for ever. This is how those are found
+   * again — not by position, which is exactly the thing that failed, but by age.
+   */
+  async settledCandidates(actions: readonly string[], graceSeconds: number, lookbackSeconds: number, limit: number): Promise<EventEnvelope[]> {
+    const result = await this.pool.query<StoredEventRow>(`SELECT ${COLUMNS} FROM event_store
+      WHERE action = ANY($1::text[]) AND ${FACTS_ONLY}
+        AND created_at < now() - make_interval(secs => $2)
+        AND created_at > now() - make_interval(secs => $3)
+      ORDER BY created_at DESC LIMIT $4`, [actions, graceSeconds, lookbackSeconds, limit]);
+    return result.rows.map(fromRow);
+  }
+
   async readActions(actions: readonly string[], positions: Record<string, string>, highWater: Record<string, string>, limit: number): Promise<{ events: EventEnvelope[]; complete: boolean }> {
     const result = await this.pool.query<StoredEventRow>(`WITH bounds AS (
         SELECT high_water.key AS stream_id,

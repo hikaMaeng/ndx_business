@@ -228,7 +228,19 @@ export function createFactDispatcher(options: FactDispatcherOptions): Service {
       await eventStore.ensureSchema();
       for (const queueName of new Set(Object.values(options.table).flat())) await queue.ensure(queueName);
 
-      const dispatcher = startFactDispatcher({ name, eventStore, queue, table: options.table, metrics, pollMs: env.logTailPollMs, batchSize: env.logTailBatch });
+      // The dispatcher reads this only to tell a reaction that finished from
+      // one that never ran; it never claims or completes anything itself.
+      const executions = new ExecutionStore(database, env.executionLeaseSeconds);
+      await executions.ensureSchema();
+
+      const dispatcher = startFactDispatcher({
+        name, eventStore, queue, table: options.table, metrics,
+        pollMs: env.logTailPollMs, batchSize: env.logTailBatch,
+        executions,
+        reconcileGraceSeconds: env.reconcileGraceSeconds,
+        reconcileLookbackSeconds: env.reconcileLookbackSeconds,
+        reconcileMs: env.reconcileMs,
+      });
       const listener = new EventLogListener(env.databaseUrl, () => dispatcher.wake());
       await listener.start();
 

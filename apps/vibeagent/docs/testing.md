@@ -31,6 +31,44 @@ GROUP BY 1, 2, 3 ORDER BY 1, 2;
 - `audience = 'worker'` 인 행이 클라이언트 채널 읽기에 섞이면 안 된다
 - `iteration.started` 가 실제 도구 호출 횟수와 맞아야 한다. 크게 벌어지면 반응기가 자기 dispatch에 반응하고 있다는 뜻이고, 그대로 두면 무한히 돈다
 
+## 경합과 안정성
+
+단일 턴 검증은 "도는가"만 답한다. 여럿이 동시에 있을 때의 실패는 조용하다 —
+세션이 남의 이벤트를 받아도 에러가 나지 않고 그럴듯한 전사가 나올 뿐이다.
+
+```powershell
+# 계정 N개 x 계정당 세션 M개 x 세션당 턴 K개, 전부 동시
+node apps/vibeagent/tests/load/vibe-contention.mjs 4 4 2
+
+# 부품을 죽여가며: dispatcher-gap | worker-restart | both
+node apps/vibeagent/tests/load/vibe-chaos.mjs worker-restart 2
+```
+
+카오스의 회수 시나리오는 청소 루프를 관측 가능한 시간 안에 보기 위해 유예를
+낮춰야 한다. **끝나면 운영값으로 되돌린다.**
+
+```powershell
+$env:AGENT_RECONCILE_GRACE_SECONDS='30'; $env:AGENT_RECONCILE_MS='15000'
+docker compose up -d vibeagent-dispatcher
+# ... 실행 ...
+Remove-Item Env:AGENT_RECONCILE_GRACE_SECONDS, Env:AGENT_RECONCILE_MS
+docker compose up -d vibeagent-dispatcher
+```
+
+소켓에서 보이지 않는 불변식은 DB에서 본다. 전부 0이어야 한다.
+
+```sql
+SELECT count(*) FROM (SELECT session_key,turn_key,iteration_index FROM vibe_session_message
+  WHERE role='assistant' GROUP BY 1,2,3 HAVING count(*)>1) x;
+SELECT count(*) FROM (SELECT session_id,payload->>'turnKey' FROM event_store
+  WHERE action='vibe.turn.final' AND kind='progress' GROUP BY 1,2 HAVING count(*)>1) x;
+SELECT count(*) FROM (SELECT session_id,payload->>'turnKey',payload->>'iterationIndex' FROM event_store
+  WHERE action='vibe.iteration.ready' AND kind='progress' GROUP BY 1,2,3 HAVING count(*)>1) x;
+```
+
+중복 실행의 직접 증거는 파일이다. 카오스 프롬프트가 `>>` 로 덧붙이므로, 명령이 두
+번 돌면 내용이 두 배가 된다.
+
 ## 읽기 모델 검증
 
 프로젝션은 로그의 접기일 뿐이므로, 검증도 "로그와 같은 것을 말하는가"로 한다.
@@ -59,4 +97,6 @@ SELECT 'view block rows', count(*) FROM vibe_block_view b
 - 위 연쇄 집계가 짝이 맞고 폭주가 없을 것
 - 되연 세션이 리플레이 없이 복원될 것. 접힌 턴은 수치를, 펼친 턴은 본문을 보일 것
 - 스트리밍 중 화면이 바닥에 붙어 있을 것. 단 위로 스크롤한 상태에서는 끌려가지 않을 것
-- 최근 실측과 재현 절차는 [브라우저 검증 리포트](../tests/reports/)에 남긴다. 반응기 분해 검증은 [`reactor-decomposition/`](../tests/reports/reactor-decomposition/), 읽기 모델은 [`read-model/`](../tests/reports/read-model/)
+- 동시 세션이 서로를 침범하지 않을 것. 교차 이벤트는 **끝에서 세지 말고 도착하는 프레임마다** 검사할 것
+- 부품이 재시작해도 턴이 유실되거나 명령이 두 번 돌지 않을 것
+- 최근 실측과 재현 절차는 [브라우저 검증 리포트](../tests/reports/)에 남긴다. 반응기 분해 검증은 [`reactor-decomposition/`](../tests/reports/reactor-decomposition/), 읽기 모델은 [`read-model/`](../tests/reports/read-model/), 경합·카오스는 [`contention/`](../tests/reports/contention/)

@@ -86,6 +86,23 @@ export class ExecutionStore {
     return { kind: "joined", requestEventId: row.request_event_id, completed: row.status !== "running", ...(row.result ? { result: row.result } : {}) };
   }
 
+  /**
+   * Which of these have already been answered.
+   *
+   * Used to tell a reaction that finished from one that never happened. A row
+   * that is still `running` is deliberately not counted as answered: either it
+   * is genuinely in flight, in which case re-sending is absorbed by the claim,
+   * or its owner died and re-sending is exactly what should happen.
+   */
+  async settled(transactionKeys: readonly string[]): Promise<Set<string>> {
+    if (!transactionKeys.length) return new Set();
+    const result = await this.pool.query<{ transaction_key: string }>(
+      "SELECT transaction_key FROM agent_execution WHERE transaction_key = ANY($1::text[]) AND status IN ('completed', 'failed')",
+      [[...transactionKeys]],
+    );
+    return new Set(result.rows.map((row) => row.transaction_key));
+  }
+
   async renew(transactionKey: string, attemptId: string): Promise<boolean> {
     const updated = await this.pool.query(`UPDATE agent_execution SET lease_until = now() + make_interval(secs => $3), heartbeat_at = now(), updated_at = now()
       WHERE transaction_key = $1 AND status = 'running' AND attempt_id = $2`, [transactionKey, attemptId, this.leaseSeconds]);
