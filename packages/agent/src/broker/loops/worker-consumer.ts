@@ -96,7 +96,8 @@ export function startWorkerConsumer(input: { queue: EventQueueTransport; command
           })).catch((error) => console.error(JSON.stringify({ event: "worker.progress.persist.failed", transactionKey: command.transactionKey, error: error instanceof Error ? error.message : String(error) })));
         };
         try {
-          const worker = await runWorker(input.pool, command, controller.signal, undefined, onProgress);
+          // The lane is passed on: a worker watching several queues routes on it.
+          const worker = await runWorker(input.pool, command, controller.signal, undefined, onProgress, commandQueue);
           if (leaseLost) throw new WorkerLostError("worker lost the execution lease");
           payload = { ok: true, value: worker.value };
         }

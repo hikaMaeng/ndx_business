@@ -4,16 +4,16 @@ import type { EventEnvelope } from "../../common/index.js";
 
 export interface WorkerResult { value: unknown; workerId: string; }
 export type WorkerProgress = (payload: Record<string, unknown>) => void;
-export interface WorkerPool { run(event: EventEnvelope, signal?: AbortSignal, onAssigned?: (workerId: string) => Promise<void>, onProgress?: WorkerProgress): Promise<WorkerResult>; destroy(): Promise<void>; snapshot?(): { workers: number; busy: number; queued: number }; }
+export interface WorkerPool { run(event: EventEnvelope, signal?: AbortSignal, onAssigned?: (workerId: string) => Promise<void>, onProgress?: WorkerProgress, queue?: string): Promise<WorkerResult>; destroy(): Promise<void>; snapshot?(): { workers: number; busy: number; queued: number }; }
 
 /** A process-level worker loss is retryable; action failures are returned by the worker itself. */
 export class WorkerLostError extends Error {
   constructor(message: string) { super(message); this.name = "WorkerLostError"; }
 }
 
-export function runWorker(pool: WorkerPool, event: EventEnvelope, signal?: AbortSignal, onAssigned?: (workerId: string) => Promise<void>, onProgress?: WorkerProgress): Promise<WorkerResult> { return pool.run(event, signal, onAssigned, onProgress); }
+export function runWorker(pool: WorkerPool, event: EventEnvelope, signal?: AbortSignal, onAssigned?: (workerId: string) => Promise<void>, onProgress?: WorkerProgress, queue?: string): Promise<WorkerResult> { return pool.run(event, signal, onAssigned, onProgress, queue); }
 
-interface PendingTask { id: string; event: EventEnvelope; signal?: AbortSignal; onAssigned?: (workerId: string) => Promise<void>; onProgress?: WorkerProgress; resolve: (result: WorkerResult) => void; reject: (error: Error) => void; abort?: () => void; }
+interface PendingTask { id: string; event: EventEnvelope; queue: string; signal?: AbortSignal; onAssigned?: (workerId: string) => Promise<void>; onProgress?: WorkerProgress; resolve: (result: WorkerResult) => void; reject: (error: Error) => void; abort?: () => void; }
 interface WorkerSlot { worker: Worker; workerId: string; busy: boolean; retired: boolean; task?: PendingTask; }
 
 /**
@@ -42,7 +42,7 @@ export function createWorkerPool(options: { minWorkerThreads: number; maxWorkerT
         continue;
       }
       if (slot.retired || slot.task !== task) continue;
-      slot.worker.postMessage({ type: "run", id: task.id, event: task.event });
+      slot.worker.postMessage({ type: "run", id: task.id, event: task.event, queue: task.queue });
       task.abort = () => slot.worker.postMessage({ type: "abort", id: task.id });
       if (task.signal?.aborted) task.abort();
       else task.signal?.addEventListener("abort", task.abort, { once: true });
@@ -104,9 +104,9 @@ export function createWorkerPool(options: { minWorkerThreads: number; maxWorkerT
   void dispatch();
 
   return {
-    run(event: EventEnvelope, signal?: AbortSignal, onAssigned?: (workerId: string) => Promise<void>, onProgress?: WorkerProgress): Promise<WorkerResult> {
+    run(event: EventEnvelope, signal?: AbortSignal, onAssigned?: (workerId: string) => Promise<void>, onProgress?: WorkerProgress, from = ""): Promise<WorkerResult> {
       if (queue.length >= options.maxQueue) return Promise.reject(new Error("Agent worker queue is full"));
-      return new Promise<WorkerResult>((resolve, reject) => { queue.push({ id: randomUUID(), event, signal, onAssigned, onProgress, resolve, reject }); void dispatch(); });
+      return new Promise<WorkerResult>((resolve, reject) => { queue.push({ id: randomUUID(), event, queue: from, signal, onAssigned, onProgress, resolve, reject }); void dispatch(); });
     },
     async destroy(): Promise<void> {
       for (const task of queue.splice(0)) task.reject(new Error("Worker pool stopped"));

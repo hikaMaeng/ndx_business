@@ -23,7 +23,7 @@ export function createInlinePool(execute: WorkerExecute, maxConcurrent: number):
   const running = new Map<string, AbortController>();
 
   return {
-    run(event: EventEnvelope, signal?: AbortSignal, onAssigned?: (workerId: string) => Promise<void>, onProgress?: WorkerProgress): Promise<WorkerResult> {
+    run(event: EventEnvelope, signal?: AbortSignal, onAssigned?: (workerId: string) => Promise<void>, onProgress?: WorkerProgress, queue = ""): Promise<WorkerResult> {
       if (running.size >= maxConcurrent) return Promise.reject(new Error("inline worker pool is at capacity"));
       const workerId = randomUUID();
       const controller = new AbortController();
@@ -43,7 +43,7 @@ export function createInlinePool(execute: WorkerExecute, maxConcurrent: number):
       return (async () => {
         await onAssigned?.(workerId);
         try {
-          const value = await execute(event, controller.signal, (payload) => onProgress?.(payload));
+          const value = await execute(event, controller.signal, (payload) => onProgress?.(payload), queue);
           return { value, workerId };
         } finally {
           finish();
