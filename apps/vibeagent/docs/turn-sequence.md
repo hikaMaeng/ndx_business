@@ -31,9 +31,10 @@
 | 이벤트 브로커 | 소켓과 로그 tail. 아무 처리도 하지 않는다 |
 | 이벤트 로그 | `event_store`. append만 되고 지워지지 않는다 |
 | fact 디스패처 | 로그를 tail하며 반응표대로 반응기 큐에 사본을 넣는다. 도메인을 모른다 |
-| 반응기 큐 | `vibe_intake` · `vibe_model` · `vibe_decide` · `vibe_tool` · `vibe_join` |
+| 반응기 큐 | `vibe_intake` · `vibe_model` · `vibe_decide` · `vibe_tool` · `vibe_join` · `vibe_view` |
 | 반응기 | fact 하나에 반응하는 **독립 함수를 한 번 실행**하고 끝난다 |
 | 세션 저장소 | `vibe_session` · `vibe_session_message`. 히스토리와 시퀀스의 단일 출처 |
+| 읽기 모델 | `vibe_turn_view` · `vibe_block_view`. 로그를 미리 접어 둔 것. 버려도 재생성된다 |
 | 인퍼런스 | OpenAI 호환 엔드포인트. SSE로 스트리밍한다 |
 | bash | 별도 OS 프로세스 |
 
@@ -55,7 +56,9 @@ sequenceDiagram
     participant W3 as 응답 판정
     participant W4 as 도구 실행
     participant W5 as 이터레이션 조인
+    participant W6 as 뷰 투영
     participant DB as 세션 저장소
+    participant V as 읽기 모델
     participant I as 인퍼런스
     participant S as bash
 
@@ -94,6 +97,8 @@ sequenceDiagram
     L->>D: tail
     D->>W4: (반응표) tool.requested → vibe_tool · N개는 N번 병렬로
 
+    W4->>DB: 이 호출에 이미 답이 있는가
+    W4->>W4: fence — 아직 내가 소유자인가
     W4->>L: vibe.tool.started
     W4->>S: spawn
     S-->>W4: stdout chunk
@@ -118,6 +123,11 @@ sequenceDiagram
     D->>W2: (반응표) iteration.ready → vibe_model · 다시 모델 호출
     Note over W2,W5: 고리는 반응표에만 있고 어느 함수도 모른다
 
+    D->>W6: (반응표) 같은 fact의 또 다른 사본 → vibe_view
+    W6->>L: 델타를 되읽어
+    W6->>V: 접어서 저장
+    Note over W6: 아무 fact도 남기지 않는다
+
     L->>B: tail (audience ≠ worker)
     B-->>C: 이벤트 스트림
     C->>C: seq로 보정하며 렌더
@@ -139,13 +149,27 @@ sequenceDiagram
 
 | fact | 반응기 큐 |
 | --- | --- |
-| `vibe.turn.started` | `vibe_model` |
+| `vibe.turn.started` | `vibe_model` · `vibe_view` |
 | `vibe.iteration.ready` | `vibe_model` |
-| `vibe.model.replied` | `vibe_decide` |
+| `vibe.model.replied` | `vibe_decide` · `vibe_view` |
 | `vibe.tool.requested` | `vibe_tool` |
-| `vibe.tool.completed` | `vibe_join` |
+| `vibe.tool.completed` | `vibe_join` · `vibe_view` |
+| `vibe.turn.final` | `vibe_view` |
 
 한 fact를 여러 반응기가 받아도 된다. 큐가 다르므로 경쟁 소비가 아니라 fan-out이다.
+**읽기 모델이 그 증거다** — 뷰 함수는 판정 함수와 같은 `model.replied` 를 받지만 각자의
+사본을 각자의 큐에서 받고, 서로의 존재를 모른다. 위 표에서 `vibe_view` 를 지우면 읽기
+모델만 사라지고 기계는 그대로 돈다.
+
+### 라우팅 키는 (큐, action) 쌍이다
+
+`model.replied` 가 한 큐에서는 "판단하라" 이고 다른 큐에서는 "기록하라" 다. action도
+엔벨롭도 둘을 구분해주지 못한다 — 같은 fact이기 때문이다. 다른 것은 **누구에게 보낸
+사본인가** 뿐이고 그건 큐 이름이 말해준다.
+
+```
+worker(event, queue) { reactors[queue][event.action](...) }
+```
 
 ## 함수마다 하는 일 하나
 
@@ -157,13 +181,25 @@ sequenceDiagram
 | [`reply-decide.ts`](../../../packages/vibeagent_domain/src/server/reactors/reply-decide.ts) | `model.replied` | 최종인지 도구인지 본다 | `turn.final` 또는 `tool.requested × N` |
 | [`tool-run.ts`](../../../packages/vibeagent_domain/src/server/reactors/tool-run.ts) | `tool.requested` | 프로세스를 띄우고 출력을 중계 | `tool.started/stdout/completed` |
 | [`tool-join.ts`](../../../packages/vibeagent_domain/src/server/reactors/tool-join.ts) | `tool.completed` | 요청 수와 완료 수를 센다 | 전부 끝났으면 `iteration.ready` |
+| [`view-project.ts`](../../../packages/vibeagent_domain/src/server/reactors/view-project.ts) | 위 넷 | 로그를 되읽어 전사를 접어 저장 | 없음 |
 
-**조인에 제어자가 없다.** 도구 호출이 N개면 `tool.completed` 가 N번 오고 조인 함수가
-N번 깨어난다. 매번 같은 질문 — "이 이터레이션이 요청한 수만큼 끝났는가" — 을 DB에
-물어보고, 마지막 하나만 참을 만난다. 세는 일은 상태가 하지 누가 지휘하지 않는다.
+**조인에 제어자가 없다. 그런데 세는 것만으로는 부족하다.**
 
-`session-open` 만 세션 핸들 없이 실행된다. 폴더가 정해지기 전이므로 줄 것이 없다.
-나머지는 전부 세션이 이미 폴더를 가진 상태에서만 깨어난다.
+도구 호출이 N개면 `tool.completed` 가 N번 오고 조인 함수가 N번 깨어난다. 매번 같은
+질문 — "요청한 수만큼 끝났는가" — 을 DB에 묻는다. 여기까지는 맞다.
+
+틀린 것은 "마지막 하나만 참을 만난다" 는 생각이다. **마지막 둘은 두 쓰기가 모두
+커밋된 뒤에 읽을 수 있고, 둘 다 N of N 을 본다. 둘 다 옳다.** 직렬화해도 같다 —
+누가 마지막에 읽었느냐가 아니라 **누가 말할 권리를 갖느냐** 의 문제이고, 그건 순서가
+아니라 유일성이다.
+
+그래서 `vibe_iteration_ready` 에 `ON CONFLICT DO NOTHING` 으로 넣고 **행이 들어간
+반응기만** 발급한다. 진 쪽은 자기 일을 다 했으므로 그냥 멈춘다. 재전달도 같은 장치가
+막는다.
+
+`session-open` 과 `view-project` 는 세션 핸들 없이 실행된다. 앞은 폴더가 정해지기
+전이라 줄 것이 없고, 뒤는 아무것도 발급하지 않아 시퀀스가 필요 없다. **핸들은 지연
+로딩이고, 요청하는 행위 자체가 "나는 발행할 것이다" 라는 선언이다.**
 
 ---
 
@@ -177,12 +213,19 @@ N번 깨어난다. 매번 같은 질문 — "이 이터레이션이 요청한 �
 | `vibe_session` | `session_key`, `workspace`(불변), `next_seq` |
 | `vibe_session_message` | `(session_key, ordinal)` 로 정렬된 대화 히스토리 |
 
-- **폴더 불변성**: `INSERT ... ON CONFLICT DO NOTHING` 뒤에 읽는다. 두 번째 개설 시도는
-  거부가 아니라 이미 정해진 폴더를 돌려받는다.
+- **폴더 불변성**: `INSERT ... ON CONFLICT DO NOTHING` 뒤에 읽는다. 같은 폴더로 다시
+  열면 이미 정해진 폴더를 돌려받고, **다른 폴더로 열려는 시도는 병합되지 않고 거부된다.**
+  검사와 경합이 한 단계로 합쳐진다.
 - **히스토리 append**: `BEGIN` → 세션 행 `FOR UPDATE` → `max(ordinal)+1`. 한 세션의
   순번은 몇 개의 워커가 붙든 일관된다.
 - **시퀀스**: `UPDATE ... next_seq + $2 RETURNING next_seq - $2` 로 블록(8192)을 떼어
-  간다. 스트림 델타마다 DB를 왕복하지 않으면서 번호는 겹치지 않는다.
+  간다. 스트림 델타마다 DB를 왕복하지 않으면서 번호는 겹치지 않는다. 블록은 **절반
+  지점에서 미리 다음 것을 받아온다** — 예전에는 소진되면 던졌고, 그 자리가 하필
+  인퍼런스 비용을 다 치른 뒤 스트림 중간이었다.
+- **메시지 자연키**: `(session_key, turn_key, iteration_index, role, tool_call_id)` 에
+  유니크 인덱스. 리스를 잃고 재시도된 반응기가 assistant 답변을 두 줄 남기는 것을 막는다.
+  덮어쓰지 않고 먼저 쓰인 것을 남긴다 — 하류가 이미 반응한 버전이기 때문이다.
+- **이터레이션 래치**: `vibe_iteration_ready`. 위 조인 항목 참조.
 - **조인 판정**: `sum(jsonb_array_length(tool_calls))` 대 `count(*) FILTER (role='tool')`.
   세는 주체가 DB이므로 조인 함수는 상태를 들고 있지 않아도 된다.
 
@@ -217,37 +260,82 @@ N번 깨어난다. 매번 같은 질문 — "이 이터레이션이 요청한 �
 | --- | --- | --- |
 | 도구 승인 게이트 | 불가 | `tool.requested` 와 도구 실행 사이에 반응기를 하나 더 끼운다. 기존 함수는 손대지 않는다 |
 | 턴 취소 | 불가 | 다음 fact가 남지 않으면 끝난다 |
-| 재개 | 턴 전체 재실행 | 마지막 fact를 다시 흘리면 그 지점부터 |
+| 재개 | 턴 전체 재실행 | 마지막 fact를 다시 흘리면 그 지점부터. 청소 루프가 자동으로 한다 |
 | 워커 사망 | 턴 전체 소실 | 그 함수 한 번만 다시 |
-| 다중 도구 호출 | 루프 안에서 순차 | N개가 그냥 병렬로 흐른다 |
+| 다중 도구 호출 | 루프 안에서 순차 | N개가 그냥 병렬로 흐른다 ([실측](../tests/reports/fan-in-idempotency/)) |
 | 스케일 | 턴 단위 | 함수 종류별. 느린 종류만 늘린다 |
 | 새 기능 | 기존 함수를 고친다 | 반응표에 한 줄, 파일 하나 |
 
 ---
 
-## 아직 없는 것
+## 같은 것을 두 번 하지 않기
 
-**뷰 투영.** 턴이 쌓이면 브라우저가 전부 들고 있을 수 없다. 끝난 턴은 접고 내용을 버린 뒤
-다시 펼칠 때 백엔드에서 받아오는 편이 낫고, 그 조회는 이미 DB에 있는 것을 읽는 일이므로
-HTTP다. 원본 로그를 매번 접는 것보다 미리 묶어 둔 뷰가 싸다.
+큐는 at-least-once다. visibility timeout은 **동시 소비**만 막지, 타임아웃으로 인한
+재전달이나 리스 만료 후의 재클레임을 막지 않는다. 그래서 층마다 답이 다르다.
 
-디스패처가 있으므로 이것은 반응표에 `(전부) → 뷰 투영` 한 줄을 더하고 파일 하나를
-쓰는 일이다. 누구를 고치는 일이 아니고, "이벤트를 옆에서 주워 담는" 문제도 없다.
-뷰 함수는 자기 큐에서 자기 사본을 받는다. **바쁜 처리 함수에 DB 쓰기를 얹지 않는다.**
+| 대상 | 성질 | 장치 |
+| --- | --- | --- |
+| 스트리밍 델타 | 재실행하면 **다른 내용** | 멱등 불가 → 리스를 잃으면 즉시 발급 중단 |
+| 결정적 fact | 논리적 정체성이 있음 | 생성자가 `key` 를 발급 |
+| bash 실행 | 되돌릴 수 없는 부수효과 | 실행 전 확인 + fence |
 
-**아무도 반응하지 않은 fact.** 이전 문서는 이것을 "디스패처 재시작 중 유실"이라고
-적었는데, 그건 과장이었다. 커서는 DB의 행이므로 **평범한 재시작은 아무것도 잃지
-않는다** — 멈춘 자리에서 이어간다. 실제 구멍은 훨씬 좁다: **저장된 커서가 없는**
-디스패처가 로그 끝에서 시작하면 그 앞의 fact를 전부 건너뛴다. 첫 기동, 이름 변경,
-커서 행 유실이 그런 경우다.
+**델타는 멱등하게 만들 수 없다.** 같은 반응기를 두 번 돌리면 모델이 다른 문장을 뱉는다.
+중복이 아니라 서로 다른 두 답이므로, 접는 게 아니라 진 attempt가 못 쓰게 막아야 한다.
 
-그래서 위치로는 찾을 수 없다 — 위치가 실패한 바로 그것이기 때문이다. **나이로**
-찾는다. 반응이 진작 끝났어야 할 만큼 오래된 fact인데 그에 해당하는 실행 기록이
-없으면 누락이다. 디스패처의 청소 루프가 주기적으로 그걸 찾아 다시 보낸다.
+**결정적 fact는 논리키로 접는다.** 발급자가 그 fact가 *무엇인지* 를 말하고,
+`deterministicEventId("fact:<streamId>:<key>")` 가 이벤트 id가 된다.
 
-다시 보내는 것은 어느 경우에도 안전하다. 아직 도는 반응은 클레임이 흡수하고,
-끝난 반응은 기록된 결과로 건너뛰며, 없던 반응이 바로 이 장치의 대상이다. 유예
-시간은 정확성이 아니라 낭비를 줄이기 위한 값이다.
+```
+turn.started:<turnKey>                              model.replied:<turnKey>:<iterationIndex>
+tool.requested:<turnKey>:<iterationIndex>:<index>   tool.completed:<toolCallKey>
+iteration.ready:<turnKey>:<iterationIndex>          turn.final:<turnKey>
+```
 
-실측은 [카오스 리포트](../tests/reports/contention/)에 있다 — 커서를 지워 실제로
-구멍을 만들고, 턴이 멈추는 것과 청소 루프가 되살리는 것을 둘 다 관측했다.
+반응기가 통째로 다시 돌아도 같은 fact는 `event_store(event_id)` 에서 한 행으로 접힌다.
+별도의 "처리됨" 테이블은 두지 않는다 — `event_store(event_id)` 와
+`agent_execution(transaction_key)` 가 이미 그 테이블이고, 세 번째를 만들면 앞의 둘과
+맞춰야 할 대상만 늘어난다.
+
+**명령은 실행 전에 두 번 묻는다.** 히스토리에 이미 답이 있으면 재실행하지 않고 기록된
+결과로 fact만 남긴다. 그리고 spawn 직전에 `fence()` 로 **지금 이 순간** 소유자인지
+확인한다 — abort 신호는 마지막 heartbeat 시점 기준이라, 리스가 넘어간 순간과 원래
+워커가 알아채는 순간 사이가 비어 있기 때문이다. 거짓이면 던진다. 조용히 넘어가면 그
+메세지가 처리된 것으로 취급되는데, 지금 소유한 워커가 처리할 것이다.
+
+인퍼런스에는 fence를 걸지 않았다. 비싸지만 되돌릴 수 없는 것은 아니고, 답변은 논리키로
+접힌다. **되돌릴 수 없는 것에만 건다.**
+
+---
+
+## 아무도 반응하지 않은 fact
+
+이전 문서는 이것을 "디스패처 재시작 중 유실" 이라고 적었는데 **과장이었다.** 커서는
+DB의 행이므로 평범한 재시작은 아무것도 잃지 않는다 — 멈춘 자리에서 이어간다.
+
+실제 구멍은 훨씬 좁다: **저장된 커서가 없는** 디스패처가 로그 끝에서 시작하면 그 앞의
+fact를 전부 건너뛴다. 첫 기동, 이름 변경, 커서 행 유실.
+
+위치로는 찾을 수 없다 — 위치가 실패한 바로 그것이기 때문이다. **나이로** 찾는다.
+반응이 진작 끝났어야 할 만큼 오래된 fact인데 그에 해당하는 실행 기록이 없으면 누락이다.
+디스패처의 청소 루프가 주기적으로 그걸 찾아 다시 보낸다. 도메인을 모른다 — 반응표의
+action과 실행이 정착했는지만 알면 되고, 턴이 무엇인지는 알 필요가 없다.
+
+다시 보내는 것은 어느 경우에도 안전하다. 도는 반응은 클레임이 흡수하고, 끝난 반응은
+기록된 결과로 건너뛴다. **유예 시간은 정확성이 아니라 낭비를 줄이는 값이다.**
+
+---
+
+## 실측
+
+| 무엇 | 어디 |
+| --- | --- |
+| 반응기 분해가 실제로 도는가 | [`reactor-decomposition/`](../tests/reports/reactor-decomposition/) |
+| 읽기 모델과 전사 접기 | [`read-model/`](../tests/reports/read-model/) |
+| 병렬 도구 호출과 팬인 멱등성 | [`fan-in-idempotency/`](../tests/reports/fan-in-idempotency/) |
+| 이벤트 정체성 | [`event-identity/`](../tests/reports/event-identity/) |
+| 펜싱 | [`fencing/`](../tests/reports/fencing/) |
+| 다계정 동시 · 멀티세션 · 카오스 | [`contention/`](../tests/reports/contention/) |
+
+가장 최근 경합 실측: 4계정 × 4세션 × 2턴 = **32턴 동시**, 교차 이벤트 0, DB 중복 0,
+뷰 턴 수 = 로그 턴 수. 한 프로젝트 폴더를 4세션이 공유해도, 한 세션에 3턴을 동시에
+넣어도 히스토리가 섞이지 않는다 — system 프롬프트는 한 줄, ordinal 충돌 0, seq 충돌 0.
