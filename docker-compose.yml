@@ -7,6 +7,10 @@ services:
   # committed, so the stack could not be built from a clean checkout.
   postgres:
     image: ghcr.io/pgmq/pg18-pgmq:v1.10.0
+    # The agent app opens roughly ninety connections at its configured ingress
+    # and outbox concurrency, which leaves nothing under the default hundred —
+    # not even a psql session to look at it with.
+    command: ["postgres", "-c", "max_connections=200"]
     container_name: postgres
     # The official PostgreSQL entrypoint must start as root to repair/check
     # named-volume permissions before dropping to the postgres server user.
