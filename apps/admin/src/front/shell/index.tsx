@@ -41,8 +41,9 @@ export function AdminShell({ token, onLogout }: { token: string; onLogout: () =>
 
   const nav: Array<{ id: View; icon: typeof LayoutDashboard; label: string }> = [
     { id: "dashboard", icon: LayoutDashboard, label: text[RSC.ADMIN_NAV_DASHBOARD] },
+    ...(isMasterAdmin ? [{ id: "accounts" as const, icon: Users, label: text[RSC.ADMIN_NAV_ACCOUNTS] }] : []),
     { id: "organizations", icon: Building2, label: text[RSC.ADMIN_NAV_ORGANIZATIONS] },
-    ...(isMasterAdmin ? [{ id: "models" as const, icon: Boxes, label: text[RSC.ADMIN_NAV_MODELS] }, { id: "accounts" as const, icon: Users, label: text[RSC.ADMIN_NAV_ACCOUNTS] }, { id: "system" as const, icon: Server, label: text[RSC.ADMIN_NAV_SYSTEM] }] : []),
+    ...(isMasterAdmin ? [{ id: "models" as const, icon: Boxes, label: text[RSC.ADMIN_NAV_MODELS] }, { id: "system" as const, icon: Server, label: text[RSC.ADMIN_NAV_SYSTEM] }] : []),
   ];
 
   return <div className="admin-shell">
