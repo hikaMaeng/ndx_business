@@ -29,6 +29,7 @@ export async function decideReply(
     const answer = (reply?.content ?? "").trim();
     emit({
       action: VIBE_ACTIONS.turnFinal, seq: session.sequence.next(),
+      key: `turn.final:${scope.turnKey}`,
       turnKey: scope.turnKey, answer, stoppedBy: "final",
     });
     return { turnKey: scope.turnKey, toolCalls: 0, final: true };
@@ -38,6 +39,7 @@ export async function decideReply(
   if (scope.iterationIndex + 1 >= globals.config.maxIterations) {
     emit({
       action: VIBE_ACTIONS.turnFinal, seq: session.sequence.next(), turnKey: scope.turnKey,
+      key: `turn.final:${scope.turnKey}`,
       answer: "Stopped: reached the iteration budget before the model produced a final answer.",
       stoppedBy: "iteration_budget",
     });
@@ -53,6 +55,9 @@ export async function decideReply(
 
     emit({
       action: VIBE_ACTIONS.toolRequested, seq: session.sequence.next(),
+      // Derived from the call's own position, so a repeated decision asks for
+      // the same N commands rather than for N more.
+      key: `tool.requested:${scope.turnKey}:${scope.iterationIndex}:${index}`,
       turnKey: scope.turnKey, iterationIndex: scope.iterationIndex,
       // Deterministic so a replayed decision addresses the same logical call.
       toolCallKey: `${scope.turnKey}:${scope.iterationIndex}:${index}`,

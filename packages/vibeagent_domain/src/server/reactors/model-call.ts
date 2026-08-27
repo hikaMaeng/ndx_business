@@ -36,6 +36,7 @@ export async function callModel(
 
   emit({
     action: VIBE_ACTIONS.iterationStarted, seq: session.sequence.next(),
+    key: `iteration.started:${scope.turnKey}:${scope.iterationIndex}`,
     turnKey: scope.turnKey, iterationIndex: scope.iterationIndex,
   });
 
@@ -77,6 +78,9 @@ export async function callModel(
 
   emit({
     action: VIBE_ACTIONS.modelReplied, seq: session.sequence.next(),
+    // The decisive one. Two of these would run the decision twice and fan out
+    // two sets of tool calls for one reply.
+    key: `model.replied:${scope.turnKey}:${scope.iterationIndex}`,
     turnKey: scope.turnKey, iterationIndex: scope.iterationIndex,
     toolCalls: reply.toolCalls.length, answered: !reply.toolCalls.length,
     audience: "worker",

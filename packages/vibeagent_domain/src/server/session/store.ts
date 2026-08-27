@@ -146,6 +146,31 @@ export class SessionStore {
   }
 
   /**
+   * The recorded answer to one tool call, if it has one.
+   *
+   * Asked before running a command, because a command is the one effect here a
+   * key cannot make idempotent: it changed the world the first time. The exit
+   * code is read back out of the summary the answer was written with, so a
+   * replayed fact reports what actually happened rather than guessing.
+   */
+  async toolAnswer(sessionKey: string, turnKey: string, iterationIndex: number, toolCallId: string): Promise<{ content: string; exitCode: number | null } | null> {
+    const result = await this.pool.query<{ content: string }>(
+      `SELECT content FROM vibe_session_message
+        WHERE session_key = $1 AND turn_key = $2 AND iteration_index = $3 AND role = 'tool' AND tool_call_id = $4
+        LIMIT 1`,
+      [sessionKey, turnKey, iterationIndex, toolCallId],
+    );
+    const content = result.rows[0]?.content;
+    if (content === undefined) return null;
+    // `summariseForModel` writes `exit_code=<n>` first, so the first line holds it.
+    const head = content.split("\n")[0] ?? "";
+    const marker = "exit_code=";
+    const digits = head.startsWith(marker) ? head.slice(marker.length).split(" ")[0] ?? "" : "";
+    const parsed = Number.parseInt(digits, 10);
+    return { content, exitCode: Number.isNaN(parsed) ? null : parsed };
+  }
+
+  /**
    * Claims the right to declare one iteration finished. True at most once.
    *
    * Every reactor that answers a tool call goes on to ask whether the iteration

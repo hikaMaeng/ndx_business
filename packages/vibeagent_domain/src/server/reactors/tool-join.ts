@@ -45,6 +45,7 @@ export async function joinTools(
 
   emit({
     action: VIBE_ACTIONS.iterationReady, seq: session.sequence.next(),
+    key: `iteration.ready:${scope.turnKey}:${scope.iterationIndex}`,
     turnKey: scope.turnKey, iterationIndex: scope.iterationIndex + 1,
     toolCalls: requested,
     audience: "worker",

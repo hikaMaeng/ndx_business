@@ -83,10 +83,34 @@ export function startWorkerConsumer(input: { queue: EventQueueTransport; command
         // guarantee no one relies on would only add latency to a stream.
         let progressSeq = 0;
         const onProgress = (progress: Record<string, unknown>): void => {
+          // A superseded attempt stops writing here, not at its next await.
+          // Losing the lease means another worker was told this execution was
+          // dead and is redoing it; anything this one writes from now on is a
+          // second opinion nobody asked for.
+          if (leaseLost) return;
           const seq = progressSeq++;
           const action = typeof progress.action === "string" ? progress.action : `${command.action}.progress`;
+          /**
+           * What makes an emitted event the same event.
+           *
+           * By default this is positional — the nth thing this execution said —
+           * which deduplicates a redelivery only by coincidence: a reactor that
+           * streams a model's answer says a different number of different
+           * things each time it runs, so the nth slot of one attempt carries
+           * different content from the nth slot of the next, and the conflict
+           * rule would keep the first and splice the two together.
+           *
+           * A handler that knows what a fact *is* says so with `key`, and that
+           * identity survives re-execution: two attempts recording that the
+           * same turn started produce one event, not two. Only facts need it —
+           * for a burst of deltas there is no stable identity to give, which is
+           * why those are fenced by the lease above rather than deduplicated.
+           */
+          const key = typeof progress.key === "string" && progress.key ? progress.key : null;
           void persistResult(toProgressDraft(command, {
-            eventId: deterministicEventId(`progress:${command.transactionKey}:${command.streamId}:${seq}`),
+            eventId: key
+              ? deterministicEventId(`fact:${command.streamId}:${key}`)
+              : deterministicEventId(`progress:${command.transactionKey}:${command.streamId}:${seq}`),
             action,
             kind: progress.kind === "fact" ? "fact" : "progress",
             // A handler marks its own worker-to-worker traffic. The broker reads

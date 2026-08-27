@@ -42,17 +42,44 @@ export async function runTool(
 
   if (!command) {
     const message = "the bash tool requires a non-empty `command` string.";
-    emit({ action: VIBE_ACTIONS.toolFailed, seq: session.sequence.next(), ...common, error: message });
+    emit({ action: VIBE_ACTIONS.toolFailed, seq: session.sequence.next(), key: `tool.failed:${toolCallKey}`, ...common, error: message });
     // A refused call still has to answer, or the join would wait for ever.
     await session.store.appendMessages(session.sessionKey, [{
       turnKey: scope.turnKey, iterationIndex: scope.iterationIndex,
       role: "tool", content: `error: ${message}`, toolCallId,
     }]);
-    emit({ action: VIBE_ACTIONS.toolCompleted, seq: session.sequence.next(), ...common, exitCode: null, timedOut: false, durationMs: 0 });
+    emit({ action: VIBE_ACTIONS.toolCompleted, seq: session.sequence.next(), key: `tool.completed:${toolCallKey}`, ...common, exitCode: null, timedOut: false, durationMs: 0 });
     return { toolCallKey, exitCode: null };
   }
 
-  emit({ action: VIBE_ACTIONS.toolStarted, seq: session.sequence.next(), turnKey: scope.turnKey, toolCallKey, command });
+  /**
+   * Has this command already been run?
+   *
+   * Everything else here can be made idempotent by keying it, but a command is
+   * not a record — it changes the world, and running `cat > file` twice is two
+   * writes no key can undo. So the question has to be asked before spawning
+   * rather than deduplicated after.
+   *
+   * The answer already in the history is the evidence. It is written before
+   * `tool.completed` is recorded, so finding one means a previous attempt got
+   * at least that far, and re-running would be redoing work already accounted
+   * for. The fact is recorded again — cheaply, under the same key — because
+   * whatever reacts to it may be why this message came back.
+   *
+   * This closes redelivery after completion, which is the common case. It does
+   * not close two attempts running at the same instant; that window is held
+   * shut by the lease, which aborts the loser and kills its child process.
+   */
+  const answered = await session.store.toolAnswer(session.sessionKey, scope.turnKey, scope.iterationIndex, toolCallId);
+  if (answered) {
+    emit({
+      action: VIBE_ACTIONS.toolCompleted, seq: session.sequence.next(), key: `tool.completed:${toolCallKey}`,
+      ...common, exitCode: answered.exitCode, timedOut: false, durationMs: 0, replayed: true,
+    });
+    return { toolCallKey, exitCode: answered.exitCode };
+  }
+
+  emit({ action: VIBE_ACTIONS.toolStarted, seq: session.sequence.next(), key: `tool.started:${toolCallKey}`, turnKey: scope.turnKey, toolCallKey, command });
 
   const directory = path.resolve(resolveWorkspaceDirectory(globals.config.workspaceRoot, session.workspace));
   const result = await runBash(command, {
@@ -72,7 +99,7 @@ export async function runTool(
   }]);
 
   emit({
-    action: VIBE_ACTIONS.toolCompleted, seq: session.sequence.next(), ...common,
+    action: VIBE_ACTIONS.toolCompleted, seq: session.sequence.next(), key: `tool.completed:${toolCallKey}`, ...common,
     exitCode: result.exitCode, timedOut: result.timedOut, durationMs: result.durationMs,
   });
 

@@ -38,6 +38,8 @@ export async function openTurn(
 
   emit({
     action: VIBE_ACTIONS.turnStarted,
+    // One turn starts once, however many times this reactor runs.
+    key: `turn.started:${request.turnKey}`,
     seq: session.sequence.next(),
     sessionKey: session.sessionKey,
     turnKey: request.turnKey,

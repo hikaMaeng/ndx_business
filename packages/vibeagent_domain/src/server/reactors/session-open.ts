@@ -44,6 +44,6 @@ export async function openSession(
   if (!opened.created) return { sessionKey: request.sessionKey, workspace: opened.row.workspace, created: false };
 
   const seq = await globals.sessions.allocateSequence(request.sessionKey, 1);
-  emit({ action: VIBE_ACTIONS.sessionOpened, seq, sessionKey: request.sessionKey, workspace: opened.row.workspace });
+  emit({ action: VIBE_ACTIONS.sessionOpened, seq, key: `session.opened:${request.sessionKey}`, sessionKey: request.sessionKey, workspace: opened.row.workspace });
   return { sessionKey: request.sessionKey, workspace: opened.row.workspace, created: true };
 }
