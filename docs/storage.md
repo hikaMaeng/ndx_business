@@ -9,7 +9,7 @@ ${NDX_DATA_HOST_DIR:-./workspace}/
   .ndx/
     postgres/                 the standalone pgmq database (the `agent` app)
     admin/
-      data/                   Admin's sqlite auth store
+      data/                   files Admin keeps outside the database
       postgres/               the database Admin serves to the coding agent
 ```
 

@@ -3,7 +3,7 @@
 ## 목적
 
 다수 계정으로 다중 루트 조직, 계층 조직, 중복 소속, 책임자 권한 범위,
-환경변수 기반 마스터 관리자 제한을 실제 HTTP·SQLite 경로에서 검증한다.
+환경변수 기반 마스터 관리자 제한을 실제 HTTP·PostgreSQL 경로에서 검증한다.
 테스트는 운영 `admin_data` 볼륨이 아닌 별도 임시 DB에서 실행한다.
 
 ## 테스트 계정
@@ -23,7 +23,7 @@
 
 ## 사전 조건
 
-1. 테스트 전용 SQLite 경로를 지정한다.
+1. `TEST_DATABASE_URL`을 지정한다. 테스트마다 임시 스키마가 만들어지고 끝나면 버려진다.
 2. Compose 환경에 다음 값을 설정한다.
 
    ```text
@@ -174,5 +174,5 @@ MASTER_ADMIN_EMAILS=hika00@gmail.com,second.master@example.com
 2. `npm test --workspace admin_domain`
 3. `npm test --workspace admin`
 4. i18n·architecture·docs 검사
-5. 임시 SQLite로 O-01부터 O-10까지 실행
+5. 임시 스키마로 O-01부터 O-10까지 실행
 6. 배포 후 동일한 읽기·권한 시나리오를 headless browser와 API로 재검증

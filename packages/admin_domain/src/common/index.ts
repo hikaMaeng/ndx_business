@@ -6,3 +6,4 @@ export const serviceDomain = Object.freeze({
 export * from "./protocol/auth/index.js";
 export * from "./protocol/organization/index.js";
 export * from "./protocol/models/index.js";
+export * from "./protocol/projects/index.js";

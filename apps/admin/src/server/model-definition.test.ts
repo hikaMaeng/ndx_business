@@ -1,15 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import test from "node:test";
 import request from "supertest";
-import { openAuthDatabase } from "admin_domain/server";
+import { adminDatabaseReachable, useAdminDatabase } from "admin_domain/server";
 import { createApp } from "./app.js";
 
-test("manual model definitions are created and updated", async () => {
-  const directory = mkdtempSync(path.join(os.tmpdir(), "admin-manual-model-"));
-  const database = openAuthDatabase(path.join(directory, "models.sqlite"));
+const reachable = await adminDatabaseReachable();
+const needsDatabase = { skip: reachable ? false : "no PostgreSQL at TEST_DATABASE_URL" };
+
+test("manual model definitions are created and updated", needsDatabase, async (t) => {
+  const database = await useAdminDatabase(t);
   const previousMasterEmails = process.env.MASTER_ADMIN_EMAILS;
   process.env.MASTER_ADMIN_EMAILS = "manual-models@example.com";
   const app = createApp(database);
@@ -80,7 +79,5 @@ test("manual model definitions are created and updated", async () => {
   } finally {
     if (previousMasterEmails === undefined) delete process.env.MASTER_ADMIN_EMAILS;
     else process.env.MASTER_ADMIN_EMAILS = previousMasterEmails;
-    database.close();
-    rmSync(directory, { recursive: true, force: true });
   }
 });

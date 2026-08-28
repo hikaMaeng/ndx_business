@@ -1,7 +1,7 @@
 import type { EventEnvelope } from "agent/common";
 import type { WorkerEmit } from "agent/broker/worker";
 import { VIBE_ACTIONS, VIBE_SESSION_OPEN_ACTION, parseVibeSessionOpenRequest } from "../../../common/index.js";
-import { ensureWorkspaceDirectory } from "../../workspace/index.js";
+import { ensureWorkspaceDirectory, projectPath } from "../../workspace/index.js";
 import type { ReactorGlobals } from "../context/index.js";
 
 export interface SessionOpenOutcome {
@@ -39,8 +39,22 @@ export async function openSession(
     throw new Error(`${VIBE_SESSION_OPEN_ACTION} requires sessionKey, userId and a workspace path inside the projects root`);
   }
 
-  await ensureWorkspaceDirectory(globals.config.workspaceRoot, request.workspace);
-  const opened = await globals.sessions.open(request.sessionKey, request.workspace);
+  /**
+   * The account half of the path comes from here, never from the request.
+   *
+   * The broker stamps the verified user over whatever the frame carried, so
+   * `request.userId` is the signed-in account and not a claim. Composing the
+   * path from it means there is no string a client could send that reaches
+   * another account's folder — isolation by construction rather than a check
+   * that has to be repeated at every entry point.
+   *
+   * What is stored is the root-relative path, because everything downstream
+   * resolves from the root: the tool's working directory, the artefact server.
+   * Clients only ever see the name.
+   */
+  const workspace = projectPath(request.userId, request.workspace);
+  await ensureWorkspaceDirectory(globals.config.workspaceRoot, workspace);
+  const opened = await globals.sessions.open(request.sessionKey, workspace);
   if (!opened.created) return { sessionKey: request.sessionKey, workspace: opened.row.workspace, created: false };
 
   const seq = await globals.sessions.allocateSequence(request.sessionKey, 1);

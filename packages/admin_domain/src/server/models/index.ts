@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import type { DatabaseSync } from "node:sqlite";
 import {
   MODEL_ENDPOINT_TYPES,
   type CreateModelDefinitionRequest,
@@ -11,6 +10,7 @@ import {
   type UpdateModelDefinitionRequest,
   type UpdateModelEndpointRequest,
 } from "../../common/protocol/models/index.js";
+import { positional, queries, type AdminDatabase } from "../database/index.js";
 
 type EndpointRow = {
   id: string;
@@ -60,12 +60,12 @@ function modelFromRow(row: ModelRow): ModelDefinition {
     id: row.id,
     endpointId: row.endpoint_id,
     identifier: row.identifier,
-    contextSize: row.context_size,
-    temperature: row.temperature,
-    minP: row.min_p,
-    topP: row.top_p,
-    topK: row.top_k,
-    repeatPenalty: row.repeat_penalty,
+    contextSize: Number(row.context_size),
+    temperature: Number(row.temperature),
+    minP: Number(row.min_p),
+    topP: Number(row.top_p),
+    topK: Number(row.top_k),
+    repeatPenalty: Number(row.repeat_penalty),
     reasoning: Boolean(row.reasoning),
     supportsText: Boolean(row.supports_text),
     supportsImage: Boolean(row.supports_image),
@@ -76,10 +76,8 @@ function modelFromRow(row: ModelRow): ModelDefinition {
   };
 }
 
-function getEndpoint(database: DatabaseSync, endpointId: string): ModelEndpoint {
-  const row = database
-    .prepare("SELECT * FROM model_endpoints WHERE id = ?")
-    .get(endpointId) as EndpointRow | undefined;
+async function getEndpoint(database: AdminDatabase, endpointId: string): Promise<ModelEndpoint> {
+  const row = await queries(database).get("SELECT * FROM model_endpoints WHERE id = ?", endpointId) as EndpointRow | undefined;
   if (!row) throw new Error("Unknown model endpoint");
   return endpointFromRow(row);
 }
@@ -158,53 +156,52 @@ function identifiersFromProvider(type: ModelEndpointType, value: unknown): strin
   });
 }
 
-export function listModelCatalog(database: DatabaseSync): ModelCatalogSnapshot {
-  const endpoints = database
-    .prepare("SELECT * FROM model_endpoints ORDER BY name COLLATE NOCASE")
-    .all() as EndpointRow[];
-  const models = database
-    .prepare("SELECT * FROM model_definitions ORDER BY identifier COLLATE NOCASE")
-    .all() as ModelRow[];
+/** PostgreSQL's unique-violation code, which is how a duplicate arrives now. */
+const UNIQUE_VIOLATION = "23505";
+
+export async function listModelCatalog(database: AdminDatabase): Promise<ModelCatalogSnapshot> {
+  // `lower()` so the ordering is case-insensitive, which is what the screen
+  // has always shown.
+  const endpoints = await queries(database).all("SELECT * FROM model_endpoints ORDER BY lower(name)") as EndpointRow[];
+  const models = await queries(database).all("SELECT * FROM model_definitions ORDER BY lower(identifier)") as ModelRow[];
   return {
     endpoints: endpoints.map(endpointFromRow),
     models: models.map(modelFromRow),
   } satisfies ModelCatalogSnapshot;
 }
 
-export function createModelEndpoint(
-  database: DatabaseSync,
+export async function createModelEndpoint(
+  database: AdminDatabase,
   input: CreateModelEndpointRequest,
-): ModelCatalogSnapshot {
+): Promise<ModelCatalogSnapshot> {
   assertEndpointInput(input);
   const now = new Date().toISOString();
-  database
-    .prepare(
-      "INSERT INTO model_endpoints (id, name, url, header_name, header_value, api_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-    )
-    .run(randomUUID(), input.name.trim(), input.url.trim(), input.headerName.trim(), input.headerValue.trim(), input.type, now, now);
+  await queries(database).run(
+    "INSERT INTO model_endpoints (id, name, url, header_name, header_value, api_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    randomUUID(), input.name.trim(), input.url.trim(), input.headerName.trim(), input.headerValue.trim(), input.type, now, now,
+  );
   return listModelCatalog(database);
 }
 
-export function updateModelEndpoint(
-  database: DatabaseSync,
+export async function updateModelEndpoint(
+  database: AdminDatabase,
   endpointId: string,
   input: UpdateModelEndpointRequest,
-): ModelCatalogSnapshot {
+): Promise<ModelCatalogSnapshot> {
   assertEndpointInput(input);
-  getEndpoint(database, endpointId);
-  database
-    .prepare(
-      "UPDATE model_endpoints SET name = ?, url = ?, header_name = ?, header_value = ?, api_type = ?, updated_at = ? WHERE id = ?",
-    )
-    .run(input.name.trim(), input.url.trim(), input.headerName.trim(), input.headerValue.trim(), input.type, new Date().toISOString(), endpointId);
+  await getEndpoint(database, endpointId);
+  await queries(database).run(
+    "UPDATE model_endpoints SET name = ?, url = ?, header_name = ?, header_value = ?, api_type = ?, updated_at = ? WHERE id = ?",
+    input.name.trim(), input.url.trim(), input.headerName.trim(), input.headerValue.trim(), input.type, new Date().toISOString(), endpointId,
+  );
   return listModelCatalog(database);
 }
 
 export async function refreshModelEndpoint(
-  database: DatabaseSync,
+  database: AdminDatabase,
   endpointId: string,
 ): Promise<ModelCatalogSnapshot> {
-  const endpoint = getEndpoint(database, endpointId);
+  const endpoint = await getEndpoint(database, endpointId);
   const headers = endpoint.headerName
     ? { [endpoint.headerName]: endpoint.headerValue }
     : undefined;
@@ -217,54 +214,68 @@ export async function refreshModelEndpoint(
   const identifiers = [...new Set(identifiersFromProvider(endpoint.type, await response.json()))]
     .filter((identifier) => !identifier.toLowerCase().includes("embedding"));
   const now = new Date().toISOString();
-  const insert = database.prepare(
-    "INSERT INTO model_definitions (id, endpoint_id, identifier, context_size, temperature, min_p, top_p, top_k, repeat_penalty, reasoning, supports_text, supports_image, supports_sound, supports_video, created_at, updated_at) VALUES (?, ?, ?, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, ?, ?) ON CONFLICT(endpoint_id, identifier) DO NOTHING",
-  );
-  database.exec("BEGIN IMMEDIATE");
+
+  /**
+   * One client, not the pool.
+   *
+   * `BEGIN` on a pool is a promise that the next statement lands on the same
+   * connection, and a pool makes no such promise — the inserts could scatter
+   * across connections and the commit would apply to whichever one happened to
+   * run it. A whole provider refresh landing half-applied is exactly what the
+   * transaction was there to prevent.
+   */
+  const client = await database.connect();
   try {
-    for (const identifier of identifiers) insert.run(randomUUID(), endpointId, identifier, now, now);
-    database.exec("COMMIT");
+    await client.query("BEGIN");
+    for (const identifier of identifiers) {
+      await client.query(positional(
+        "INSERT INTO model_definitions (id, endpoint_id, identifier, context_size, temperature, min_p, top_p, top_k, repeat_penalty, reasoning, supports_text, supports_image, supports_sound, supports_video, created_at, updated_at) VALUES (?, ?, ?, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, ?, ?) ON CONFLICT (endpoint_id, identifier) DO NOTHING",
+      ), [randomUUID(), endpointId, identifier, now, now]);
+    }
+    await client.query("COMMIT");
   } catch (error) {
-    database.exec("ROLLBACK");
+    await client.query("ROLLBACK");
     throw error;
+  } finally {
+    client.release();
   }
   return listModelCatalog(database);
 }
 
-export function createModelDefinition(
-  database: DatabaseSync,
+export async function createModelDefinition(
+  database: AdminDatabase,
   endpointId: string,
   input: CreateModelDefinitionRequest,
-): ModelCatalogSnapshot {
+): Promise<ModelCatalogSnapshot> {
   assertModelInput(input);
-  getEndpoint(database, endpointId);
+  await getEndpoint(database, endpointId);
   const now = new Date().toISOString();
   try {
-    database
-      .prepare(
-        "INSERT INTO model_definitions (id, endpoint_id, identifier, context_size, temperature, min_p, top_p, top_k, repeat_penalty, reasoning, supports_text, supports_image, supports_sound, supports_video, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      )
-      .run(randomUUID(), endpointId, input.identifier.trim(), input.contextSize, input.temperature, input.minP, input.topP, input.topK, input.repeatPenalty, Number(input.reasoning), Number(input.supportsText), Number(input.supportsImage), Number(input.supportsSound), Number(input.supportsVideo), now, now);
+    await queries(database).run(
+      "INSERT INTO model_definitions (id, endpoint_id, identifier, context_size, temperature, min_p, top_p, top_k, repeat_penalty, reasoning, supports_text, supports_image, supports_sound, supports_video, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      randomUUID(), endpointId, input.identifier.trim(), input.contextSize, input.temperature, input.minP, input.topP, input.topK, input.repeatPenalty, Number(input.reasoning), Number(input.supportsText), Number(input.supportsImage), Number(input.supportsSound), Number(input.supportsVideo), now, now,
+    );
   } catch (error) {
-    if (error instanceof Error && error.message.includes("UNIQUE constraint failed"))
+    // Matched on the code rather than the message, so it survives a server
+    // running in another language.
+    if (typeof error === "object" && error !== null && (error as { code?: string }).code === UNIQUE_VIOLATION)
       throw new Error("A model with this identifier already exists for the endpoint");
     throw error;
   }
   return listModelCatalog(database);
 }
 
-export function updateModelDefinition(
-  database: DatabaseSync,
+export async function updateModelDefinition(
+  database: AdminDatabase,
   endpointId: string,
   modelId: string,
   input: UpdateModelDefinitionRequest,
-): ModelCatalogSnapshot {
+): Promise<ModelCatalogSnapshot> {
   assertModelInput(input);
-  const changed = database
-    .prepare(
-      "UPDATE model_definitions SET identifier = ?, context_size = ?, temperature = ?, min_p = ?, top_p = ?, top_k = ?, repeat_penalty = ?, reasoning = ?, supports_text = ?, supports_image = ?, supports_sound = ?, supports_video = ?, updated_at = ? WHERE id = ? AND endpoint_id = ?",
-    )
-    .run(input.identifier.trim(), input.contextSize, input.temperature, input.minP, input.topP, input.topK, input.repeatPenalty, Number(input.reasoning), Number(input.supportsText), Number(input.supportsImage), Number(input.supportsSound), Number(input.supportsVideo), new Date().toISOString(), modelId, endpointId);
+  const changed = await queries(database).run(
+    "UPDATE model_definitions SET identifier = ?, context_size = ?, temperature = ?, min_p = ?, top_p = ?, top_k = ?, repeat_penalty = ?, reasoning = ?, supports_text = ?, supports_image = ?, supports_sound = ?, supports_video = ?, updated_at = ? WHERE id = ? AND endpoint_id = ?",
+    input.identifier.trim(), input.contextSize, input.temperature, input.minP, input.topP, input.topK, input.repeatPenalty, Number(input.reasoning), Number(input.supportsText), Number(input.supportsImage), Number(input.supportsSound), Number(input.supportsVideo), new Date().toISOString(), modelId, endpointId,
+  );
   if (!changed.changes) throw new Error("Unknown endpoint model");
   return listModelCatalog(database);
 }

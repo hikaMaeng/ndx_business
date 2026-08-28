@@ -1,3 +1,4 @@
+import { workspaceDisplayName } from "vibeagent_domain/common";
 import { useState } from "react";
 import type { VibeClient, VibeProject, VibeSessionListItem } from "vibeagent_domain/front";
 import { useModel } from "../model/useModel.js";
@@ -52,7 +53,7 @@ function Project({ project, activeSession, onOpen, onNewSession }: {
           onClick={() => setOpen((current) => !current)}
         >
           <span className="project-caret">{open ? "▾" : "▸"}</span>
-          <span className="project-name" data-testid="project-name">{project.workspace}</span>
+          <span className="project-name" data-testid="project-name">{workspaceDisplayName(project.workspace)}</span>
           <span className="project-count">{project.sessions.length}</span>
         </button>
         <button

@@ -22,3 +22,48 @@ export function resolveWorkspaceDirectory(root: string, relative: string): strin
   }
   return resolved;
 }
+
+/**
+ * Every project lives under the account that made it.
+ *
+ * ```
+ * /workspace/<userId>/<project>/
+ * ```
+ *
+ * The client never names the account half. It asks for `myproject`, and the
+ * account comes from the verified session — the broker stamps `userId` over
+ * whatever the frame carried, so there is no string a client could send that
+ * addresses somebody else's folder. That is isolation by construction rather
+ * than a check that has to be remembered at every entry point.
+ *
+ * The account folder is the user id, not the email: it survives a change of
+ * address and contains nothing a path has to escape.
+ */
+export function projectPath(userId: string, name: string): string {
+  const account = normaliseWorkspacePath(userId);
+  const project = normaliseWorkspacePath(name);
+  if (!account || account.includes("/")) throw new Error(`account is not usable as a folder: ${JSON.stringify(userId)}`);
+  if (!project) throw new Error(`project name is not usable: ${JSON.stringify(name)}`);
+  return `${account}/${project}`;
+}
+
+/**
+ * The name a client should see, given what is stored.
+ *
+ * Sessions record the root-relative path because everything downstream — the
+ * tool's working directory, the artefact server — resolves from the root. The
+ * account half is an implementation detail of where things live, so it is
+ * stripped on the way out. Returns null when the path is not this account's,
+ * which is the shape a caller should have to handle rather than a throw.
+ */
+export function projectName(userId: string, rootRelative: string): string | null {
+  const prefix = `${userId}/`;
+  return rootRelative.startsWith(prefix) ? rootRelative.slice(prefix.length) || null : null;
+}
+
+/** Where one account's projects live. Created on demand, like the projects themselves. */
+export function accountDirectory(root: string, userId: string): string {
+  const account = normaliseWorkspacePath(userId);
+  if (!account || account.includes("/")) throw new Error(`account is not usable as a folder: ${JSON.stringify(userId)}`);
+  return path.resolve(path.resolve(root), account);
+}

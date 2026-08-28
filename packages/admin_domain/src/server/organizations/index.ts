@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import type { DatabaseSync } from "node:sqlite";
 import {
   ORGANIZATION_COLORS,
   ORGANIZATION_ICONS,
@@ -18,6 +17,7 @@ import {
 } from "../../common/protocol/organization/index.js";
 import type { UsersResponse } from "../../common/protocol/auth/index.js";
 import { listUsers } from "../auth/index.js";
+import { positional, queries, type AdminDatabase } from "../database/index.js";
 import {
   buildOrganizationAccess,
   canListOrganizationAccounts,
@@ -26,16 +26,15 @@ import {
   requireOrganizationManage,
 } from "./authorization/index.js";
 
-export function listOrganizations(
-  database: DatabaseSync,
+export async function listOrganizations(
+  database: AdminDatabase,
   actorId: string,
   master: boolean,
-): OrganizationSnapshot {
-  const organizationRows = database
-    .prepare(
-      "SELECT id, name, parent_id, color, icon, created_at FROM organizations ORDER BY name",
-    )
-    .all() as Array<{
+): Promise<OrganizationSnapshot> {
+  const ask = queries(database);
+  const organizationRows = await ask.all(
+    "SELECT id, name, parent_id, color, icon, created_at FROM organizations ORDER BY name",
+  ) as Array<{
     id: string;
     name: string;
     parent_id: string | null;
@@ -43,38 +42,31 @@ export function listOrganizations(
     icon: OrganizationIcon;
     created_at: string;
   }>;
-  const memberRows = database
-    .prepare(
-      "SELECT m.organization_id, m.user_id, u.email FROM organization_members m JOIN users u ON u.id=m.user_id ORDER BY u.email",
-    )
-    .all() as Array<{
+  const memberRows = await ask.all(
+    "SELECT m.organization_id, m.user_id, u.email FROM organization_members m JOIN users u ON u.id=m.user_id ORDER BY u.email",
+  ) as Array<{
     organization_id: string;
     user_id: string;
     email: string;
   }>;
-  const responsibilityRows = database
-    .prepare(
-      "SELECT r.organization_id, r.user_id, r.scope, u.email FROM organization_responsibilities r JOIN users u ON u.id=r.user_id",
-    )
-    .all() as Array<{
+  const responsibilityRows = await ask.all(
+    "SELECT r.organization_id, r.user_id, r.scope, u.email FROM organization_responsibilities r JOIN users u ON u.id=r.user_id",
+  ) as Array<{
     organization_id: string;
     user_id: string;
     scope: "node" | "subtree";
     email: string;
   }>;
-  const inferenceServiceOptions = database
-    .prepare("SELECT id, name FROM model_endpoints ORDER BY name COLLATE NOCASE")
-    .all() as Array<{ id: string; name: string }>;
-  const inferenceServiceRows = database
-    .prepare(
-      "SELECT service.organization_id, service.endpoint_id, endpoint.name FROM organization_inference_services service JOIN model_endpoints endpoint ON endpoint.id = service.endpoint_id ORDER BY endpoint.name COLLATE NOCASE",
-    )
-    .all() as Array<{ organization_id: string; endpoint_id: string; name: string }>;
-  const inferenceModelRows = database
-    .prepare(
-      "SELECT service.organization_id, service.endpoint_id, definition.id AS model_id, definition.identifier, COALESCE(item.active, 1) AS active FROM organization_inference_services service JOIN model_definitions definition ON definition.endpoint_id = service.endpoint_id LEFT JOIN organization_inference_models item ON item.organization_id = service.organization_id AND item.endpoint_id = service.endpoint_id AND item.model_id = definition.id ORDER BY definition.identifier COLLATE NOCASE",
-    )
-    .all() as Array<{
+  // `lower()` for a case-insensitive sort.
+  const inferenceServiceOptions = await ask.all(
+    "SELECT id, name FROM model_endpoints ORDER BY lower(name)",
+  ) as Array<{ id: string; name: string }>;
+  const inferenceServiceRows = await ask.all(
+    "SELECT service.organization_id, service.endpoint_id, endpoint.name FROM organization_inference_services service JOIN model_endpoints endpoint ON endpoint.id = service.endpoint_id ORDER BY lower(endpoint.name)",
+  ) as Array<{ organization_id: string; endpoint_id: string; name: string }>;
+  const inferenceModelRows = await ask.all(
+    "SELECT service.organization_id, service.endpoint_id, definition.id AS model_id, definition.identifier, COALESCE(item.active, 1) AS active FROM organization_inference_services service JOIN model_definitions definition ON definition.endpoint_id = service.endpoint_id LEFT JOIN organization_inference_models item ON item.organization_id = service.organization_id AND item.endpoint_id = service.endpoint_id AND item.model_id = definition.id ORDER BY lower(definition.identifier)",
+  ) as Array<{
     organization_id: string;
     endpoint_id: string;
     model_id: string;
@@ -126,7 +118,7 @@ export function listOrganizations(
     inferenceServices: [...servicesByOrganization.values()].flatMap((services) =>
       [...services.values()],
     ),
-    access: buildOrganizationAccess(
+    access: await buildOrganizationAccess(
       database,
       actorId,
       master,
@@ -135,90 +127,84 @@ export function listOrganizations(
   } satisfies OrganizationSnapshot;
 }
 
-export function assignOrganizationInferenceService(
-  database: DatabaseSync,
+export async function assignOrganizationInferenceService(
+  database: AdminDatabase,
   actorId: string,
   master: boolean,
   organizationId: string,
   input: AssignOrganizationInferenceServiceRequest,
-): OrganizationSnapshot {
-  requireOrganizationManage(database, actorId, organizationId, master);
+): Promise<OrganizationSnapshot> {
+  await requireOrganizationManage(database, actorId, organizationId, master);
   if (!input || typeof input.endpointId !== "string" || !input.endpointId)
     throw new Error("Unknown inference service");
-  const endpoint = database
-    .prepare("SELECT id FROM model_endpoints WHERE id = ?")
-    .get(input.endpointId) as { id: string } | undefined;
+  const endpoint = await queries(database).get("SELECT id FROM model_endpoints WHERE id = ?", input.endpointId) as { id: string } | undefined;
   if (!endpoint) throw new Error("Unknown inference service");
-  database
-    .prepare(
-      "INSERT OR IGNORE INTO organization_inference_services (organization_id, endpoint_id) VALUES (?, ?)",
-    )
-    .run(organizationId, endpoint.id);
+  // Already a member is not an error; it is the state being asked for.
+  await queries(database).run(
+    "INSERT INTO organization_inference_services (organization_id, endpoint_id) VALUES (?, ?) ON CONFLICT DO NOTHING",
+    organizationId, endpoint.id,
+  );
   return listOrganizations(database, actorId, master);
 }
 
-export function removeOrganizationInferenceService(
-  database: DatabaseSync,
+export async function removeOrganizationInferenceService(
+  database: AdminDatabase,
   actorId: string,
   master: boolean,
   organizationId: string,
   endpointId: string,
-): OrganizationSnapshot {
-  requireOrganizationManage(database, actorId, organizationId, master);
-  const removed = database
-    .prepare(
-      "DELETE FROM organization_inference_services WHERE organization_id = ? AND endpoint_id = ?",
-    )
-    .run(organizationId, endpointId);
+): Promise<OrganizationSnapshot> {
+  await requireOrganizationManage(database, actorId, organizationId, master);
+  const removed = await queries(database).run(
+    "DELETE FROM organization_inference_services WHERE organization_id = ? AND endpoint_id = ?",
+    organizationId, endpointId,
+  );
   if (!removed.changes) throw new Error("Unknown organization inference service");
   return listOrganizations(database, actorId, master);
 }
 
-export function updateOrganizationInferenceModel(
-  database: DatabaseSync,
+export async function updateOrganizationInferenceModel(
+  database: AdminDatabase,
   actorId: string,
   master: boolean,
   organizationId: string,
   endpointId: string,
   modelId: string,
   input: UpdateOrganizationInferenceModelRequest,
-): OrganizationSnapshot {
-  requireOrganizationManage(database, actorId, organizationId, master);
+): Promise<OrganizationSnapshot> {
+  await requireOrganizationManage(database, actorId, organizationId, master);
   if (!input || typeof input.active !== "boolean")
     throw new Error("Inference model active state is required");
-  const changed = database
-    .prepare(
-      "INSERT INTO organization_inference_models (organization_id, endpoint_id, model_id, active) SELECT ?, ?, definition.id, ? FROM model_definitions definition JOIN organization_inference_services service ON service.organization_id = ? AND service.endpoint_id = ? WHERE definition.id = ? AND definition.endpoint_id = ? ON CONFLICT(organization_id, endpoint_id, model_id) DO UPDATE SET active = excluded.active",
-    )
-    .run(
-      organizationId,
-      endpointId,
-      Number(input.active),
-      organizationId,
-      endpointId,
-      modelId,
-      endpointId,
-    );
+  const changed = await queries(database).run(
+    "INSERT INTO organization_inference_models (organization_id, endpoint_id, model_id, active) SELECT ?, ?, definition.id, ? FROM model_definitions definition JOIN organization_inference_services service ON service.organization_id = ? AND service.endpoint_id = ? WHERE definition.id = ? AND definition.endpoint_id = ? ON CONFLICT (organization_id, endpoint_id, model_id) DO UPDATE SET active = excluded.active",
+    organizationId,
+    endpointId,
+    Number(input.active),
+    organizationId,
+    endpointId,
+    modelId,
+    endpointId,
+  );
   if (!changed.changes) throw new Error("Unknown organization inference model");
   return listOrganizations(database, actorId, master);
 }
 
-export function listOrganizationAccounts(
-  database: DatabaseSync,
+export async function listOrganizationAccounts(
+  database: AdminDatabase,
   actorId: string,
   master: boolean,
-): UsersResponse {
-  if (!canListOrganizationAccounts(database, actorId, master))
+): Promise<UsersResponse> {
+  if (!(await canListOrganizationAccounts(database, actorId, master)))
     throw new Error("You cannot manage organization accounts");
-  return { users: listUsers(database) } satisfies UsersResponse;
+  return { users: await listUsers(database) } satisfies UsersResponse;
 }
 
-export function createOrganization(
-  database: DatabaseSync,
+export async function createOrganization(
+  database: AdminDatabase,
   actorId: string,
   master: boolean,
   input: CreateOrganizationRequest,
-): OrganizationSnapshot {
+): Promise<OrganizationSnapshot> {
   if (!input || typeof input.name !== "string")
     throw new Error("Organization name is required");
   const name = input.name.trim();
@@ -238,36 +224,33 @@ export function createOrganization(
     if (input.parentId !== null && input.parentId !== undefined) {
       if (typeof input.parentId !== "string" || !input.parentId)
         throw new Error("Unknown parent organization");
-      requireOrganizationAdminAll(database, actorId, input.parentId, master);
+      await requireOrganizationAdminAll(database, actorId, input.parentId, master);
     }
   } else {
     if (typeof input.parentId !== "string" || !input.parentId)
       throw new Error("A child organization requires a parent");
-    requireOrganizationAdminAll(database, actorId, input.parentId, master);
+    await requireOrganizationAdminAll(database, actorId, input.parentId, master);
   }
-  database
-    .prepare(
-      "INSERT INTO organizations (id, name, parent_id, color, icon, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-    )
-    .run(
-      randomUUID(),
-      name,
-      input.parentId ?? null,
-      "blue",
-      "building",
-      new Date().toISOString(),
-    );
+  await queries(database).run(
+    "INSERT INTO organizations (id, name, parent_id, color, icon, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+    randomUUID(),
+    name,
+    input.parentId ?? null,
+    "blue",
+    "building",
+    new Date().toISOString(),
+  );
   return listOrganizations(database, actorId, master);
 }
 
-export function updateOrganization(
-  database: DatabaseSync,
+export async function updateOrganization(
+  database: AdminDatabase,
   actorId: string,
   master: boolean,
   organizationId: string,
   input: UpdateOrganizationRequest,
-): OrganizationSnapshot {
-  requireOrganizationManage(database, actorId, organizationId, master);
+): Promise<OrganizationSnapshot> {
+  await requireOrganizationManage(database, actorId, organizationId, master);
   if (!input || typeof input.name !== "string")
     throw new Error("Organization name is required");
   const name = input.name.trim();
@@ -276,70 +259,70 @@ export function updateOrganization(
     throw new Error("Unknown organization color");
   if (!ORGANIZATION_ICONS.includes(input.icon))
     throw new Error("Unknown organization icon");
-  database
-    .prepare(
-      "UPDATE organizations SET name = ?, color = ?, icon = ? WHERE id = ?",
-    )
-    .run(name, input.color, input.icon, organizationId);
+  await queries(database).run(
+    "UPDATE organizations SET name = ?, color = ?, icon = ? WHERE id = ?",
+    name, input.color, input.icon, organizationId,
+  );
   return listOrganizations(database, actorId, master);
 }
 
-export function assignMember(
-  database: DatabaseSync,
+export async function assignMember(
+  database: AdminDatabase,
   actorId: string,
   master: boolean,
   organizationId: string,
   input: AssignMemberRequest,
-): OrganizationSnapshot {
-  requireOrganizationManage(database, actorId, organizationId, master);
+): Promise<OrganizationSnapshot> {
+  await requireOrganizationManage(database, actorId, organizationId, master);
   if (!input || typeof input.userId !== "string" || !input.userId)
     throw new Error("Unknown organization account");
-  database
-    .prepare(
-      "INSERT OR IGNORE INTO organization_members (organization_id, user_id) VALUES (?, ?)",
-    )
-    .run(organizationId, input.userId);
+  await queries(database).run(
+    "INSERT INTO organization_members (organization_id, user_id) VALUES (?, ?) ON CONFLICT DO NOTHING",
+    organizationId, input.userId,
+  );
   return listOrganizations(database, actorId, master);
 }
 
-export function removeMember(
-  database: DatabaseSync,
+export async function removeMember(
+  database: AdminDatabase,
   actorId: string,
   master: boolean,
   organizationId: string,
   userId: string,
-): OrganizationSnapshot {
+): Promise<OrganizationSnapshot> {
   // see docs/internals.md#decisions
-  requireOrganizationManage(database, actorId, organizationId, master);
+  await requireOrganizationManage(database, actorId, organizationId, master);
   if (!userId) throw new Error("Unknown organization account");
-  database.exec("BEGIN IMMEDIATE");
+
+  // Both deletions or neither, and both on one connection — a pool does not
+  // promise the next statement lands where `BEGIN` did.
+  const client = await database.connect();
   try {
-    database
-      .prepare(
-        "DELETE FROM organization_responsibilities WHERE organization_id = ? AND user_id = ?",
-      )
-      .run(organizationId, userId);
-    database
-      .prepare(
-        "DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?",
-      )
-      .run(organizationId, userId);
-    database.exec("COMMIT");
+    await client.query("BEGIN");
+    await client.query(positional(
+      "DELETE FROM organization_responsibilities WHERE organization_id = ? AND user_id = ?",
+    ), [organizationId, userId]);
+    await client.query(positional(
+      "DELETE FROM organization_members WHERE organization_id = ? AND user_id = ?",
+    ), [organizationId, userId]);
+    await client.query("COMMIT");
   } catch (error) {
-    database.exec("ROLLBACK");
+    await client.query("ROLLBACK");
     throw error;
+  } finally {
+    client.release();
   }
   return listOrganizations(database, actorId, master);
 }
 
-export function assignResponsible(
-  database: DatabaseSync,
+export async function assignResponsible(
+  database: AdminDatabase,
   actorId: string,
   master: boolean,
   organizationId: string,
   input: AssignResponsibleRequest,
-): OrganizationSnapshot {
-  requireOrganizationManage(database, actorId, organizationId, master);
+): Promise<OrganizationSnapshot> {
+  await requireOrganizationManage(database, actorId, organizationId, master);
   if (
     !input ||
     typeof input.userId !== "string" ||
@@ -348,42 +331,38 @@ export function assignResponsible(
   )
     throw new Error("Unknown organization responsibility");
   if (input.scope === "subtree")
-    requireOrganizationAdminAll(database, actorId, organizationId, master);
-  database
-    .prepare(
-      "INSERT INTO organization_responsibilities (organization_id, user_id, scope) VALUES (?, ?, ?) ON CONFLICT(organization_id, user_id) DO UPDATE SET scope=excluded.scope",
-    )
-    .run(organizationId, input.userId, input.scope);
+    await requireOrganizationAdminAll(database, actorId, organizationId, master);
+  await queries(database).run(
+    "INSERT INTO organization_responsibilities (organization_id, user_id, scope) VALUES (?, ?, ?) ON CONFLICT (organization_id, user_id) DO UPDATE SET scope=excluded.scope",
+    organizationId, input.userId, input.scope,
+  );
   return listOrganizations(database, actorId, master);
 }
 
-export function removeResponsible(
-  database: DatabaseSync,
+export async function removeResponsible(
+  database: AdminDatabase,
   actorId: string,
   master: boolean,
   organizationId: string,
   userId: string,
-): OrganizationSnapshot {
-  requireOrganizationManage(database, actorId, organizationId, master);
+): Promise<OrganizationSnapshot> {
+  await requireOrganizationManage(database, actorId, organizationId, master);
   if (!userId) throw new Error("Unknown organization account");
-  database
-    .prepare(
-      "DELETE FROM organization_responsibilities WHERE organization_id = ? AND user_id = ?",
-    )
-    .run(organizationId, userId);
+  await queries(database).run(
+    "DELETE FROM organization_responsibilities WHERE organization_id = ? AND user_id = ?",
+    organizationId, userId,
+  );
   return listOrganizations(database, actorId, master);
 }
 
-export function deleteOrganization(
-  database: DatabaseSync,
+export async function deleteOrganization(
+  database: AdminDatabase,
   actorId: string,
   master: boolean,
   organizationId: string,
-): OrganizationSnapshot {
+): Promise<OrganizationSnapshot> {
   requireMasterOrganizationMutation(master);
-  requireOrganizationManage(database, actorId, organizationId, master);
-  database
-    .prepare("DELETE FROM organizations WHERE id = ?")
-    .run(organizationId);
+  await requireOrganizationManage(database, actorId, organizationId, master);
+  await queries(database).run("DELETE FROM organizations WHERE id = ?", organizationId);
   return listOrganizations(database, actorId, master);
 }

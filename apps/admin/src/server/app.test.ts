@@ -1,11 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import test from "node:test";
 import request from "supertest";
 import { createApp } from "./app.js";
-import { openAuthDatabase } from "admin_domain/server";
+import { adminDatabaseReachable, useAdminDatabase } from "admin_domain/server";
 
 function useMasterEmails(value: string): () => void {
   const previous = process.env.MASTER_ADMIN_EMAILS;
@@ -17,25 +14,17 @@ function useMasterEmails(value: string): () => void {
 }
 
 /**
- * A throwaway database on disk, removed when the test ends. The health tests
- * used to call `createApp()` with no database at all, which quietly wrote one
- * into the repository instead.
+ * Every test in this file needs the real store.
+ *
+ * These exercise real SQL against a real server, so a database that is not
+ * running is reported as a skip with the reason rather than as a wall of
+ * connection failures.
  */
-function useDatabase(label: string, t: { after: (fn: () => void) => void }) {
-  const directory = mkdtempSync(path.join(os.tmpdir(), `admin-${label}-`));
-  const database = openAuthDatabase(path.join(directory, `${label}.sqlite`));
-  t.after(() => {
-    // Closed before the directory goes. Windows refuses to unlink a file that
-    // is still open, so leaving this out fails the test on the cleanup rather
-    // than on anything it was checking.
-    database.close();
-    rmSync(directory, { recursive: true, force: true });
-  });
-  return database;
-}
+const reachable = await adminDatabaseReachable();
+const needsDatabase = { skip: reachable ? false : "no PostgreSQL at TEST_DATABASE_URL" };
 
-test("GET /health returns admin health", async (t) => {
-  const response = await request(createApp(useDatabase("health", t))).get("/health").expect(200);
+test("GET /health returns admin health", needsDatabase, async (t) => {
+  const response = await request(createApp(await useAdminDatabase(t))).get("/health").expect(200);
 
   assert.deepEqual(response.body, {
     status: "ok",
@@ -43,8 +32,8 @@ test("GET /health returns admin health", async (t) => {
   });
 });
 
-test("GET /api/health returns admin health", async (t) => {
-  const response = await request(createApp(useDatabase("api-health", t))).get("/api/health").expect(200);
+test("GET /api/health returns admin health", needsDatabase, async (t) => {
+  const response = await request(createApp(await useAdminDatabase(t))).get("/api/health").expect(200);
 
   assert.deepEqual(response.body, {
     status: "ok",
@@ -52,9 +41,8 @@ test("GET /api/health returns admin health", async (t) => {
   });
 });
 
-test("API permission middleware defaults every API route to authentication", async () => {
-  const directory = mkdtempSync(path.join(os.tmpdir(), "admin-permission-"));
-  const database = openAuthDatabase(path.join(directory, "permission.sqlite"));
+test("API permission middleware defaults every API route to authentication", needsDatabase, async (t) => {
+  const database = await useAdminDatabase(t);
   const restoreMasterEmails = useMasterEmails("master@example.com");
   const app = createApp(database);
   const password = "correct horse battery";
@@ -81,14 +69,11 @@ test("API permission middleware defaults every API route to authentication", asy
     await request(app).get("/api/admin/settings").set("Authorization", `Bearer ${masterToken}`).expect(200);
   } finally {
     restoreMasterEmails();
-    database.close();
-    rmSync(directory, { recursive: true, force: true });
   }
 });
 
-test("signup, login, authenticated settings, and session revocation work in SQLite", async () => {
-  const directory = mkdtempSync(path.join(os.tmpdir(), "admin-auth-"));
-  const database = openAuthDatabase(path.join(directory, "auth.sqlite"));
+test("signup, login, authenticated settings, and session revocation work end to end", needsDatabase, async (t) => {
+  const database = await useAdminDatabase(t);
   const restoreMasterEmails = useMasterEmails("operator@example.com");
   const app = createApp(database);
   try {
@@ -104,14 +89,11 @@ test("signup, login, authenticated settings, and session revocation work in SQLi
     await request(app).get("/api/auth/me").set("Authorization", `Bearer ${token}`).expect(401);
   } finally {
     restoreMasterEmails();
-    database.close();
-    rmSync(directory, { recursive: true, force: true });
   }
 });
 
-test("one account reuses its token while tracking devices and configurable transports", async () => {
-  const directory = mkdtempSync(path.join(os.tmpdir(), "admin-shared-session-"));
-  const database = openAuthDatabase(path.join(directory, "auth.sqlite"));
+test("one account reuses its token while tracking devices and configurable transports", needsDatabase, async (t) => {
+  const database = await useAdminDatabase(t);
   const restoreMasterEmails = useMasterEmails("shared@example.com");
   const app = createApp(database);
   try {
@@ -127,14 +109,11 @@ test("one account reuses its token while tracking devices and configurable trans
     await request(app).get("/api/auth/me").set("X-Client-Token", first.body.sessionToken).set("X-Session-Device", "plugin-c").expect(200);
   } finally {
     restoreMasterEmails();
-    database.close();
-    rmSync(directory, { recursive: true, force: true });
   }
 });
 
-test("organization acceptance: multiple roots, deep children, delegated scopes, and forbidden mutations", async () => {
-  const directory = mkdtempSync(path.join(os.tmpdir(), "admin-organization-acceptance-"));
-  const database = openAuthDatabase(path.join(directory, "organization.sqlite"));
+test("organization acceptance: multiple roots, deep children, delegated scopes, and forbidden mutations", needsDatabase, async (t) => {
+  const database = await useAdminDatabase(t);
   const restoreMasterEmails = useMasterEmails("hika00@gmail.com");
   const app = createApp(database);
   const password = "correct horse battery";
@@ -159,11 +138,12 @@ test("organization acceptance: multiple roots, deep children, delegated scopes, 
     const nodeOwner = await createAccount("node.owner@example.com");
     const sharedMember = await createAccount("shared.member@example.com");
     const outsider = await createAccount("other.member@example.com");
-    const userId = (email: string) => (database.prepare("SELECT id FROM users WHERE email = ?").get(email) as { id: string }).id;
-    const sharedMemberId = userId("shared.member@example.com");
-    const subtreeOwnerId = userId("org.owner@example.com");
-    const nodeOwnerId = userId("node.owner@example.com");
-    const outsiderId = userId("other.member@example.com");
+    const userId = async (email: string): Promise<string> =>
+      String((await database.query("SELECT id FROM users WHERE email = $1", [email])).rows[0]!.id);
+    const sharedMemberId = await userId("shared.member@example.com");
+    const subtreeOwnerId = await userId("org.owner@example.com");
+    const nodeOwnerId = await userId("node.owner@example.com");
+    const outsiderId = await userId("other.member@example.com");
 
     const headquarters = await createOrganization(master, "Headquarters");
     const research = await createOrganization(master, "Research");
@@ -248,14 +228,11 @@ test("organization acceptance: multiple roots, deep children, delegated scopes, 
     assert.equal(delegatedPermission.canDelete, false);
   } finally {
     restoreMasterEmails();
-    database.close();
-    rmSync(directory, { recursive: true, force: true });
   }
 });
 
-test("model endpoints refresh provider models, filter embeddings, and persist model options", async () => {
-  const directory = mkdtempSync(path.join(os.tmpdir(), "admin-models-"));
-  const database = openAuthDatabase(path.join(directory, "models.sqlite"));
+test("model endpoints refresh provider models, filter embeddings, and persist model options", needsDatabase, async (t) => {
+  const database = await useAdminDatabase(t);
   const restoreMasterEmails = useMasterEmails("models@example.com");
   const previousFetch = globalThis.fetch;
   const app = createApp(database);
@@ -415,7 +392,5 @@ test("model endpoints refresh provider models, filter embeddings, and persist mo
   } finally {
     globalThis.fetch = previousFetch;
     restoreMasterEmails();
-    database.close();
-    rmSync(directory, { recursive: true, force: true });
   }
 });

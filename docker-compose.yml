@@ -46,6 +46,10 @@ services:
         required: false
     ports:
       - "${ADMIN_HOST_PORT:-18080}:18080"
+      # The product database. Published so the test suite and psql can reach it
+      # from the host; nothing in the stack uses this port, the services talk
+      # over the internal network.
+      - "${ADMIN_POSTGRES_HOST_PORT:-15432}:5432"
     # Nothing to depend on any more. This used to wait for a `postgres` service
     # it never spoke to — admin runs its own on 127.0.0.1, and that service
     # existed only for the retired `agent` app.

@@ -4,11 +4,11 @@
 
 전 계정 기능이 하나의 공유 세션 토큰과 여러 장비 세션 기록을 일관되게
 유지하는지 검증한다. 테스트 대상은 `apps/admin/src/server/app.ts`와
-`packages/admin_domain/src/server/auth/index.ts`의 실제 HTTP·SQLite 경로다.
+`packages/admin_domain/src/server/auth/index.ts`의 실제 HTTP·PostgreSQL 경로다.
 
 ## Test data and isolation
 
-각 실행은 임시 SQLite 파일과 고유 이메일을 사용한다. 운영 `admin_data`
+각 실행은 임시 PostgreSQL 스키마와 고유 이메일을 사용한다. 운영 `admin_data`
 볼륨은 사용하지 않는다. 장비는 다음 식별자를 사용한다.
 
 | Device | Transport | User agent |
@@ -79,7 +79,7 @@
 2. `npm test --workspace admin_domain`
 3. `npm test --workspace admin`
 4. i18n, architecture, docs 계약 검사
-5. 임시 SQLite를 사용한 API matrix 실행
+5. 임시 스키마를 사용한 API matrix 실행
 6. `npm run deploy admin` 실행 및 deploy report 보관
 7. 배포 URL에 headless smoke 및 scenario 실행
 8. 결과와 미실행 항목을 이 문서의 실행 기록에 추가

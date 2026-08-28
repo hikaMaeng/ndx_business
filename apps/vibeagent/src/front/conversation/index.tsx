@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { workspaceDisplayName } from "vibeagent_domain/common";
 import type { VibeClient } from "vibeagent_domain/front";
 import { useModel } from "../model/useModel.js";
 import { Transcript } from "./Transcript.js";
@@ -80,7 +81,7 @@ export function Conversation({ client }: { client: VibeClient }): React.JSX.Elem
       <header className="conversation-head">
         <div>
           <p className="section-kicker">프로젝트</p>
-          <strong data-testid="session-workspace">{workspace || "—"}</strong>
+          <strong data-testid="session-workspace">{workspace ? workspaceDisplayName(workspace) : "—"}</strong>
         </div>
         <div className="head-actions">
           <span className="chip">도구: bash (별도 프로세스)</span>
