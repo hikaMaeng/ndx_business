@@ -2,8 +2,8 @@ import express from "express";
 import type { DatabaseSync } from "node:sqlite";
 import { parseLoginRequest, parseSignupRequest, parseUpdateSettingsRequest } from "admin_domain/common";
 import { login, readSettings, revokeSession, signup } from "admin_domain/server";
-import type { AuthenticatedRequest } from "../permission/index.js";
-import { body, requireInput } from "./body.js";
+import type { AuthenticatedRequest } from "../../permission/index.js";
+import { body, requireInput } from "../body.js";
 
 export function registerAuthRoutes(app: express.Express, database: DatabaseSync): void {
   app.post("/api/auth/signup", (request, response) => {

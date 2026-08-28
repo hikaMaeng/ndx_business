@@ -6,7 +6,7 @@ export {
   ensureModelsFeatureModel, ModelsCommands, createEndpointDraft, createModelDefinitionDraft,
 } from "./models/model/index.js";
 export type {
-  ModelsFeatureModel, ModelsProgress, ModelsRequest, CommandText,
+  ModelsFeatureModel, ModelsProgress, ModelsFetch, CommandText,
   EndpointDraft, ModelDefinitionDraft,
 } from "./models/model/index.js";
 export { ensureAccountModel } from "./account/model/index.js";

@@ -1,6 +1,6 @@
-import { createOrganizationAccountsModel } from "./accounts.js";
-import { createOrganizationSelectionModel } from "./selection.js";
-import { createOrganizationSnapshotModel } from "./snapshot.js";
+import { createOrganizationAccountsModel } from "./accounts/index.js";
+import { createOrganizationSelectionModel } from "./selection/index.js";
+import { createOrganizationSnapshotModel } from "./snapshot/index.js";
 import type { OrganizationFeatureModel } from "./types.js";
 
 const models = new Map<string, OrganizationFeatureModel>();

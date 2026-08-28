@@ -10,7 +10,7 @@
  * | `commands/` | every write, and the one shape they share |
  */
 export { ensureModelsFeatureModel } from "./store.js";
-export { ModelsCommands, type ModelsRequest, type CommandText } from "./commands/index.js";
+export { ModelsCommands, type ModelsFetch, type CommandText } from "./commands/index.js";
 export { createEndpointDraft, createModelDefinitionDraft, type EndpointDraft, type ModelDefinitionDraft } from "./drafts/index.js";
 export type { ModelsProgress } from "./progress/index.js";
 export type { ModelsFeatureModel } from "./types.js";

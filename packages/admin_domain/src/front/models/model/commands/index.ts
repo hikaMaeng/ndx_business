@@ -3,13 +3,14 @@ import type { EndpointDraft, ModelDefinitionDraft } from "../drafts/index.js";
 import type { ModelsFeatureModel } from "../types.js";
 
 /**
- * How this feature reaches the server.
+ * How this feature reaches the server. A function, not a wire shape — the name
+ * says fetch because that is what it is.
  *
  * Injected rather than imported: the domain must not know how a request is
  * authenticated, only that something can make one. The app supplies its authed
  * fetch and the domain stays free of tokens, headers and base URLs.
  */
-export type ModelsRequest = (path: string, options?: RequestInit) => Promise<unknown>;
+export type ModelsFetch = (path: string, options?: RequestInit) => Promise<unknown>;
 
 /** What to say when a request fails without saying anything useful itself. */
 export interface CommandText {
@@ -44,7 +45,7 @@ export class ModelsCommands {
    */
   constructor(
     private readonly model: ModelsFeatureModel,
-    private readonly request: ModelsRequest,
+    private readonly request: ModelsFetch,
     private readonly words: () => CommandText,
   ) {}
 

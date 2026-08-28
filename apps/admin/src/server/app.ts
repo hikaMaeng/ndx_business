@@ -4,10 +4,10 @@ import { fileURLToPath } from "node:url";
 import type { DatabaseSync } from "node:sqlite";
 import { openAuthDatabase } from "admin_domain/server";
 import { apiPermissionMiddleware } from "./permission/index.js";
-import { registerAdminRoutes } from "./routes/admin.js";
-import { registerAuthRoutes } from "./routes/auth.js";
-import { registerModelRoutes } from "./routes/models.js";
-import { registerOrganizationRoutes } from "./routes/organizations.js";
+import { registerAdminRoutes } from "./routes/admin/index.js";
+import { registerAuthRoutes } from "./routes/auth/index.js";
+import { registerModelRoutes } from "./routes/models/index.js";
+import { registerOrganizationRoutes } from "./routes/organizations/index.js";
 
 export function createApp(database: DatabaseSync = openAuthDatabase(process.env.AUTH_DATABASE_PATH ?? "./data/admin.sqlite")) {
   const app = express();

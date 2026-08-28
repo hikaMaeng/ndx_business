@@ -2,7 +2,7 @@ import express from "express";
 import type { DatabaseSync } from "node:sqlite";
 import { parseCreateModelEndpointRequest, parseModelDefinitionRequest, parseUpdateModelEndpointRequest } from "admin_domain/common";
 import { createModelDefinition, createModelEndpoint, listModelCatalog, refreshModelEndpoint, updateModelDefinition, updateModelEndpoint } from "admin_domain/server";
-import { body, requireInput } from "./body.js";
+import { body, requireInput } from "../body.js";
 
 export function registerModelRoutes(app: express.Express, database: DatabaseSync): void {
   app.get("/api/models", (_request, response) => response.json(listModelCatalog(database)));

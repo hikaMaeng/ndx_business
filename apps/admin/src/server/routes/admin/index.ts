@@ -1,7 +1,7 @@
 import express from "express";
 import type { DatabaseSync } from "node:sqlite";
 import { getSettings, listPendingUsers, listUsers, revokeSessionById, saveSettings, setUserStatus } from "admin_domain/server";
-import { body } from "./body.js";
+import { body } from "../body.js";
 
 export function registerAdminRoutes(app: express.Express, database: DatabaseSync): void {
   app.get("/api/admin/settings", (_request, response) => response.json(getSettings(database)));

@@ -2,8 +2,8 @@ import express from "express";
 import type { DatabaseSync } from "node:sqlite";
 import { addOrganizationInferenceServiceRoute, parseAssignMemberRequest, parseAssignOrganizationInferenceServiceRequest, parseAssignResponsibleRequest, parseCreateOrganizationRequest, parseUpdateOrganizationInferenceModelRequest, parseUpdateOrganizationRequest, removeOrganizationInferenceServiceRoute, updateOrganizationInferenceModelRoute } from "admin_domain/common";
 import { assignMember, assignOrganizationInferenceService, assignResponsible, createOrganization, deleteOrganization, listOrganizationAccounts, listOrganizations, removeMember, removeOrganizationInferenceService, removeResponsible, updateOrganization, updateOrganizationInferenceModel } from "admin_domain/server";
-import type { AuthenticatedRequest } from "../permission/index.js";
-import { body, requireInput } from "./body.js";
+import type { AuthenticatedRequest } from "../../permission/index.js";
+import { body, requireInput } from "../body.js";
 
 function actor(request: AuthenticatedRequest) { return { id: request.user!.id, master: Boolean(request.user!.isMasterAdmin) }; }
 function forbidden(response: express.Response, error: unknown, fallback: string) { response.status(403).json({ error: error instanceof Error ? error.message : fallback }); }
