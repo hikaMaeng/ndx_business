@@ -7,7 +7,7 @@ import { QUEUES } from "./queues.js";
  *
  * No reactor names another and none of them could: each records what it did and
  * stops. This table is what turns "the model replied" into "somebody decide",
- * and it is configuration — the broker, the dispatcher and every worker read it
+ * and it is configuration — the broker and every worker read it
  * as opaque strings, or never read it at all.
  *
  * Read the loop off this table and you can see it plainly. It is not spread

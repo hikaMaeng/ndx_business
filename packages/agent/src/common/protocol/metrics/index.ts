@@ -24,11 +24,11 @@ export interface MetricsSnapshot {
   logTailReads: number;
   logTailEvents: number;
   logTailFailures: number;
-  factDispatchReads: number;
-  factDispatchSends: number;
-  factDispatchFailures: number;
+  reactionEnqueueReads: number;
+  reactionEnqueueSends: number;
+  reactionEnqueueFailures: number;
   /** Facts nothing ever reacted to, found by age and sent again. Should stay at zero. */
-  factDispatchRecovered: number;
+  reactionEnqueueRecovered: number;
   processingDlqTotal: number;
   queueVisibilityRenewFailures: number;
   terminalPersistenceRetries: number;

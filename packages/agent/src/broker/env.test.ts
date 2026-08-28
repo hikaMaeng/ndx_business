@@ -28,8 +28,24 @@ test("the log tail has an explicit fallback interval and batch size", () => {
   assert.throws(() => readEnv({ AGENT_LOG_TAIL_POLL_MS: "0" }), /AGENT_LOG_TAIL_POLL_MS must be positive/);
 });
 
-test("router is no longer a role", () => {
-  assert.throws(() => readEnv({ AGENT_ROLE: "router" }), /AGENT_ROLE must be gateway, worker or dispatcher/);
+/**
+ * There are two kinds of server, and the ones that are gone stay gone.
+ *
+ * `router` was removed once. `dispatcher` was the same shape returning under
+ * another name two days later — a third kind of server for something that is
+ * half of the broker's job. This is the test that noticed, so it now guards
+ * both names.
+ */
+test("broker and worker are the only roles", () => {
+  assert.equal(readEnv({}).role, "broker");
+  assert.equal(readEnv({ AGENT_ROLE: "worker" }).role, "worker");
+  for (const gone of ["router", "dispatcher"]) {
+    assert.throws(() => readEnv({ AGENT_ROLE: gone }), /AGENT_ROLE must be broker or worker/, gone + " must not be a role");
+  }
+});
+
+test("gateway still starts, because that is what deployed containers say", () => {
+  assert.equal(readEnv({ AGENT_ROLE: "gateway" }).role, "broker");
 });
 
 test("a worker server is given a list of queues to watch, not one name", () => {

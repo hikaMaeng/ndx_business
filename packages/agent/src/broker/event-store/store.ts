@@ -8,12 +8,12 @@ const COLUMNS = "event_id,stream_id,sequence,action,transaction_key,event_versio
 /** Client-facing reads never see worker-to-worker traffic. Applied in SQL, not after the fact. */
 const CLIENT_ONLY = "audience <> 'worker'";
 /**
- * A dispatcher reacts to what happened, never to the record of a reaction
+ * The enqueue loop reacts to what happened, never to the record of a reaction
  * being handed out.
  *
  * A consumer writes a `command` row for every message it picks up, including
- * the ones a dispatcher just sent it. Those rows carry the same action as the
- * fact that caused them, so a dispatcher that read them would answer its own
+ * the ones it just sent itself. Those rows carry the same action as the
+ * fact that caused them, so a loop that read them would answer its own
  * dispatch and do it again, for ever. Facts are what reactors record; commands
  * are bookkeeping.
  */
@@ -74,7 +74,7 @@ export class EventStore {
       ON CONFLICT (stream_id) DO UPDATE SET last_sequence = GREATEST(event_stream_sequence.last_sequence, EXCLUDED.last_sequence)`);
     await this.pool.query(`CREATE TABLE IF NOT EXISTS event_subscription_cursor (
       token uuid PRIMARY KEY, channels jsonb NOT NULL, positions jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())`);
-    // A named, durable tail position. A dispatcher restarting must not replay
+    // A named, durable tail position. A broker restarting must not replay
     // the whole log, and must not skip what it had not reached.
     await this.pool.query(`CREATE TABLE IF NOT EXISTS event_reader_cursor (
       name text PRIMARY KEY, positions jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())`);
@@ -160,7 +160,7 @@ export class EventStore {
   /**
    * The tail of the log for a set of actions, rather than a set of channels.
    *
-   * A dispatcher watches what *happened*, not who is listening, so it reads by
+   * The enqueue loop watches what *happened*, not who is listening, so it reads by
    * action. The position key is still `(stream_id, sequence)` for the same
    * reason the channel tail uses it: sequences are issued under the stream's
    * row lock, so within a stream commit order is sequence order and a reader
@@ -176,7 +176,7 @@ export class EventStore {
    * Facts old enough that whatever should have reacted to them has had its
    * chance, newest first.
    *
-   * The dispatcher's cursor only ever moves forward, so a fact recorded while
+   * The enqueue cursor only ever moves forward, so a fact recorded while
    * it was down is behind the cursor for ever. This is how those are found
    * again — not by position, which is exactly the thing that failed, but by age.
    */

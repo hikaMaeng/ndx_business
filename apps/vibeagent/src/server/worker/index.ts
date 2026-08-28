@@ -2,7 +2,7 @@ import { Pool } from "pg";
 import { createWorkerServer, readEnv, runService } from "agent/broker";
 import { createVibeWorker } from "vibeagent_domain/server";
 import { GROUPS, REACTOR_QUEUES } from "../reactions/index.js";
-import { maxConcurrentTurns } from "../config.js";
+import { maxConcurrentTurns, workerPoolSize } from "../config.js";
 
 /**
  * The worker server: consumes reactor queues and runs one reaction per message.
@@ -22,7 +22,7 @@ export async function startWorker(): Promise<void> {
    * thread would only cap concurrency at `cpus × 2` while holding a V8 isolate
    * per idle reaction.
    */
-  const pool = new Pool({ connectionString: env.databaseUrl, max: 8 });
+  const pool = new Pool({ connectionString: env.databaseUrl, max: workerPoolSize });
   const watched = process.env.AGENT_QUEUES ? env.queues : REACTOR_QUEUES;
 
   // Only the groups for the queues this process watches. A queue named in the

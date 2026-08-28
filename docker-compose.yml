@@ -1,62 +1,30 @@
 name: ndx-business
 
+# What every reactor worker shares. They run the same image and the same role;
+# what makes each one a different service is the queues it watches and how much
+# of the database it is allowed to hold. Splitting further, or collapsing these
+# back into one, is a change here and nowhere else — the worker reads its queues
+# from the environment.
+x-vibe-worker: &vibe-worker
+  build:
+    context: .
+    dockerfile: apps/vibeagent/docker/Dockerfile
+  image: ndx-business-vibeagent:latest
+  init: true
+  restart: unless-stopped
+  env_file:
+    - path: apps/vibeagent/docker/.env
+      required: false
+  depends_on:
+    admin:
+      condition: service_healthy
+  # Internal only: no worker accepts client traffic.
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  networks:
+    - ndx-business_internal
+
 services:
-  # The database for the `agent` app, kept separate from admin's own so the two
-  # apps cannot collide on identically named tables. PGMQ's official image is
-  # used directly: this service used to name a Dockerfile that was never
-  # committed, so the stack could not be built from a clean checkout.
-  postgres:
-    # A checkpoint on the host bind mount takes longer than docker's ten second
-    # default, and a database killed part-way through one has to recover on the
-    # next start. This is the time to shut down cleanly, not a timeout to hit.
-    stop_grace_period: 60s
-    image: ghcr.io/pgmq/pg18-pgmq:v1.10.0
-    # The agent app opens roughly ninety connections at its configured ingress
-    # and outbox concurrency, which leaves nothing under the default hundred —
-    # not even a psql session to look at it with.
-    command: ["postgres", "-c", "max_connections=200"]
-    container_name: postgres
-    # The official PostgreSQL entrypoint must start as root to repair/check
-    # named-volume permissions before dropping to the postgres server user.
-    user: "0:0"
-    init: true
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: ndx_business
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      PGDATA: /var/lib/postgresql/data
-    # Deliberately not published. Nothing on the host talks to it — the `agent`
-    # service reaches it over the internal network, and `docker exec postgres
-    # psql` is enough to inspect it. Publishing would also make the deploy
-    # script probe it over HTTP, which a database cannot answer.
-    volumes:
-      - ${NDX_DATA_HOST_DIR:-${VIBE_WORKSPACE_HOST_DIR:-./workspace}}/.ndx/postgres:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d ndx_business"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-    networks:
-      - ndx-business_internal
-  agent:
-    build:
-      context: .
-      dockerfile: apps/agent/docker/Dockerfile
-    image: ndx-business-agent:latest
-    container_name: agent
-    init: true
-    restart: unless-stopped
-    env_file:
-      - path: apps/agent/docker/.env
-        required: false
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "${AGENT_HOST_PORT:-18083}:18081"
-    networks:
-      - ndx-business_internal
   admin:
     # A checkpoint on the host bind mount takes longer than docker's ten second
     # default, and a database killed part-way through one has to recover on the
@@ -78,9 +46,9 @@ services:
         required: false
     ports:
       - "${ADMIN_HOST_PORT:-18080}:18080"
-    depends_on:
-      postgres:
-        condition: service_healthy
+    # Nothing to depend on any more. This used to wait for a `postgres` service
+    # it never spoke to — admin runs its own on 127.0.0.1, and that service
+    # existed only for the retired `agent` app.
     volumes:
       - ${NDX_DATA_HOST_DIR:-${VIBE_WORKSPACE_HOST_DIR:-./workspace}}/.ndx/admin/data:/app/data
       # The database Admin serves — accounts, the fact log, every session the
@@ -103,7 +71,11 @@ services:
       - path: apps/vibeagent/docker/.env
         required: false
     environment:
-      AGENT_ROLE: gateway
+      AGENT_ROLE: broker
+      # One database serves every service, and each process holds three pools
+      # (runtime, queue, and the reactors' own). Stated here so the total is
+      # arithmetic rather than a surprise.
+      AGENT_DATABASE_POOL_MAX: 8
       # A log label, nothing more. Brokers hold no durable state and nothing routes
       # to them by name, so replicas may share it without failing closed.
       AGENT_GATEWAY_ID: agent
@@ -129,68 +101,70 @@ services:
         target: /workspace/.ndx
     networks:
       - ndx-business_internal
-  vibeagent-worker:
-    build:
-      context: .
-      dockerfile: apps/vibeagent/docker/Dockerfile
-    image: ndx-business-vibeagent:latest
-    init: true
-    restart: unless-stopped
-    env_file:
-      - path: apps/vibeagent/docker/.env
-        required: false
+  # --- reactor workers -------------------------------------------------------
+  #
+  # One process per kind of work, named for the work. The lines are drawn by
+  # what the work costs and what it is allowed to touch, not by tidiness:
+  #
+  #   inference    seconds to minutes per message, and the only one that costs
+  #                money. This is the one worth running more of.
+  #   tool-runner  the only one that executes commands nobody vetted, and so the
+  #                only one given a writable projects folder.
+  #   turn-control opening a session, deciding reply-or-tools, waiting for
+  #                parallel tools to land. Milliseconds, database only.
+  #   read-model   writes what the screen reads. Emits nothing and takes no
+  #                session lock, so if it falls behind the turn does not.
+
+  # Calls the model. The slow, expensive step; scale this one first.
+  vibeagent-inference:
+    <<: *vibe-worker
     environment:
       AGENT_ROLE: worker
-    depends_on:
-      admin:
-        condition: service_healthy
-    # Internal only: workers never accept client traffic.
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      AGENT_QUEUES: vibe_model
+      AGENT_POOL_MAX: 8
+      AGENT_DATABASE_POOL_MAX: 8
+
+  # Runs the agent's shell commands inside a project folder. The only container
+  # that executes untrusted input, and the only worker given the projects root.
+  vibeagent-tool-runner:
+    <<: *vibe-worker
+    environment:
+      AGENT_ROLE: worker
+      AGENT_QUEUES: vibe_tool
+      AGENT_POOL_MAX: 8
+      AGENT_DATABASE_POOL_MAX: 8
     volumes:
       # Projects root. A host path, not a named volume: the browser runs on the
       # host, so generated files have to be reachable there without docker cp.
       - ${NDX_DATA_HOST_DIR:-${VIBE_WORKSPACE_HOST_DIR:-./workspace}}:/workspace
       # ...and `.ndx` masked back out of it. System storage lives inside this
-      # root so there is one folder to copy or back up, but the agent runs a
-      # real shell in here and `rm -rf` does not consult the folder listing
+      # root so there is one folder to copy or back up, but this container runs
+      # a real shell in there and `rm -rf` does not consult the folder listing
       # that hides dot-directories. An empty tmpfs over the path means the
       # agent cannot reach the database files at all.
       - type: tmpfs
         target: /workspace/.ndx
-    networks:
-      - ndx-business_internal
-  # Turns recorded facts into work for reactors, per the reaction table.
-  # It is the only thing that knows which reaction follows which fact; the
-  # workers and the broker read nothing of it.
-  vibeagent-dispatcher:
-    build:
-      context: .
-      dockerfile: apps/vibeagent/docker/Dockerfile
-    image: ndx-business-vibeagent:latest
-    init: true
-    restart: unless-stopped
-    env_file:
-      - path: apps/vibeagent/docker/.env
-        required: false
-    environment:
-      AGENT_ROLE: dispatcher
-      # The recovery sweep. It finds facts nothing reacted to — the ones behind
-      # the cursor after a restart — and sends them again. The grace period must
-      # exceed the longest legitimate reaction, or slow work gets re-driven;
-      # that is absorbed by the claim but wastes an inference call. Overridable
-      # so a contention test can watch recovery happen without waiting minutes.
-      AGENT_RECONCILE_GRACE_SECONDS: ${AGENT_RECONCILE_GRACE_SECONDS:-600}
-      AGENT_RECONCILE_MS: ${AGENT_RECONCILE_MS:-60000}
-    depends_on:
-      admin:
-        condition: service_healthy
-    networks:
-      - ndx-business_internal
 
-  # A second broker, to show they are interchangeable: it claims nothing, is
-  # granted nothing, and tails the same log as the first.
-  vibeagent-gateway-b:
+  # The turn's decision points: open it, choose what follows a model reply, and
+  # wait for parallel tool calls to all report in.
+  vibeagent-turn-control:
+    <<: *vibe-worker
+    environment:
+      AGENT_ROLE: worker
+      AGENT_QUEUES: vibe_intake,vibe_decide,vibe_join
+      AGENT_POOL_MAX: 4
+      AGENT_DATABASE_POOL_MAX: 4
+
+  # Folds the fact log into the shape the transcript reads.
+  vibeagent-read-model:
+    <<: *vibe-worker
+    environment:
+      AGENT_ROLE: worker
+      AGENT_QUEUES: vibe_view
+      AGENT_POOL_MAX: 4
+      AGENT_DATABASE_POOL_MAX: 4
+
+  vibeagent-b:
     profiles: [gateway-ha]
     build:
       context: .
@@ -202,7 +176,7 @@ services:
       - path: apps/vibeagent/docker/.env
         required: false
     environment:
-      AGENT_ROLE: gateway
+      AGENT_ROLE: broker
       AGENT_GATEWAY_ID: agent-b
     labels:
       ndx.business.deploy-health-path: /ready

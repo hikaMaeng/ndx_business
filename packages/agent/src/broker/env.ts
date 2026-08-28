@@ -1,7 +1,15 @@
 import { cpus } from "node:os";
 
 export interface AgentEnv {
-  role: "gateway" | "worker" | "dispatcher";
+  /**
+   * What this process is.
+   *
+   * Two, not three. `dispatcher` named a third kind of server for something
+   * that is half of the broker's job — recording a fact and putting it where
+   * the reactors will see it are the same job — and it was the `router`
+   * process, removed days earlier, back under another name.
+   */
+  role: "broker" | "worker";
   port: number;
   databaseUrl: string;
   /** Where client ingress is written. */
@@ -48,8 +56,11 @@ function positive(source: NodeJS.ProcessEnv, name: string, fallback: number, all
 }
 
 export function readEnv(source = process.env): AgentEnv {
-  const role = source.AGENT_ROLE ?? "gateway";
-  if (role !== "gateway" && role !== "worker" && role !== "dispatcher") throw new Error("AGENT_ROLE must be gateway, worker or dispatcher");
+  // `gateway` is still accepted: it is what deployed containers say today, and
+  // a rename is not a reason to refuse to start.
+  const requested = source.AGENT_ROLE ?? "broker";
+  const role = requested === "gateway" ? "broker" : requested;
+  if (role !== "broker" && role !== "worker") throw new Error("AGENT_ROLE must be broker or worker");
   const cpuCount = cpus().length;
   const maxWorkerThreads = positive(source, "AGENT_MAX_THREADS", cpuCount * 2, false);
   const minWorkerThreads = positive(source, "AGENT_MIN_THREADS", maxWorkerThreads);

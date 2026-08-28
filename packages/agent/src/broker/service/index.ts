@@ -2,6 +2,7 @@ import { createServer, type RequestListener } from "node:http";
 import type { Pool } from "pg";
 import { readEnv, type AgentEnv } from "../env.js";
 import { createDatabasePool, snapshotDatabasePool } from "../database.js";
+import { EnqueueLease, leaseKeyFor } from "../loops/reaction-enqueue/lease.js";
 import { PgmqClient } from "../pgmq/client.js";
 import { MetricsRegistry } from "../metrics/registry.js";
 import { writeMetrics } from "../metrics/endpoint.js";
@@ -10,7 +11,7 @@ import { EventLogListener } from "../event-store/notify.js";
 import { EventStreamHub } from "../stream/hub.js";
 import { ExecutionStore } from "../idempotency/store.js";
 import { startEventLogTail } from "../loops/log-tail/index.js";
-import { startFactDispatcher, type ReactionTable } from "../loops/fact-dispatcher/index.js";
+import { startReactionEnqueue, type ReactionTable } from "../loops/reaction-enqueue/index.js";
 import { startWorkerConsumer } from "../loops/worker-consumer/index.js";
 import { attachWebSocketTransport } from "../transport/websocket.js";
 import { createGatewayStandby } from "../gateway/standby/index.js";
@@ -57,7 +58,15 @@ interface Runtime {
 function createRuntime(env: AgentEnv): Runtime {
   const databasePoolLimit = env.role === "worker" ? Math.min(env.databasePoolMax, 24) : Math.min(env.databasePoolMax, 20);
   const database = createDatabasePool(env.databaseUrl, databasePoolLimit);
-  const queueDatabase = createDatabasePool(env.databaseUrl, 12);
+  /**
+   * The queue pool follows the same budget.
+   *
+   * It was a fixed twelve however small the process had been told to be, which
+   * meant a limit set on one pool was silently doubled by the other. Every
+   * service now shares one database, so "how many connections may this process
+   * hold" has to be answerable by reading one number.
+   */
+  const queueDatabase = createDatabasePool(env.databaseUrl, Math.max(2, Math.min(12, databasePoolLimit)));
   const metrics = new MetricsRegistry();
   const refresh = (): void => {
     for (const [name, pool] of [["databasePool", snapshotDatabasePool(database)], ["queuePool", snapshotDatabasePool(queueDatabase)]] as const) {
@@ -109,6 +118,19 @@ export interface EventBrokerOptions {
   authorizeChannel?(channel: string, user: { id: string }): boolean;
   /** Extra HTTP routes this deployment needs. Mounted before the client bundle. */
   extendHttp?(app: RequestListener): RequestListener;
+  /**
+   * action -> the reactor queues that should receive a copy.
+   *
+   * Given this, the broker also puts recorded facts where the workers will
+   * find them. That is not a second component and never should have been one:
+   * a broker that records a fact and does not say who should hear about it has
+   * done half its job.
+   *
+   * Omit it and the broker is pure delivery: sockets and the log tail.
+   */
+  reactions?: ReactionTable;
+  /** Distinguishes this deployment's durable enqueue position from any other's. */
+  reactionsName?: string;
 }
 
 /**
@@ -152,6 +174,16 @@ export function createEventBroker(options: EventBrokerOptions): Service {
       const listener = new EventLogListener(env.databaseUrl, (channel) => tail.wake(channel));
       await listener.start();
 
+      /**
+       * The other half: facts in, work out.
+       *
+       * Every broker runs it and the lease decides which one is doing it at any
+       * moment. Reading the log needs no coordination, which is the point of a
+       * log; enqueuing does, because two brokers acting on the same fact would
+       * buy the same inference twice.
+       */
+      const enqueue = options.reactions ? await startEnqueue(runtime, env, eventStore, options) : undefined;
+
       const backend = createWebBackend({
         env, queue, metrics, verifier, accountBaseUrl,
         checkDatabase: async () => { await Promise.all([queue.check(), database.query("SELECT 1")]); },
@@ -187,6 +219,7 @@ export function createEventBroker(options: EventBrokerOptions): Service {
           closeHttp: async () => closeHttpServer(standby.server),
           releaseOwnership: async () => undefined,
         });
+        if (enqueue) { enqueue.stop(); await enqueue.done; await enqueue.release(); }
         await queueDatabase.end(); await database.end();
       };
     },
@@ -194,69 +227,47 @@ export function createEventBroker(options: EventBrokerOptions): Service {
   };
 }
 
-// ========================================================= fact dispatcher ====
-
-export interface FactDispatcherOptions {
-  /** Distinguishes this dispatcher's durable tail position from any other's. */
-  name?: string;
-  /** action → reactor queues. The only place that knows which reaction follows which fact. */
-  table: ReactionTable;
-  env?: AgentEnv;
-}
-
 /**
- * Turns recorded facts into work for reactors.
+ * Wires the reaction table into the broker's own runtime.
  *
- * Complete as shipped: it is pure transport and has nothing for an application
- * to fill in beyond the table, which is configuration. It reads the log, and
- * for every fact the table names it puts a copy on each listed queue.
- *
- * Workers can therefore record what happened and stop, without any of them
- * knowing what reacts to it — the whole point of keeping the table out here.
+ * A function rather than a service, because it is not something that runs on
+ * its own. It is something the broker does.
  */
-export function createFactDispatcher(options: FactDispatcherOptions): Service {
-  const env = options.env ?? readEnv();
-  const runtime = createRuntime(env);
-  let stopService: (() => Promise<void>) | undefined;
+async function startEnqueue(
+  runtime: Runtime, env: AgentEnv, eventStore: EventStore, options: EventBrokerOptions,
+): Promise<{ stop(): void; done: Promise<void>; release(): Promise<void> }> {
+  const table = options.reactions!;
+  const name = options.reactionsName ?? "reactions";
+  const { queue, metrics, database } = runtime;
 
-  return {
-    async start(): Promise<void> {
-      const { queue, metrics, database, queueDatabase } = runtime;
-      const eventStore = new EventStore(database, metrics);
-      const name = options.name ?? "fact-dispatcher";
+  for (const queueName of new Set(Object.values(table).flat())) await queue.ensure(queueName);
 
-      await eventStore.ensureSchema();
-      for (const queueName of new Set(Object.values(options.table).flat())) await queue.ensure(queueName);
+  // Read to tell a reaction that finished from one that never ran. Without it
+  // nothing is recovered.
+  const executions = new ExecutionStore(database, env.executionLeaseSeconds);
+  await executions.ensureSchema();
 
-      // The dispatcher reads this only to tell a reaction that finished from
-      // one that never ran; it never claims or completes anything itself.
-      const executions = new ExecutionStore(database, env.executionLeaseSeconds);
-      await executions.ensureSchema();
-
-      const dispatcher = startFactDispatcher({
-        name, eventStore, queue, table: options.table, metrics,
-        pollMs: env.logTailPollMs, batchSize: env.logTailBatch,
-        executions,
-        reconcileGraceSeconds: env.reconcileGraceSeconds,
-        reconcileLookbackSeconds: env.reconcileLookbackSeconds,
-        reconcileMs: env.reconcileMs,
-      });
-      const listener = new EventLogListener(env.databaseUrl, () => dispatcher.wake());
-      await listener.start();
-
-      const server = internalHealthServer(runtime);
-      console.log(JSON.stringify({ event: "broker.dispatcher.started", name, actions: Object.keys(options.table) }));
-
-      stopService = async () => {
-        dispatcher.stop(); server.close();
-        await listener.stop();
-        await dispatcher.done;
-        runtime.stopMetrics(); await queueDatabase.end(); await database.end();
-      };
-    },
-    async stop(): Promise<void> { await stopService?.(); },
-  };
+  const lease = new EnqueueLease(database, leaseKeyFor(name));
+  const loop = startReactionEnqueue({
+    name, eventStore, queue, table, metrics,
+    pollMs: env.logTailPollMs, batchSize: env.logTailBatch,
+    executions,
+    reconcileGraceSeconds: env.reconcileGraceSeconds,
+    reconcileLookbackSeconds: env.reconcileLookbackSeconds,
+    reconcileMs: env.reconcileMs,
+    lease,
+  });
+  console.log(JSON.stringify({ event: "broker.reactions.armed", name, actions: Object.keys(table).length }));
+  return { stop: loop.stop, done: loop.done, release: () => lease.release() };
 }
+
+// ===================================================== removed: dispatcher ====
+
+//
+// `createFactDispatcher` stood here. It made a third kind of server out of the
+// broker's second half, which is how a `dispatcher` container came to exist: the
+// same shape as the `router` process removed days before it. The loop it ran now
+// runs inside `createEventBroker`, given a reaction table.
 
 // =========================================================== worker server ====
 
@@ -352,6 +363,27 @@ export function createWorkerServer(options: WorkerServerOptions): Service {
 }
 
 /** Wires SIGTERM/SIGINT to a service so an app does not repeat the same block. */
+/**
+ * Presents several services as one.
+ *
+ * A process that is two things still gets a single shutdown: `runService`
+ * installs its signal handlers once, and two calls would install two, each
+ * racing to `process.exit` and cutting the other's stop short. Composing first
+ * means the halves stop in reverse order and the process leaves when both are
+ * done.
+ */
+export function combineServices(...services: readonly Service[]): Service {
+  const started: Service[] = [];
+  return {
+    async start(): Promise<void> {
+      for (const service of services) { await service.start(); started.push(service); }
+    },
+    async stop(): Promise<void> {
+      for (const service of started.reverse()) await service.stop();
+    },
+  };
+}
+
 export function runService(service: Service): Promise<void> {
   const stop = (): void => {
     void service.stop().then(() => process.exit(0)).catch((error) => {

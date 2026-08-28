@@ -26,7 +26,11 @@ stop_children() {
 trap stop_children TERM INT EXIT
 
 # Keep the official entrypoint so a pre-existing volume is never reinitialized.
-/usr/local/bin/docker-entrypoint.sh postgres &
+# This is the PG server for the whole product: admin itself, the event broker,
+# and every worker server. The stock hundred was sized for a single client. Each
+# vibeagent process holds three pools and there are five of them, so the budget
+# is declared in docker-compose.yml and the ceiling has to clear it.
+/usr/local/bin/docker-entrypoint.sh postgres -c max_connections="${POSTGRES_MAX_CONNECTIONS:-200}" &
 postgres_pid=$!
 
 for attempt in $(seq 1 60); do
