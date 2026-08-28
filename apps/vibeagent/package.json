@@ -10,6 +10,7 @@
     "lint": "tsc --noEmit -p tsconfig.server.json && tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "admin_domain": "*",
     "agent": "*",
     "express": "5.2.1",
     "pg": "8.23.0",

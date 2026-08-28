@@ -125,7 +125,7 @@
 .organization-node-count {
   margin-inline-start: auto;
   color: var(--text-description);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .organization-node-actions {
@@ -193,7 +193,7 @@
   display: grid;
   gap: 6px;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
 }
 
@@ -283,7 +283,7 @@
   color: var(--text-secondary);
   border-radius: 999px;
   background: var(--surface-hover-bg);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .organization-info-form,
@@ -305,7 +305,7 @@
 .organization-info-form legend {
   margin-bottom: 9px;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 700;
 }
 
@@ -388,7 +388,7 @@
   display: grid;
   gap: 6px;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
 }
 
@@ -467,7 +467,7 @@
   border: 1px solid var(--input-hover-border);
   border-radius: 999px;
   background: transparent;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 800;
 }
 
@@ -583,7 +583,7 @@
   border: 1px solid var(--input-hover-border);
   border-radius: 8px;
   background: transparent;
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 800;
 }
 

@@ -7,21 +7,44 @@
   "module": "./dist/common/index.js",
   "types": "./dist/common/index.d.ts",
   "exports": {
-    ".": { "types": "./dist/common/index.d.ts", "import": "./dist/common/index.js" },
-    "./common": { "types": "./dist/common/index.d.ts", "import": "./dist/common/index.js" },
-    "./server": { "types": "./dist/server/index.d.ts", "import": "./dist/server/index.js" },
-    "./front": { "types": "./dist/front/index.d.ts", "import": "./dist/front/index.js" },
-    "./broker": { "types": "./dist/broker/index.d.ts", "import": "./dist/broker/index.js" },
-    "./broker/worker": { "types": "./dist/broker/worker/index.d.ts", "import": "./dist/broker/worker/index.js" },
+    ".": {
+      "types": "./dist/common/index.d.ts",
+      "import": "./dist/common/index.js"
+    },
+    "./common": {
+      "types": "./dist/common/index.d.ts",
+      "import": "./dist/common/index.js"
+    },
+    "./server": {
+      "types": "./dist/server/index.d.ts",
+      "import": "./dist/server/index.js"
+    },
+    "./front": {
+      "types": "./dist/front/index.d.ts",
+      "import": "./dist/front/index.js"
+    },
+    "./broker": {
+      "types": "./dist/broker/index.d.ts",
+      "import": "./dist/broker/index.js"
+    },
+    "./broker/worker": {
+      "types": "./dist/broker/worker/index.d.ts",
+      "import": "./dist/broker/worker/index.js"
+    },
     "./package.json": "./package.json"
   },
-  "files": ["dist", "README.md", "docs"],
+  "files": [
+    "dist",
+    "README.md",
+    "docs"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "node ../../scripts/run-tests.mjs src",
     "lint": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "admin_domain": "*",
     "pg": "8.23.0",
     "ws": "8.18.3"
   },

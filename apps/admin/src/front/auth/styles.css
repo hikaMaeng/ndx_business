@@ -19,7 +19,7 @@
   display: grid;
   gap: 4px;
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
 }
 
@@ -54,7 +54,7 @@ textarea:focus-visible {
   align-items: center;
   gap: 8px;
   color: var(--text-description);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 750;
   letter-spacing: 0.13em;
   text-transform: uppercase;

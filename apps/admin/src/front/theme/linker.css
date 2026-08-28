@@ -1,28 +1,16 @@
 /*
- * One palette, two apps.
+ * Admin's names, mapped onto the shared scale.
  *
- * Admin and the coding agent are the same product seen from two sides, and they
- * were drifting apart in greys — two sets of near-identical hand-picked values,
- * neither of which was the reference. The base scale below is the agent's,
- * verbatim. Every name Admin already uses is mapped onto it rather than
- * re-picked, so the eight stylesheets that consume those names did not change.
+ * The scale is not here. It is `admin_domain/front/theme.css`, imported by
+ * `main.tsx` ahead of this file and read by the coding agent too. What remains
+ * below is a translation table: every name Admin's eight stylesheets already
+ * use, pointed at a token. That indirection is the reason adopting a shared
+ * scale changed no stylesheet but this one.
  *
- * Add a colour to the base scale, never to the mapping.
+ * Map a name here. Never re-pick a value here.
  */
 :root {
-  /* --- base scale: shared with the coding agent, do not diverge --- */
-  --bg: #0a0a0a;
-  --surface: #141414;
-  --surface-2: #1c1c1c;
-  --surface-3: #242424;
-  --line: #2e2e2e;
-  --line-strong: #4d4d4d;
-  --text: #ededed;
-  --text-dim: #a3a3a3;
-  --text-faint: #6b6b6b;
-  --mono: "Cascadia Code", "Consolas", ui-monospace, monospace;
-
-  /* --- Admin's names, mapped onto the scale --- */
+  /* -------------------------------------------------------- surfaces ---- */
   --app-bg: var(--bg);
   --sidebar-bg: var(--surface);
   --main-bg: var(--bg);
@@ -39,16 +27,18 @@
   --text-description: var(--text-dim);
   --text-disabled: var(--text-faint);
 
+  /* ---------------------------------------------------------- status ---- */
   /*
-   * Status carried by weight and border, not by hue. The agent side reads as
-   * one grey surface, so Admin has to agree with it rather than introduce a
-   * palette of its own for the same states.
+   * Carried by weight, border and inversion — not by hue. The agent side reads
+   * as one grey surface, so Admin agrees with it rather than keeping a palette
+   * of its own for the same states. `--primary` is the agent's primary button
+   * exactly: text colour as the fill, background colour as the label.
    */
-  --primary: #d8d8d8;
-  --primary-hover: #f0f0f0;
-  --primary-active: #b8b8b8;
+  --primary: var(--text);
+  --primary-hover: #ffffff;
+  --primary-active: var(--text-dim);
   --on-primary: var(--bg);
-  --primary-focus: rgba(216, 216, 216, 0.24);
+  --primary-focus: rgba(237, 237, 237, 0.24);
   --success: #a8a8a8;
   --success-focus: rgba(168, 168, 168, 0.2);
   --error: #d0d0d0;
@@ -57,9 +47,10 @@
   --overlay: rgba(0, 0, 0, 0.76);
   --shadow-modal: rgba(0, 0, 0, 0.58);
 
+  /* ------------------------------------------------------------ nodes ---- */
   /*
-   * Organisation nodes are the one place hue carries meaning — someone picks a
-   * colour to tell their own tree apart — so these stay chromatic on purpose.
+   * The one place hue carries meaning: someone picks a colour to tell their own
+   * tree apart, so these stay chromatic on purpose.
    */
   --node-slate: #a3a3a3;
   --node-slate-soft: rgba(163, 163, 163, 0.15);
@@ -73,13 +64,8 @@
   --node-amber-soft: rgba(251, 191, 36, 0.14);
   --node-rose: #fb7185;
   --node-rose-soft: rgba(251, 113, 133, 0.14);
-
-  color: var(--text);
-  background: var(--bg);
-  color-scheme: dark;
-  font-family: "Segoe UI Variable", "Malgun Gothic", "Nirmala UI", sans-serif;
-  font-synthesis: none;
 }
+
 
 * {
   box-sizing: border-box;
@@ -118,7 +104,7 @@ body {
   min-width: 320px;
   min-height: 100vh;
   margin: 0;
-  font-size: 13px;
+  font-size: var(--text-md);
   color: var(--text-primary);
   background: var(--app-bg);
   -webkit-font-smoothing: antialiased;

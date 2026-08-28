@@ -68,14 +68,14 @@
   border: 1px solid var(--divider);
   border-radius: 4px;
   background: var(--input-bg);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   font-weight: 650;
 }
 
 .models-endpoint-url,
 .models-endpoint-header {
   color: var(--text-description);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .models-endpoint-header {
@@ -100,7 +100,7 @@
   gap: 8px;
   align-items: center;
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .models-card-model b {
@@ -124,7 +124,7 @@
   display: grid;
   gap: 6px;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
 }
 
@@ -178,7 +178,7 @@
 .models-dialog-heading h2 {
   margin: 2px 0 0;
   color: var(--text-primary);
-  font-size: 16px;
+  font-size: var(--text-xl);
 }
 
 .models-empty,
@@ -239,7 +239,7 @@
 
 .models-definition span {
   color: var(--text-description);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .models-definition-form fieldset {
@@ -253,7 +253,7 @@
 .models-definition-form legend {
   padding-inline: 4px;
   color: var(--text-description);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .models-check-row {

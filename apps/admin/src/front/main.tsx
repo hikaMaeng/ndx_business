@@ -3,6 +3,8 @@ import ReactDOM from "react-dom/client";
 import { AdminShell } from "./shell";
 import { Login } from "./auth";
 import { direction, resolveLanguage } from "./i18n";
+// The scale both apps share, ahead of anything that maps or uses it.
+import "admin_domain/front/theme.css";
 import "./styles.css";
 
 const language = resolveLanguage();

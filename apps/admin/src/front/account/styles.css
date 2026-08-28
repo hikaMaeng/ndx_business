@@ -23,7 +23,7 @@
   border: 0;
   border-radius: 6px;
   background: transparent;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 700;
   cursor: pointer;
 }
@@ -70,12 +70,12 @@
 
 .session-row span {
   color: var(--text-description);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .session-row code {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-sm);
   overflow-wrap: anywhere;
 }
 
@@ -89,19 +89,19 @@
 
 .session-devices > strong {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .device-row {
   display: grid;
   gap: 2px;
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .device-row small {
   color: var(--text-description);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 
 .decision-buttons {

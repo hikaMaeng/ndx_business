@@ -1,6 +1,19 @@
 import type express from "express";
+import { parseUserSummary, type UserSummary } from "admin_domain/common";
 
-export interface AuthenticatedUser { id: string; email: string; status: string; isMasterAdmin?: boolean }
+/**
+ * Who the account service says you are.
+ *
+ * An alias, not a declaration. This was its own `interface` until now — a
+ * hand-copy of the shape `/api/auth/me` returns, kept in step with Admin by
+ * memory alone. It had already drifted: `status` was widened to `string`, so a
+ * response carrying a status this service has never heard of typechecked fine,
+ * and only the `!== "active"` test below stood between it and a live session.
+ *
+ * The contract is Admin's to state, and Admin states it — `AuthRoute` names
+ * `/api/auth/me` as returning `UserSummary`. Importing it is the whole fix.
+ */
+export type AuthenticatedUser = UserSummary;
 export type AuthedRequest = express.Request & { sessionUser?: AuthenticatedUser; sessionToken?: string };
 
 /**
@@ -26,10 +39,13 @@ export function createSessionVerifier(input: { adminBaseUrl: string; cacheMs: nu
       cache.delete(token);
       throw new Error("session is not valid");
     }
-    const user = await response.json() as AuthenticatedUser;
-    if (!user?.id || user.status !== "active") {
+    // Parsed, not cast. The old `as` believed whatever came back, which is a
+    // strange thing to do to the one answer that decides whether a request may
+    // proceed at all.
+    const user = parseUserSummary(await response.json());
+    if (!user || user.status !== "active") {
       cache.delete(token);
-      throw new Error("account is not active");
+      throw new Error(user ? "account is not active" : "the account service returned a user this service cannot read");
     }
     // Short cache only. Admin slides the idle timeout on every check, so caching
     // too long would both hide a revocation and stop the session from staying alive.

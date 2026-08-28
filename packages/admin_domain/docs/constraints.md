@@ -11,6 +11,13 @@
 | `admin_domain/server` | `apps/admin/src/server/app.ts` | Provider refresh never persists identifiers containing `embedding` and keeps each configured header scoped to that provider request; manual model identifiers remain unique within an endpoint. |
 | `admin_domain/front` | `apps/admin/src/front/models` | Catalog and endpoint selection are independent token-keyed slices outside React. |
 
+- `src/front/theme/theme.css` is the only place a colour or a font size is
+  chosen. Downstream files map names onto it and never re-pick a value; a
+  literal `font-size` in either app is a defect.
+- Keep that file to tokens. An element rule there would apply to both apps at
+  once, which is the one thing importing it must never be able to do.
+- Adding a step to the type scale is additive and safe. Changing an existing
+  step moves both apps, so treat it as a change to both.
 - This is the only domain package for `apps/admin`.
 - Do not create another domain-related package for the same app.
 - Do not import from `apps/`.

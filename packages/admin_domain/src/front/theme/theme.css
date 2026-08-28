@@ -1,0 +1,65 @@
+/*
+ * The scale both apps read. One file, two consumers.
+ *
+ * Admin and the coding agent are the same product seen from two sides. They had
+ * been drifting apart in two ways at once: two sets of hand-picked greys, and
+ * two unrelated ways of sizing text — the agent in ad-hoc `rem` (22 distinct
+ * values between .6 and 2.4), Admin in ad-hoc `px` (7 values between 10 and 16).
+ * Neither had a scale, so neither could be matched to the other; there was
+ * nothing to match.
+ *
+ * This file is the scale. It holds tokens and nothing else — no element rules,
+ * no layout, no component styling. Importing it can therefore only add names,
+ * never move anything on a page that has not asked for the name.
+ *
+ * It lives in admin_domain because that is where the shared vocabulary already
+ * lives, and because the dependency runs that way round for real reasons: the
+ * agent verifies its sessions against Admin's account service, so Admin is
+ * upstream of it whether or not a package.json says so.
+ *
+ * Add a value here. Never re-pick one downstream.
+ */
+:root {
+  /* --------------------------------------------------------- surfaces ---- */
+  /* Black-led on purpose: the page is near-black and every surface is a step
+   * up from it, so depth reads as lightening rather than as a border. */
+  --bg: #0a0a0a;
+  --surface: #141414;
+  --surface-2: #1c1c1c;
+  --surface-3: #242424;
+  --line: #2e2e2e;
+  --line-strong: #4d4d4d;
+  --text: #ededed;
+  --text-dim: #a3a3a3;
+  --text-faint: #6b6b6b;
+
+  /* ------------------------------------------------------ type family ---- */
+  --font: "Segoe UI Variable", "Malgun Gothic", "Nirmala UI", sans-serif;
+  --mono: "Cascadia Code", "Consolas", ui-monospace, monospace;
+
+  /* -------------------------------------------------------- type scale ---- */
+  /*
+   * Nine steps, in rem so a reader's browser setting still moves them. The
+   * comments give the size at a 16px root, because that is what both apps'
+   * existing values were reasoning about.
+   *
+   * `sm` is the workhorse — it is where both apps already were. The agent's
+   * most-used size was .78rem (12.5px) and Admin's was 12px, so 12px is not a
+   * compromise between them, it is the point they had independently reached.
+   */
+  --text-2xs: 0.625rem;   /* 10px — counts, micro labels */
+  --text-xs: 0.6875rem;   /* 11px — meta, eyebrows, chips */
+  --text-sm: 0.75rem;     /* 12px — body, controls, table cells */
+  --text-md: 0.8125rem;   /* 13px — emphasised body */
+  --text-lg: 0.875rem;    /* 14px — buttons, sub-headings */
+  --text-xl: 1rem;        /* 16px — section headings */
+  --text-2xl: 1.25rem;    /* 20px — screen headings */
+  --text-3xl: 1.75rem;    /* 28px — page titles */
+  --text-4xl: 2.5rem;     /* 40px — the one display size */
+
+  color: var(--text);
+  background: var(--bg);
+  color-scheme: dark;
+  font-family: var(--font);
+  font-synthesis: none;
+}

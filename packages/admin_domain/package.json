@@ -23,15 +23,17 @@
       "types": "./dist/front/index.d.ts",
       "import": "./dist/front/index.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./front/theme.css": "./dist/front/theme/theme.css"
   },
   "files": [
     "dist",
+    "copy-assets.mjs",
     "README.md",
     "docs"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node copy-assets.mjs",
     "test": "node --import tsx --test src/**/*.test.ts",
     "lint": "tsc --noEmit -p tsconfig.json"
   },

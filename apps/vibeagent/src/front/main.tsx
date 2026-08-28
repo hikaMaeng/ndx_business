@@ -4,6 +4,8 @@ import { VibeClient } from "vibeagent_domain/front";
 import { Auth, type SignedIn } from "./auth/index.js";
 import { Sidebar } from "./sidebar/index.js";
 import { Conversation } from "./conversation/index.js";
+// The scale both apps share, ahead of anything that maps or uses it.
+import "admin_domain/front/theme.css";
 import "./styles.css";
 
 /**
