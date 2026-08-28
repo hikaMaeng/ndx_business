@@ -33,7 +33,7 @@ export { writeMetrics } from "./metrics/endpoint.js";
 export { PgmqClient } from "./pgmq/client.js";
 export type { EventQueueMessage, EventQueueTransport } from "./queue/transport.js";
 
-export { EventStreamHub, type StreamEvent } from "./stream/hub.js";
+export { EventStreamHub } from "./stream/hub.js";
 export { ConnectionMailbox } from "./stream/mailbox/index.js";
 export { ReplayBuffer, type ReplayBufferOutcome } from "./stream/replay-buffer/index.js";
 export { attachWebSocketTransport, type GatewayWebSocketTransport, type GatewaySocketPolicy } from "./transport/websocket.js";

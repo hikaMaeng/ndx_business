@@ -1,10 +1,8 @@
 import type { EventEnvelope } from "../../common/index.js";
 
-export type StreamEvent = EventEnvelope;
-
 interface Subscriber {
   channels: Set<string>;
-  send: (event: StreamEvent) => void;
+  send: (event: EventEnvelope) => void;
 }
 
 /**
@@ -54,7 +52,7 @@ export class EventStreamHub {
     };
   }
 
-  publish(event: StreamEvent): void {
+  publish(event: EventEnvelope): void {
     for (const id of this.subscriberIdsByChannel.get(event.channel) ?? []) this.subscribers.get(id)?.send(event);
   }
 }

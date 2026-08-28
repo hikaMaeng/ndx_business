@@ -1,49 +1,12 @@
+import type { MetricsSnapshot } from "../../common/protocol/metrics/index.js";
+
+// Re-exported so callers keep importing it from where they always have; the
+// declaration itself now lives in the protocol, because it crosses a wire.
+export type { MetricsSnapshot };
 /**
  * In-process operator counters for the ingress handoff.
  * Aggregate values only: no payloads, channels, or session identifiers ever enter this registry.
  */
-export interface MetricsSnapshot {
-  queueReads: number;
-  queueMessages: number;
-  queueDeletes: number;
-  appendTotal: number;
-  appendDuplicates: number;
-  appendFailures: number;
-  appendLatencyMsTotal: number;
-  workerStarted: number;
-  workerCompleted: number;
-  workerFailed: number;
-  processingFailures: number;
-  processingJoined: number;
-  ingressAccepted: number;
-  brokerReadFailures: number;
-  logTailReads: number;
-  logTailEvents: number;
-  logTailFailures: number;
-  factDispatchReads: number;
-  factDispatchSends: number;
-  factDispatchFailures: number;
-  /** Facts nothing ever reacted to, found by age and sent again. Should stay at zero. */
-  factDispatchRecovered: number;
-  processingDlqTotal: number;
-  queueVisibilityRenewFailures: number;
-  terminalPersistenceRetries: number;
-  terminalPersistenceAlerts: number;
-  expiredExecutionLeases: number;
-  websocketConnections: number;
-  websocketMailboxQueued: number;
-  websocketDelivered: number;
-  websocketProgressDropped: number;
-  websocketSlowConsumerClosed: number;
-  websocketReplayOverflow: number;
-  websocketSendFailures: number;
-  databasePoolTotal: number;
-  databasePoolIdle: number;
-  databasePoolWaiting: number;
-  queuePoolTotal: number;
-  queuePoolIdle: number;
-  queuePoolWaiting: number;
-}
 
 export class MetricsRegistry {
   private readonly counters: MetricsSnapshot = {

@@ -1,13 +1,12 @@
 import { createHash } from "node:crypto";
 import type { Pool } from "pg";
-import type { EventEnvelope } from "../../common/index.js";
+import type { EventEnvelope, ResultPayload } from "../../common/index.js";
 
 export type ExecutionClaim =
   | { kind: "claimed"; attemptId: string; attempts: number }
   | { kind: "joined"; requestEventId: string; completed: boolean; result?: ResultPayload }
   | { kind: "conflict"; reason: string };
 
-export type ResultPayload = { ok: boolean; value?: unknown; error?: { code: string; message: string } };
 
 function payloadHash(event: EventEnvelope): string {
   return createHash("sha256").update(JSON.stringify({ action: event.action, payload: event.payload })).digest("hex");
@@ -25,6 +24,8 @@ async function addRecipient(pool: Pool, event: EventEnvelope): Promise<void> {
 }
 
 /** Durable transaction-key coordination. It deduplicates work; it never schedules it. */
+export type { ResultPayload };
+
 export class ExecutionStore {
   constructor(private readonly pool: Pool, private readonly leaseSeconds: number) {}
 
