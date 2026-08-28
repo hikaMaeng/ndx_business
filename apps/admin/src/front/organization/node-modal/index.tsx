@@ -1,12 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Trash2, UserRound } from "lucide-react";
 import {
   ORGANIZATION_COLORS,
   ORGANIZATION_ICONS,
-  parseOrganizationSnapshot,
-  organizationInferenceModelPath,
-  organizationInferenceServicePath,
-  organizationInferenceServicesPath,
   type Organization,
   type OrganizationColor,
   type OrganizationIcon,
@@ -14,6 +10,9 @@ import {
   type OrganizationSnapshot,
   type UserSummary,
 } from "admin_domain/common";
+import {
+  OrganizationCommands, addableAccounts, heldResponsibility, membersOf, unattachedInferenceServices,
+} from "admin_domain/front";
 import { Button } from "../../components/ui/button";
 import type { Texts } from "../../i18n";
 import { OrganizationIconView } from "../icons";
@@ -65,32 +64,12 @@ export function OrganizationNodeModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
-  const members = snapshot.members.filter(
-    (member) => member.organizationId === organization.id,
-  );
+  const members = membersOf(snapshot, organization.id);
   const inferenceServices = snapshot.inferenceServices.filter(
     (service) => service.organizationId === organization.id,
   );
-  const assignedServiceIds = new Set(
-    inferenceServices.map((service) => service.endpointId),
-  );
-  const availableInferenceServices = snapshot.inferenceServiceOptions.filter(
-    (service) => !assignedServiceIds.has(service.endpointId),
-  );
-  const memberIds = useMemo(
-    () => new Set(members.map((member) => member.userId)),
-    [members],
-  );
-  const suggestions = query.trim()
-    ? accounts
-        .filter(
-          (account) =>
-            account.status === "active" &&
-            !memberIds.has(account.id) &&
-            account.email.toLowerCase().includes(query.trim().toLowerCase()),
-        )
-        .slice(0, 6)
-    : [];
+  const availableInferenceServices = unattachedInferenceServices(snapshot, organization.id);
+  const suggestions = addableAccounts(accounts, members, query);
 
   useEffect(() => {
     setName(organization.name);
@@ -111,119 +90,45 @@ export function OrganizationNodeModal({
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [onClose]);
 
-  async function mutate(path: string, options: RequestInit): Promise<void> {
-    setBusy(true);
-    setError("");
-    try {
-      const next = parseOrganizationSnapshot(
-        await request(path, options, token),
-      );
-      if (!next) throw new Error(text[RSC.AUTH_ERROR_ALERT]);
-      onSnapshot(next);
-    } catch (reason) {
-      setError(
-        reason instanceof Error ? reason.message : text[RSC.AUTH_ERROR_ALERT],
-      );
-      throw reason;
-    } finally {
-      setBusy(false);
-    }
-  }
+  /**
+   * The screen's writes, which used to be seven near-identical functions here.
+   *
+   * The words are read through a ref rather than depended on: `texts()` builds
+   * a fresh object every render, and an identity that changes every render
+   * would rebuild the commands every render.
+   */
+  const words = useRef(text);
+  words.current = text;
+  const commands = useMemo(
+    () => new OrganizationCommands(
+      (path, options) => request(path, options, token),
+      () => ({ failed: words.current[RSC.AUTH_ERROR_ALERT] }),
+      onSnapshot,
+      (change) => {
+        if (change.busy !== undefined) setBusy(change.busy);
+        if (change.error !== undefined) setError(change.error);
+      },
+    ),
+    [request, token, onSnapshot],
+  );
 
+  // Closing a dialog and flashing a confirmation are this screen's business, so
+  // they stay here — and they only happen when the command says it worked.
   async function saveInformation(event: React.FormEvent) {
     event.preventDefault();
     setSaved(false);
-    try {
-      await mutate(`/api/organizations/${organization.id}`, {
-        method: "PUT",
-        body: JSON.stringify({ name, color, icon }),
-      });
-      setSaved(true);
-    } catch {
-      // The shared alert already renders the request error.
-    }
+    if (await commands.saveInformation(organization.id, { name, color, icon })) setSaved(true);
   }
-
   async function addMember(account: UserSummary) {
-    try {
-      await mutate(`/api/organizations/${organization.id}/members`, {
-        method: "POST",
-        body: JSON.stringify({ userId: account.id }),
-      });
-      setQuery("");
-    } catch {
-      // The shared alert already renders the request error.
-    }
+    if (await commands.addMember(organization.id, account.id)) setQuery("");
   }
-
-  async function toggleResponsibility(
-    userId: string,
-    scope: "node" | "subtree",
-  ) {
-    const active = snapshot.responsibilities.find(
-      (item) =>
-        item.organizationId === organization.id && item.userId === userId,
-    )?.scope;
-    try {
-      await mutate(
-        active === scope
-          ? `/api/organizations/${organization.id}/responsibilities/${userId}`
-          : `/api/organizations/${organization.id}/responsibilities`,
-        active === scope
-          ? { method: "DELETE" }
-          : { method: "POST", body: JSON.stringify({ userId, scope }) },
-      );
-    } catch {
-      // The shared alert already renders the request error.
-    }
-  }
-
-  async function removeMember(userId: string) {
-    try {
-      await mutate(`/api/organizations/${organization.id}/members/${userId}`, {
-        method: "DELETE",
-      });
-    } catch {
-      // The shared alert already renders the request error.
-    }
-  }
-
-  async function addInferenceService(endpointId: string) {
-    if (!endpointId) return;
-    try {
-      await mutate(organizationInferenceServicesPath(organization.id), {
-        method: "POST",
-        body: JSON.stringify({ endpointId }),
-      });
-    } catch {
-      // The shared alert already renders the request error.
-    }
-  }
-
-  async function removeInferenceService(endpointId: string) {
-    try {
-      await mutate(organizationInferenceServicePath(organization.id, endpointId), {
-        method: "DELETE",
-      });
-    } catch {
-      // The shared alert already renders the request error.
-    }
-  }
-
-  async function toggleInferenceModel(
-    endpointId: string,
-    modelId: string,
-    active: boolean,
-  ) {
-    try {
-      await mutate(
-        organizationInferenceModelPath(organization.id, endpointId, modelId),
-        { method: "PUT", body: JSON.stringify({ active: !active }) },
-      );
-    } catch {
-      // The shared alert already renders the request error.
-    }
-  }
+  const removeMember = (userId: string) => commands.removeMember(organization.id, userId);
+  const toggleResponsibility = (userId: string, scope: "node" | "subtree") =>
+    commands.setResponsibility(organization.id, userId, scope, heldResponsibility(snapshot, organization.id, userId));
+  const addInferenceService = (endpointId: string) => commands.addInferenceService(organization.id, endpointId);
+  const removeInferenceService = (endpointId: string) => commands.removeInferenceService(organization.id, endpointId);
+  const toggleInferenceModel = (endpointId: string, modelId: string, active: boolean) =>
+    commands.setInferenceModelActive(organization.id, endpointId, modelId, !active);
 
   return (
     <div

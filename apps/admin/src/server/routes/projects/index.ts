@@ -2,7 +2,7 @@ import express from "express";
 import { parseCreateProjectRequest } from "admin_domain/common";
 import {
   createProject, deleteProject, findProject, listProjects, listProjectsByOrganization,
-  readProjectDefault, resolvePolicy, writeProjectDefault, type AdminDatabase,
+  readProjectDefault, resolvePolicy, type AdminDatabase,
 } from "admin_domain/server";
 import type { AuthenticatedRequest } from "../../permission/index.js";
 import { body, requireInput } from "../body.js";
@@ -37,22 +37,6 @@ export function registerProjectRoutes(app: express.Express, database: AdminDatab
     const removed = await deleteProject(database, request.user!.id, String(request.params.name));
     if (!removed) { response.status(404).json({ error: "no such project" }); return; }
     response.json({ ok: true });
-  });
-
-  /**
-   * What every new project starts with.
-   *
-   * Readable by any signed-in account because the coding agent fetches it on
-   * their behalf when it makes a folder; only a master administrator writes it.
-   */
-  app.get("/api/project-defaults/:name", async (request, response) => {
-    response.json({ file: await readProjectDefault(database, String(request.params.name)) });
-  });
-
-  app.put("/api/admin/project-defaults/:name", async (request, response) => {
-    const content = (body(request) as { content?: unknown } | undefined)?.content;
-    if (typeof content !== "string") { response.status(400).json({ error: "content must be a string" }); return; }
-    response.json({ file: await writeProjectDefault(database, String(request.params.name), content) });
   });
 
   /**

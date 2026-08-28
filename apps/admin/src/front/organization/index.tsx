@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CornerDownRight, Plus, Trash2 } from "lucide-react";
-import { ensureOrganizationModel } from "admin_domain/front";
+import { OrganizationScreenCommands, childrenOf, ensureOrganizationModel } from "admin_domain/front";
 import {
   parseOrganizationSnapshot,
   parseUsersResponse,
   type Organization,
+  type UserSummary,
   type OrganizationNodePermission,
   type OrganizationSnapshot,
 } from "admin_domain/common";
@@ -40,74 +41,41 @@ export function OrganizationScreen({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  async function loadOrganizations() {
-    setBusy(true);
-    setError("");
-    try {
-      const organizationValue = await request("/api/organizations", {}, token);
-      const organizationResult = parseOrganizationSnapshot(organizationValue);
-      if (!organizationResult)
-        throw new Error(text[RSC.AUTH_ERROR_ALERT]);
-      model.snapshot.set(organizationResult);
-      if (
-        organizationResult.access.nodes.some((node) => node.canManageMembers)
-      ) {
-        const accountResult = parseUsersResponse(
-          await request("/api/organizations/users", {}, token),
-        );
-        if (!accountResult) throw new Error(text[RSC.AUTH_ERROR_ALERT]);
-        model.accounts.set(accountResult.users);
-      } else {
-        model.accounts.set([]);
-      }
-    } catch (reason) {
-      setError(
-        reason instanceof Error ? reason.message : text[RSC.AUTH_ERROR_ALERT],
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
+  /**
+   * Loading and the two writes this screen owns.
+   *
+   * The words are read through a ref rather than depended on: `texts()` builds
+   * a fresh object every render, so listing it would rebuild the commands every
+   * render and re-run the load effect for ever. That failure has happened twice
+   * in this app already.
+   */
+  const words = useRef(text);
+  words.current = text;
+  const commands = useMemo(
+    () => new OrganizationScreenCommands(
+      (path, options) => request(path, options, token),
+      () => ({ failed: words.current[RSC.AUTH_ERROR_ALERT] }),
+      (change) => {
+        if (change.snapshot) model.snapshot.set(change.snapshot);
+        if (change.accounts) model.accounts.set(change.accounts as UserSummary[]);
+      },
+      (change) => {
+        if (change.busy !== undefined) setBusy(change.busy);
+        if (change.error !== undefined) setError(change.error);
+      },
+      parseUsersResponse,
+    ),
+    [model, request, token],
+  );
 
-  useEffect(() => {
-    void loadOrganizations();
-  }, [model, token]);
+  useEffect(() => { void commands.load(); }, [commands]);
 
-  async function mutate(
-    path: string,
-    options: RequestInit,
-  ): Promise<OrganizationSnapshot | null> {
-    setBusy(true);
-    setError("");
-    try {
-      const next = parseOrganizationSnapshot(
-        await request(path, options, token),
-      );
-      if (!next) throw new Error(text[RSC.AUTH_ERROR_ALERT]);
-      model.snapshot.set(next);
-      return next;
-    } catch (reason) {
-      setError(
-        reason instanceof Error ? reason.message : text[RSC.AUTH_ERROR_ALERT],
-      );
-      return null;
-    } finally {
-      setBusy(false);
-    }
-  }
-
+  // Closing a form and clearing a selection are this screen's business, and
+  // they only happen when the command reports it worked.
   async function createOrganization(event: React.FormEvent) {
     event.preventDefault();
     if (!creation || !newName.trim()) return;
-    const next = await mutate("/api/organizations", {
-      method: "POST",
-      body: JSON.stringify({
-        name: newName,
-        mode: creation.mode,
-        parentId: creation.parentId,
-      }),
-    });
-    if (next) {
+    if (await commands.create({ name: newName, mode: creation.mode, parentId: creation.parentId })) {
       setCreation(null);
       setNewName("");
     }
@@ -115,10 +83,7 @@ export function OrganizationScreen({
 
   async function deleteOrganization(organization: Organization) {
     if (!window.confirm(organization.name)) return;
-    const next = await mutate(`/api/organizations/${organization.id}`, {
-      method: "DELETE",
-    });
-    if (next && selection === organization.id) model.selection.set(null);
+    if (await commands.remove(organization.id) && selection === organization.id) model.selection.set(null);
   }
 
   function openCreation(target: CreationTarget) {
@@ -126,11 +91,7 @@ export function OrganizationScreen({
     setNewName("");
   }
 
-  function children(parentId: string | null): Organization[] {
-    return snapshot.organizations.filter(
-      (organization) => organization.parentId === parentId,
-    );
-  }
+  const children = (parentId: string | null): Organization[] => childrenOf(snapshot, parentId);
 
   function renderNode(organization: Organization): React.ReactNode {
     const permission =
@@ -237,7 +198,7 @@ export function OrganizationScreen({
           <h1>{text[RSC.ADMIN_ORGANIZATIONS_TITLE]}</h1>
           <p>{text[RSC.ADMIN_ORGANIZATIONS_MESSAGE]}</p>
         </div>
-        <Button variant="outline" onClick={loadOrganizations} disabled={busy}>
+        <Button variant="outline" onClick={() => { void commands.load(); }} disabled={busy}>
           {text[RSC.ADMIN_ORGANIZATIONS_REFRESH_BUTTON]}
         </Button>
         {snapshot.access.canCreateRoot && (
