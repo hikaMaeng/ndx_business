@@ -1,10 +1,10 @@
 import path from "node:path";
 import type { EventEnvelope } from "agent/common";
 import type { WorkerEmit } from "agent/broker/worker";
-import { VIBE_ACTIONS, parseIterationScope } from "../../common/index.js";
-import { runBash } from "../tools/bash/index.js";
-import { resolveWorkspaceDirectory } from "../workspace/index.js";
-import type { ReactorGlobals, SessionContext } from "./context.js";
+import { VIBE_ACTIONS, parseIterationScope } from "../../../common/index.js";
+import { runBash } from "../../tools/bash/index.js";
+import { resolveWorkspaceDirectory } from "../../workspace/index.js";
+import type { ReactorGlobals, SessionContext } from "../context/index.js";
 
 /** Keeps a tool result readable for the model without letting one command flood the context. */
 function summariseForModel(result: { exitCode: number | null; stdout: string; stderr: string; timedOut: boolean }): string {

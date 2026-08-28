@@ -1,8 +1,8 @@
 import type { EventEnvelope } from "agent/common";
 import type { WorkerEmit } from "agent/broker/worker";
-import { VIBE_ACTIONS, VIBE_SESSION_OPEN_ACTION, parseVibeSessionOpenRequest } from "../../common/index.js";
-import { ensureWorkspaceDirectory } from "../workspace/index.js";
-import type { ReactorGlobals } from "./context.js";
+import { VIBE_ACTIONS, VIBE_SESSION_OPEN_ACTION, parseVibeSessionOpenRequest } from "../../../common/index.js";
+import { ensureWorkspaceDirectory } from "../../workspace/index.js";
+import type { ReactorGlobals } from "../context/index.js";
 
 export interface SessionOpenOutcome {
   sessionKey: string;

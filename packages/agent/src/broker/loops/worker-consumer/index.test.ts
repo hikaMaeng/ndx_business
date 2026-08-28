@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { EventDraft, EventEnvelope, IngressEvent } from "../../common/index.js";
-import { startWorkerConsumer, terminalPersistenceVisibilitySeconds } from "./worker-consumer.js";
-import { WorkerLostError } from "../worker/pool.js";
+import type { EventDraft, EventEnvelope, IngressEvent } from "../../../common/index.js";
+import { startWorkerConsumer, terminalPersistenceVisibilitySeconds } from "../worker-consumer/index.js";
+import { WorkerLostError } from "../../worker/pool.js";
 
 const command: IngressEvent = { eventId: "command-1", action: "hash.sha256", transactionKey: "tx-1", channel: "agent.requests", replyChannel: "orders", createdAt: "2026-08-22T00:00:00.000Z", payload: { input: "abc" } };
 

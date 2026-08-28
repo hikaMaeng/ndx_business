@@ -1,9 +1,9 @@
 import { VIBE_ACTIONS, type VibeClientAction, type VibeProgressMap } from "../../../common/index.js";
 import type { VibeSessionModel } from "../VibeSessionModel.js";
-import { sessionOpened } from "./session.js";
-import { turnFinal, turnStarted } from "./turn.js";
-import { iterationMessage, iterationReasoning, iterationStarted } from "./iteration.js";
-import { toolCompleted, toolFailed, toolStarted, toolStderr, toolStdout } from "./tool.js";
+import { sessionOpened } from "./session/index.js";
+import { turnFinal, turnStarted } from "./turn/index.js";
+import { iterationMessage, iterationReasoning, iterationStarted } from "./iteration/index.js";
+import { toolCompleted, toolFailed, toolStarted, toolStderr, toolStdout } from "./tool/index.js";
 
 /**
  * One reducer per event, and nothing else.

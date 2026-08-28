@@ -14,9 +14,9 @@ export { createDatabasePool, snapshotDatabasePool, type DatabasePoolSnapshot } f
 export { readEnv, type AgentEnv } from "./env.js";
 
 export { nextReadBackoff, wait } from "./loops/backoff.js";
-export { startEventLogTail, type BrokerLoop } from "./loops/log-tail.js";
-export { startFactDispatcher, type ReactionTable } from "./loops/fact-dispatcher.js";
-export { startWorkerConsumer, terminalPersistenceVisibilitySeconds } from "./loops/worker-consumer.js";
+export { startEventLogTail, type BrokerLoop } from "./loops/log-tail/index.js";
+export { startFactDispatcher, type ReactionTable } from "./loops/fact-dispatcher/index.js";
+export { startWorkerConsumer, terminalPersistenceVisibilitySeconds } from "./loops/worker-consumer/index.js";
 
 export { CoalescedWakeup } from "./loops/notifier.js";
 

@@ -1,9 +1,9 @@
 import type { EventEnvelope } from "agent/common";
 import type { WorkerEmit } from "agent/broker/worker";
-import { VIBE_ACTIONS, parseIterationScope } from "../../common/index.js";
-import { chat } from "../llm/index.js";
-import { BASH_TOOL_SCHEMA } from "../tools/bash/index.js";
-import type { ReactorGlobals, SessionContext } from "./context.js";
+import { VIBE_ACTIONS, parseIterationScope } from "../../../common/index.js";
+import { chat } from "../../llm/index.js";
+import { BASH_TOOL_SCHEMA } from "../../tools/bash/index.js";
+import type { ReactorGlobals, SessionContext } from "../context/index.js";
 
 /**
  * One inference call. That is the whole job.

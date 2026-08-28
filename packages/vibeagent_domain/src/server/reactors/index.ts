@@ -5,14 +5,14 @@ import { VIBE_ACTIONS, VIBE_SESSION_OPEN_ACTION, VIBE_TURN_ACTION } from "../../
 import { readLoopConfig } from "../config/index.js";
 import { SessionStore, ensureSessionSchema } from "../session/index.js";
 import { ViewStore, ensureViewSchema } from "../view/index.js";
-import { loadSession, sessionKeyOf, type ReactorGlobals, type SessionContext } from "./context.js";
-import { openSession } from "./session-open.js";
-import { openTurn } from "./turn-open.js";
-import { callModel } from "./model-call.js";
-import { decideReply } from "./reply-decide.js";
-import { runTool } from "./tool-run.js";
-import { joinTools } from "./tool-join.js";
-import { projectView } from "./view-project.js";
+import { loadSession, sessionKeyOf, type ReactorGlobals, type SessionContext } from "./context/index.js";
+import { openSession } from "./session-open/index.js";
+import { openTurn } from "./turn-open/index.js";
+import { callModel } from "./model-call/index.js";
+import { decideReply } from "./reply-decide/index.js";
+import { runTool } from "./tool-run/index.js";
+import { joinTools } from "./tool-join/index.js";
+import { projectView } from "./view-project/index.js";
 
 /**
  * One reactor per event, and nothing that spans them.
@@ -155,4 +155,4 @@ export function createVibeWorker(
   };
 }
 
-export { loadSession, sessionKeyOf, SessionContext, Sequencer, type ReactorGlobals } from "./context.js";
+export { loadSession, sessionKeyOf, SessionContext, Sequencer, type ReactorGlobals } from "./context/index.js";

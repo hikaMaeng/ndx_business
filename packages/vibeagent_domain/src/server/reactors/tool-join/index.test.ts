@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { EventEnvelope } from "agent/common";
-import { VIBE_ACTIONS } from "../../common/index.js";
-import { Sequencer, SessionContext, type ReactorGlobals } from "./context.js";
-import { joinTools } from "./tool-join.js";
+import { VIBE_ACTIONS } from "../../../common/index.js";
+import { Sequencer, SessionContext, type ReactorGlobals } from "../context/index.js";
+import { joinTools } from "./index.js";
 
 /**
  * The join is where a turn's parallel branches come back together, and it is

@@ -1,8 +1,8 @@
 import type { Pool } from "pg";
 import type { EventEnvelope } from "agent/common";
-import type { LoopConfig } from "../config/index.js";
-import type { SessionStore } from "../session/index.js";
-import type { ViewStore } from "../view/index.js";
+import type { LoopConfig } from "../../config/index.js";
+import type { SessionStore } from "../../session/index.js";
+import type { ViewStore } from "../../view/index.js";
 
 /**
  * What a reactor is given.

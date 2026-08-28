@@ -1,5 +1,5 @@
-import type { VibeIterationMessage, VibeIterationReasoning, VibeIterationStarted } from "../../../common/index.js";
-import type { VibeSessionModel } from "../VibeSessionModel.js";
+import type { VibeIterationMessage, VibeIterationReasoning, VibeIterationStarted } from "../../../../common/index.js";
+import type { VibeSessionModel } from "../../VibeSessionModel.js";
 
 /**
  * Nothing to show yet — the first delta opens the block — but something to count.

@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { EventEnvelope } from "agent/common";
-import { VIBE_ACTIONS } from "../../common/index.js";
-import { Sequencer, SessionContext, type ReactorGlobals } from "./context.js";
-import { decideReply } from "./reply-decide.js";
-import type { ChatToolCall } from "../llm/index.js";
+import { VIBE_ACTIONS } from "../../../common/index.js";
+import { Sequencer, SessionContext, type ReactorGlobals } from "../context/index.js";
+import { decideReply } from "./index.js";
+import type { ChatToolCall } from "../../llm/index.js";
 
 /**
  * The only judgement in the machine: was that the answer, or a request to run

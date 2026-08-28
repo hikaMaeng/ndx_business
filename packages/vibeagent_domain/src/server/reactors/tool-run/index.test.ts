@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { EventEnvelope } from "agent/common";
-import { VIBE_ACTIONS } from "../../common/index.js";
-import { Sequencer, SessionContext, type ReactorGlobals } from "./context.js";
-import { runTool } from "./tool-run.js";
+import { VIBE_ACTIONS } from "../../../common/index.js";
+import { Sequencer, SessionContext, type ReactorGlobals } from "../context/index.js";
+import { runTool } from "./index.js";
 
 /**
  * A command is the one effect in this machine that a key cannot make

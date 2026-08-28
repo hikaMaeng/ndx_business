@@ -1,5 +1,5 @@
-import type { VibeTurnFinal, VibeTurnStarted } from "../../../common/index.js";
-import type { VibeSessionModel } from "../VibeSessionModel.js";
+import type { VibeTurnFinal, VibeTurnStarted } from "../../../../common/index.js";
+import type { VibeSessionModel } from "../../VibeSessionModel.js";
 
 /** The prompt, which the client may already have shown, and may not have. */
 export function turnStarted(model: VibeSessionModel, event: VibeTurnStarted): void {

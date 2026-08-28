@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { startEventLogTail } from "./log-tail.js";
-import { EventStreamHub } from "../stream/hub.js";
-import { MetricsRegistry } from "../metrics/registry.js";
-import type { EventEnvelope } from "../../common/index.js";
-import type { EventStore } from "../event-store/store.js";
+import { startEventLogTail } from "../log-tail/index.js";
+import { EventStreamHub } from "../../stream/hub.js";
+import { MetricsRegistry } from "../../metrics/registry.js";
+import type { EventEnvelope } from "../../../common/index.js";
+import type { EventStore } from "../../event-store/store.js";
 
 function event(channel: string, streamId: string, sequence: number): EventEnvelope {
   return {

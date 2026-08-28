@@ -1,5 +1,5 @@
-import type { VibeToolChunk, VibeToolCompleted, VibeToolFailed, VibeToolStarted } from "../../../common/index.js";
-import type { VibeSessionModel } from "../VibeSessionModel.js";
+import type { VibeToolChunk, VibeToolCompleted, VibeToolFailed, VibeToolStarted } from "../../../../common/index.js";
+import type { VibeSessionModel } from "../../VibeSessionModel.js";
 
 /**
  * The model asked for a command. This is the request, not its result.

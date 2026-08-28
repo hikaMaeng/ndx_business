@@ -1,7 +1,7 @@
 import type { EventEnvelope } from "agent/common";
-import { VIBE_ACTIONS, parseIterationScope } from "../../common/index.js";
-import type { ViewStore } from "../view/index.js";
-import { sessionKeyOf } from "./context.js";
+import { VIBE_ACTIONS, parseIterationScope } from "../../../common/index.js";
+import type { ViewStore } from "../../view/index.js";
+import { sessionKeyOf } from "../context/index.js";
 
 const asText = (value: unknown): string => (typeof value === "string" ? value : "");
 const asNumber = (value: unknown): number => (typeof value === "number" && Number.isFinite(value) ? value : 0);

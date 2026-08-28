@@ -1,8 +1,8 @@
-import type { EventStore } from "../event-store/store.js";
-import type { EventStreamHub } from "../stream/hub.js";
-import type { MetricsRegistry } from "../metrics/registry.js";
-import { CoalescedWakeup } from "./notifier.js";
-import { nextReadBackoff, wait } from "./backoff.js";
+import type { EventStore } from "../../event-store/store.js";
+import type { EventStreamHub } from "../../stream/hub.js";
+import type { MetricsRegistry } from "../../metrics/registry.js";
+import { CoalescedWakeup } from "../notifier.js";
+import { nextReadBackoff, wait } from "../backoff.js";
 
 export type BrokerLoop = { stop(): void; done: Promise<void> };
 

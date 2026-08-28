@@ -1,11 +1,11 @@
-import type { EventEnvelope, IngressEvent } from "../../common/index.js";
-import { deterministicEventId } from "../../server/index.js";
-import type { EventStore } from "../event-store/store.js";
-import type { EventQueueTransport } from "../queue/transport.js";
-import type { MetricsRegistry } from "../metrics/registry.js";
-import { CoalescedWakeup } from "./notifier.js";
-import { nextReadBackoff, wait } from "./backoff.js";
-import type { BrokerLoop } from "./log-tail.js";
+import type { EventEnvelope, IngressEvent } from "../../../common/index.js";
+import { deterministicEventId } from "../../../server/index.js";
+import type { EventStore } from "../../event-store/store.js";
+import type { EventQueueTransport } from "../../queue/transport.js";
+import type { MetricsRegistry } from "../../metrics/registry.js";
+import { CoalescedWakeup } from "../notifier.js";
+import { nextReadBackoff, wait } from "../backoff.js";
+import type { BrokerLoop } from "../log-tail/index.js";
 
 /** action → the reactor queues that should receive it. Supplied by the app; meaningless to this file. */
 export type ReactionTable = Readonly<Record<string, readonly string[]>>;

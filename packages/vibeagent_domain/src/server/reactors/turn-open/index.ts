@@ -1,7 +1,7 @@
 import type { EventEnvelope } from "agent/common";
 import type { WorkerEmit } from "agent/broker/worker";
-import { VIBE_ACTIONS, VIBE_TURN_ACTION, parseVibeTurnRequest } from "../../common/index.js";
-import type { ReactorGlobals, SessionContext } from "./context.js";
+import { VIBE_ACTIONS, VIBE_TURN_ACTION, parseVibeTurnRequest } from "../../../common/index.js";
+import type { ReactorGlobals, SessionContext } from "../context/index.js";
 
 /**
  * The turn begins.
