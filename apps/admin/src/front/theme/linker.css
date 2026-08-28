@@ -1,23 +1,53 @@
+/*
+ * One palette, two apps.
+ *
+ * Admin and the coding agent are the same product seen from two sides, and they
+ * were drifting apart in greys — two sets of near-identical hand-picked values,
+ * neither of which was the reference. The base scale below is the agent's,
+ * verbatim. Every name Admin already uses is mapped onto it rather than
+ * re-picked, so the eight stylesheets that consume those names did not change.
+ *
+ * Add a colour to the base scale, never to the mapping.
+ */
 :root {
-  --app-bg: #141414;
-  --sidebar-bg: #1b1b1b;
-  --main-bg: #181818;
-  --surface-bg: #202020;
-  --surface-hover-bg: #262626;
-  --selection-bg: #2a2a2a;
-  --input-bg: #242424;
-  --input-border: #323232;
-  --input-hover-border: #3a3a3a;
-  --border: #2b2b2b;
+  /* --- base scale: shared with the coding agent, do not diverge --- */
+  --bg: #0a0a0a;
+  --surface: #141414;
+  --surface-2: #1c1c1c;
+  --surface-3: #242424;
+  --line: #2e2e2e;
+  --line-strong: #4d4d4d;
+  --text: #ededed;
+  --text-dim: #a3a3a3;
+  --text-faint: #6b6b6b;
+  --mono: "Cascadia Code", "Consolas", ui-monospace, monospace;
+
+  /* --- Admin's names, mapped onto the scale --- */
+  --app-bg: var(--bg);
+  --sidebar-bg: var(--surface);
+  --main-bg: var(--bg);
+  --surface-bg: var(--surface-2);
+  --surface-hover-bg: var(--surface-3);
+  --selection-bg: var(--surface-3);
+  --input-bg: var(--surface-2);
+  --input-border: var(--line);
+  --input-hover-border: var(--line-strong);
+  --border: var(--line);
   --divider: rgba(255, 255, 255, 0.06);
-  --text-primary: #f5f5f5;
-  --text-secondary: #c7c7c7;
-  --text-description: #9a9a9a;
-  --text-disabled: #707070;
+  --text-primary: var(--text);
+  --text-secondary: var(--text-dim);
+  --text-description: var(--text-dim);
+  --text-disabled: var(--text-faint);
+
+  /*
+   * Status carried by weight and border, not by hue. The agent side reads as
+   * one grey surface, so Admin has to agree with it rather than introduce a
+   * palette of its own for the same states.
+   */
   --primary: #d8d8d8;
   --primary-hover: #f0f0f0;
   --primary-active: #b8b8b8;
-  --on-primary: #181818;
+  --on-primary: var(--bg);
   --primary-focus: rgba(216, 216, 216, 0.24);
   --success: #a8a8a8;
   --success-focus: rgba(168, 168, 168, 0.2);
@@ -26,6 +56,11 @@
   --error-focus: rgba(208, 208, 208, 0.22);
   --overlay: rgba(0, 0, 0, 0.76);
   --shadow-modal: rgba(0, 0, 0, 0.58);
+
+  /*
+   * Organisation nodes are the one place hue carries meaning — someone picks a
+   * colour to tell their own tree apart — so these stay chromatic on purpose.
+   */
   --node-slate: #a3a3a3;
   --node-slate-soft: rgba(163, 163, 163, 0.15);
   --node-blue: #60a5fa;
@@ -38,10 +73,11 @@
   --node-amber-soft: rgba(251, 191, 36, 0.14);
   --node-rose: #fb7185;
   --node-rose-soft: rgba(251, 113, 133, 0.14);
-  color: var(--text-primary);
-  background: var(--app-bg);
+
+  color: var(--text);
+  background: var(--bg);
   color-scheme: dark;
-  font-family: "Segoe UI Variable", "Malgun Gothic", "Microsoft YaHei", "Nirmala UI", sans-serif;
+  font-family: "Segoe UI Variable", "Malgun Gothic", "Nirmala UI", sans-serif;
   font-synthesis: none;
 }
 
