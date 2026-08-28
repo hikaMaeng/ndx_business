@@ -27,7 +27,7 @@ services:
     # psql` is enough to inspect it. Publishing would also make the deploy
     # script probe it over HTTP, which a database cannot answer.
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ${NDX_DATA_HOST_DIR:-${VIBE_WORKSPACE_HOST_DIR:-./workspace}}/.ndx/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d ndx_business"]
       interval: 10s
@@ -74,7 +74,13 @@ services:
       postgres:
         condition: service_healthy
     volumes:
-      - admin_data:/app/data
+      - ${NDX_DATA_HOST_DIR:-${VIBE_WORKSPACE_HOST_DIR:-./workspace}}/.ndx/admin/data:/app/data
+      # The database Admin serves — accounts, the fact log, every session the
+      # coding agent has ever run. It was on an *anonymous* volume until now:
+      # declared by the base postgres image, named by nobody, mentioned in no
+      # compose file. A `down` followed by an `up` hands the container a new
+      # empty one, so the entire history was one command away from gone.
+      - ${NDX_DATA_HOST_DIR:-${VIBE_WORKSPACE_HOST_DIR:-./workspace}}/.ndx/admin/postgres:/var/lib/postgresql
     networks:
       - ndx-business_internal
   vibeagent:
@@ -105,7 +111,14 @@ services:
     volumes:
       # Projects root. A host path, not a named volume: the browser runs on the
       # host, so generated files have to be reachable there without docker cp.
-      - ${VIBE_WORKSPACE_HOST_DIR:-./workspace}:/workspace
+      - ${NDX_DATA_HOST_DIR:-${VIBE_WORKSPACE_HOST_DIR:-./workspace}}:/workspace
+      # ...and `.ndx` masked back out of it. System storage lives inside this
+      # root so there is one folder to copy or back up, but the agent runs a
+      # real shell in here and `rm -rf` does not consult the folder listing
+      # that hides dot-directories. An empty tmpfs over the path means the
+      # agent cannot reach the database files at all.
+      - type: tmpfs
+        target: /workspace/.ndx
     networks:
       - ndx-business_internal
   vibeagent-worker:
@@ -129,7 +142,14 @@ services:
     volumes:
       # Projects root. A host path, not a named volume: the browser runs on the
       # host, so generated files have to be reachable there without docker cp.
-      - ${VIBE_WORKSPACE_HOST_DIR:-./workspace}:/workspace
+      - ${NDX_DATA_HOST_DIR:-${VIBE_WORKSPACE_HOST_DIR:-./workspace}}:/workspace
+      # ...and `.ndx` masked back out of it. System storage lives inside this
+      # root so there is one folder to copy or back up, but the agent runs a
+      # real shell in here and `rm -rf` does not consult the folder listing
+      # that hides dot-directories. An empty tmpfs over the path means the
+      # agent cannot reach the database files at all.
+      - type: tmpfs
+        target: /workspace/.ndx
     networks:
       - ndx-business_internal
   # Turns recorded facts into work for reactors, per the reaction table.
@@ -184,15 +204,16 @@ services:
     ports:
       - "${AGENT_GATEWAY_B_HOST_PORT:-18082}:18081"
     volumes:
-      - ${VIBE_WORKSPACE_HOST_DIR:-./workspace}:/workspace
+      - ${NDX_DATA_HOST_DIR:-${VIBE_WORKSPACE_HOST_DIR:-./workspace}}:/workspace
+      # ...and `.ndx` masked back out of it. System storage lives inside this
+      # root so there is one folder to copy or back up, but the agent runs a
+      # real shell in here and `rm -rf` does not consult the folder listing
+      # that hides dot-directories. An empty tmpfs over the path means the
+      # agent cannot reach the database files at all.
+      - type: tmpfs
+        target: /workspace/.ndx
     networks:
       - ndx-business_internal
-
-volumes:
-  postgres_data:
-    name: ndx-business_postgres_data
-  admin_data:
-    name: ndx-business_admin_data
 
 networks:
   # Project-scoped: no other compose project joins this network. Publishing a
