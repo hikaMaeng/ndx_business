@@ -20,9 +20,8 @@ export function AccountScreen({ token, request = api }: { token: string; request
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
-  // Same reason as the shell. The `idle` guard below keeps the happy path from
-  // spinning, but a failed load sets the status back to `idle`, so with unstable
-  // words in the dependencies a single failure became a retry storm.
+  // Read through a ref for the same reason as the shell: `texts()` is a new
+  // object every render and must not decide when this effect runs.
   const words = useRef(text);
   words.current = text;
 
@@ -35,7 +34,7 @@ export function AccountScreen({ token, request = api }: { token: string; request
       model.snapshot.set({ settings: result.settings, sessions: result.sessions, pendingUsers: result.pendingUsers, status: "ready" });
       setFilterText(result.settings.signupFilter ? JSON.stringify(result.settings.signupFilter, null, 2) : "");
     }).catch((reason) => {
-      model.snapshot.mutate((current) => { current.status = "idle"; });
+      model.snapshot.mutate((current) => { current.status = "failed"; });
       setError(reason instanceof Error ? reason.message : words.current[RSC.AUTH_ERROR_ALERT]);
     });
   }, [model, request, snapshot.status, token]);
@@ -71,7 +70,7 @@ export function AccountScreen({ token, request = api }: { token: string; request
       {([["approval", RSC.ADMIN_ACCOUNT_TAB_APPROVAL], ["sessions", RSC.ADMIN_ACCOUNT_TAB_SESSIONS], ["policy", RSC.ADMIN_ACCOUNT_TAB_POLICY]] as const).map(([value, label]) =>
         <button key={value} role="tab" aria-selected={tab === value} className={tab === value ? "is-active" : ""} onClick={() => setTab(value)}>{text[label]}</button>)}
     </div>
-    {error && <p role="alert" className="error-text">{error}</p>}
+    {error && <p role="alert" className="error-text">{error}{snapshot.status === "failed" && <> <button type="button" className="link-button" onClick={() => { setError(""); model.snapshot.mutate((current) => { current.status = "idle"; }); }}>{text[RSC.ADMIN_RETRY_BUTTON]}</button></>}</p>}
     {snapshot.status !== "ready" ? <p role="status">{text[RSC.ADMIN_LOADING_STATUS]}</p> : tab === "policy" && settings ? <PolicyForm settings={settings} filterText={filterText} setFilterText={setFilterText} message={message} onSave={save} text={text} /> : tab === "approval" ? <ApprovalPanel users={snapshot.pendingUsers} onDecision={decide} text={text} /> : <SessionsPanel sessions={snapshot.sessions} onRevoke={revoke} text={text} />}
   </section>;
 }

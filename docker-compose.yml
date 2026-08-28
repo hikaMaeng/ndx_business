@@ -6,6 +6,10 @@ services:
   # used directly: this service used to name a Dockerfile that was never
   # committed, so the stack could not be built from a clean checkout.
   postgres:
+    # A checkpoint on the host bind mount takes longer than docker's ten second
+    # default, and a database killed part-way through one has to recover on the
+    # next start. This is the time to shut down cleanly, not a timeout to hit.
+    stop_grace_period: 60s
     image: ghcr.io/pgmq/pg18-pgmq:v1.10.0
     # The agent app opens roughly ninety connections at its configured ingress
     # and outbox concurrency, which leaves nothing under the default hundred —
@@ -54,6 +58,10 @@ services:
     networks:
       - ndx-business_internal
   admin:
+    # A checkpoint on the host bind mount takes longer than docker's ten second
+    # default, and a database killed part-way through one has to recover on the
+    # next start. This is the time to shut down cleanly, not a timeout to hit.
+    stop_grace_period: 60s
     build:
       context: .
       dockerfile: apps/admin/docker/Dockerfile

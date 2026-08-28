@@ -28,6 +28,7 @@
   "admin.save.button": "Guardar política",
   "admin.saved.status": "Política guardada.",
   "admin.loading.status": "Cargando política…",
+  "admin.retry.button": "Reintentar",
   "admin.sessions.title.text": "Sesiones activas",
   "admin.sessions.subtitle.text": "Revocar una sesión finaliza inmediatamente su inicio de sesión.",
   "admin.sessions.empty.message": "No hay sesiones activas.",

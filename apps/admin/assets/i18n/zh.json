@@ -28,6 +28,7 @@
   "admin.save.button": "保存策略",
   "admin.saved.status": "策略已保存。",
   "admin.loading.status": "正在加载策略…",
+  "admin.retry.button": "重试",
   "admin.sessions.title.text": "活动会话",
   "admin.sessions.subtitle.text": "撤销会话会立即结束登录。",
   "admin.sessions.empty.message": "没有活动会话。",

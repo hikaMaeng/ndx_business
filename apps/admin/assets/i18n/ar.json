@@ -28,6 +28,7 @@
   "admin.save.button": "حفظ السياسة",
   "admin.saved.status": "تم حفظ السياسة.",
   "admin.loading.status": "جارٍ تحميل السياسة…",
+  "admin.retry.button": "إعادة المحاولة",
   "admin.sessions.title.text": "الجلسات النشطة",
   "admin.sessions.subtitle.text": "يؤدي إبطال الجلسة إلى إنهاء تسجيل الدخول فورًا.",
   "admin.sessions.empty.message": "لا توجد جلسات نشطة.",

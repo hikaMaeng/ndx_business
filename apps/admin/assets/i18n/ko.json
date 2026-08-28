@@ -28,6 +28,7 @@
   "admin.save.button": "정책 저장",
   "admin.saved.status": "정책이 저장되었습니다.",
   "admin.loading.status": "정책을 불러오는 중…",
+  "admin.retry.button": "다시 시도",
   "admin.sessions.title.text": "활성 세션",
   "admin.sessions.subtitle.text": "세션을 취소하면 해당 로그인이 즉시 종료됩니다.",
   "admin.sessions.empty.message": "활성 세션이 없습니다.",

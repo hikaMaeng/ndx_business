@@ -28,6 +28,7 @@
   "admin.save.button": "Enregistrer la politique",
   "admin.saved.status": "Politique enregistrée.",
   "admin.loading.status": "Chargement de la politique…",
+  "admin.retry.button": "Réessayer",
   "admin.sessions.title.text": "Sessions actives",
   "admin.sessions.subtitle.text": "La révocation d’une session met immédiatement fin à sa connexion.",
   "admin.sessions.empty.message": "Aucune session active.",

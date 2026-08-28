@@ -28,6 +28,7 @@
   "admin.save.button": "नीति सहेजें",
   "admin.saved.status": "नीति सहेजी गई।",
   "admin.loading.status": "नीति लोड हो रही है…",
+  "admin.retry.button": "पुनः प्रयास करें",
   "admin.sessions.title.text": "सक्रिय सत्र",
   "admin.sessions.subtitle.text": "सत्र रद्द करने से उसका लॉगिन तुरंत समाप्त हो जाता है।",
   "admin.sessions.empty.message": "कोई सक्रिय सत्र नहीं है।",

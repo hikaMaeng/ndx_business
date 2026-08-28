@@ -10,7 +10,14 @@ stop_children() {
     kill -TERM "$admin_pid" 2>/dev/null || true
   fi
   if [[ -n "$postgres_pid" ]] && kill -0 "$postgres_pid" 2>/dev/null; then
-    kill -TERM "$postgres_pid" 2>/dev/null || true
+    # INT, not TERM. To postgres, TERM means *smart* shutdown: refuse new
+    # connections and then wait for every existing client to disconnect on its
+    # own. The admin server beside it holds a pool, so that wait does not end,
+    # docker's grace period expires, and the database is killed mid-write —
+    # which is why every restart began "database system was not properly shut
+    # down; automatic recovery in progress". INT is fast shutdown: roll back
+    # open transactions, checkpoint, exit cleanly.
+    kill -INT "$postgres_pid" 2>/dev/null || true
   fi
   [[ -z "$admin_pid" ]] || wait "$admin_pid" 2>/dev/null || true
   [[ -z "$postgres_pid" ]] || wait "$postgres_pid" 2>/dev/null || true

@@ -28,6 +28,7 @@
   "admin.save.button": "Save policy",
   "admin.saved.status": "Policy saved.",
   "admin.loading.status": "Loading policy…",
+  "admin.retry.button": "Try again",
   "admin.sessions.title.text": "Active sessions",
   "admin.sessions.subtitle.text": "Revoking a session immediately ends its login.",
   "admin.sessions.empty.message": "No active sessions.",

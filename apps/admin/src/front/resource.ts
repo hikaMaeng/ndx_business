@@ -36,6 +36,7 @@ export enum RSC {
   ADMIN_SAVE_BUTTON = "admin.save.button",
   ADMIN_SAVED_STATUS = "admin.saved.status",
   ADMIN_LOADING_STATUS = "admin.loading.status",
+  ADMIN_RETRY_BUTTON = "admin.retry.button",
   ADMIN_SESSIONS_TITLE_TEXT = "admin.sessions.title.text",
   ADMIN_SESSIONS_SUBTITLE_TEXT = "admin.sessions.subtitle.text",
   ADMIN_SESSIONS_EMPTY_MESSAGE = "admin.sessions.empty.message",
