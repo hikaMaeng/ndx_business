@@ -53,6 +53,47 @@ const statements: readonly string[] = [
   // Files every new project starts with, edited in Admin rather than baked into
   // an image. Keyed by name so a second one is a row and not a migration.
   "CREATE TABLE IF NOT EXISTS project_defaults (name text PRIMARY KEY, content text NOT NULL, updated_at text NOT NULL)",
+
+  /*
+   * What a session is given: skills, MCP servers, commands, hooks.
+   *
+   * One table for every kind because the merge is the same for all of them and
+   * writing it four times is how four of them end up disagreeing. `kind` says
+   * which; `value` is whatever that kind needs and this layer never reads.
+   *
+   * An entry belongs to exactly one place. Either an organisation set it, or an
+   * account did — globally, or for one of its projects. The CHECK is what keeps
+   * a row from claiming two of those at once and making its precedence a
+   * question rather than a fact.
+   *
+   * `mode` is the whole reason organisations can have policy at all. A
+   * `default` is a suggestion an account may override; `enforced` cannot be
+   * overridden or removed by anyone below, and between organisations the
+   * outermost one wins. Without the distinction a parent that sets anything
+   * freezes it for the entire tree, and sub-organisation settings become inert.
+   */
+  `CREATE TABLE IF NOT EXISTS policy (
+     id text PRIMARY KEY,
+     kind text NOT NULL CHECK (kind IN ('skill', 'mcp', 'command', 'hook')),
+     name text NOT NULL,
+     organization_id text REFERENCES organizations(id) ON DELETE CASCADE,
+     owner_id text REFERENCES users(id) ON DELETE CASCADE,
+     project_id text REFERENCES projects(id) ON DELETE CASCADE,
+     mode text NOT NULL DEFAULT 'default' CHECK (mode IN ('default', 'enforced')),
+     enabled boolean NOT NULL DEFAULT true,
+     value jsonb NOT NULL DEFAULT '{}'::jsonb,
+     updated_at text NOT NULL,
+     CHECK (
+       (organization_id IS NOT NULL AND owner_id IS NULL AND project_id IS NULL)
+       OR (organization_id IS NULL AND owner_id IS NOT NULL)
+     ),
+     CHECK (mode = 'default' OR organization_id IS NOT NULL)
+   )`,
+  // One entry per key per place. The partial indexes are how "one per place"
+  // is said when two of the three columns are null.
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_policy_organization ON policy(organization_id, kind, name) WHERE organization_id IS NOT NULL",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_policy_account_global ON policy(owner_id, kind, name) WHERE owner_id IS NOT NULL AND project_id IS NULL",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_policy_account_project ON policy(owner_id, project_id, kind, name) WHERE project_id IS NOT NULL",
 ];
 
 /**
