@@ -16,8 +16,26 @@ function useMasterEmails(value: string): () => void {
   };
 }
 
-test("GET /health returns admin health", async () => {
-  const response = await request(createApp()).get("/health").expect(200);
+/**
+ * A throwaway database on disk, removed when the test ends. The health tests
+ * used to call `createApp()` with no database at all, which quietly wrote one
+ * into the repository instead.
+ */
+function useDatabase(label: string, t: { after: (fn: () => void) => void }) {
+  const directory = mkdtempSync(path.join(os.tmpdir(), `admin-${label}-`));
+  const database = openAuthDatabase(path.join(directory, `${label}.sqlite`));
+  t.after(() => {
+    // Closed before the directory goes. Windows refuses to unlink a file that
+    // is still open, so leaving this out fails the test on the cleanup rather
+    // than on anything it was checking.
+    database.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+  return database;
+}
+
+test("GET /health returns admin health", async (t) => {
+  const response = await request(createApp(useDatabase("health", t))).get("/health").expect(200);
 
   assert.deepEqual(response.body, {
     status: "ok",
@@ -25,8 +43,8 @@ test("GET /health returns admin health", async () => {
   });
 });
 
-test("GET /api/health returns admin health", async () => {
-  const response = await request(createApp()).get("/api/health").expect(200);
+test("GET /api/health returns admin health", async (t) => {
+  const response = await request(createApp(useDatabase("api-health", t))).get("/api/health").expect(200);
 
   assert.deepEqual(response.body, {
     status: "ok",

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { ensureAccountModel } from "admin_domain/front";
 import { parseSettingsResponse, type AuthSettings, type PendingUser, type SessionSummary } from "admin_domain/common";
@@ -20,19 +20,25 @@ export function AccountScreen({ token, request = api }: { token: string; request
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
+  // Same reason as the shell. The `idle` guard below keeps the happy path from
+  // spinning, but a failed load sets the status back to `idle`, so with unstable
+  // words in the dependencies a single failure became a retry storm.
+  const words = useRef(text);
+  words.current = text;
+
   useEffect(() => {
     if (snapshot.status !== "idle") return;
     model.snapshot.mutate((current) => { current.status = "loading"; });
     void request("/api/admin/settings", {}, token).then((value) => {
       const result = parseSettingsResponse(value);
-      if (!result) throw new Error(text[RSC.AUTH_ERROR_ALERT]);
+      if (!result) throw new Error(words.current[RSC.AUTH_ERROR_ALERT]);
       model.snapshot.set({ settings: result.settings, sessions: result.sessions, pendingUsers: result.pendingUsers, status: "ready" });
       setFilterText(result.settings.signupFilter ? JSON.stringify(result.settings.signupFilter, null, 2) : "");
     }).catch((reason) => {
       model.snapshot.mutate((current) => { current.status = "idle"; });
-      setError(reason instanceof Error ? reason.message : text[RSC.AUTH_ERROR_ALERT]);
+      setError(reason instanceof Error ? reason.message : words.current[RSC.AUTH_ERROR_ALERT]);
     });
-  }, [model, request, snapshot.status, text, token]);
+  }, [model, request, snapshot.status, token]);
 
   async function save(event: React.FormEvent, draft: AuthSettings = snapshot.settings as AuthSettings) {
     event.preventDefault();

@@ -70,3 +70,22 @@ service removal applies only to the selected node.
 The Model menu is master-only. Its card list exposes only endpoint metadata plus
 model identifier/context size; provider credentials remain editable only in the
 detail form and are never rendered in a card.
+
+## Effect dependencies
+
+`texts(...)` builds a fresh object on every render, and an inline `onLogout`
+prop is a fresh function on every render. Neither may appear in a `useEffect`
+dependency array: an effect that sets state and depends on one re-runs after
+its own render, for ever. This has now happened twice — the models screen and
+the shell, the latter calling `/api/auth/me` about thirty-seven times a second
+with nothing visibly wrong.
+
+Read words through a `useRef` that is reassigned each render, and hand down
+callbacks wrapped in `useCallback`.
+
+## Database paths
+
+`AUTH_DATABASE_PATH` is required and has no fallback. `createApp` takes its
+database as an argument and will not open one. A default here does not fail
+loudly — it starts a service against an empty store, or writes a stray file
+into the working directory, and both look like success.

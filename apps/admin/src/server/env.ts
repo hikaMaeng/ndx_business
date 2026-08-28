@@ -17,9 +17,14 @@ export function readEnv(source: NodeJS.ProcessEnv = process.env): ServerEnv {
     throw new Error("NODE_ENV must be development, test, or production");
   }
 
-  return {
-    port: parsedPort,
-    nodeEnv,
-    databasePath: source.AUTH_DATABASE_PATH ?? "./data/admin.sqlite"
-  };
+  // Required, with no fallback. The other two values in this function throw
+  // when they are wrong; this one used to guess, and guessing a database path
+  // is worse than guessing a port. An unset variable silently opened a second,
+  // empty store at a relative path — one shipped that way and grew to 257 MB
+  // beside the real one before anybody noticed, because nothing about it looks
+  // like a failure: the service starts, and simply knows no accounts.
+  const databasePath = source.AUTH_DATABASE_PATH;
+  if (!databasePath) throw new Error("AUTH_DATABASE_PATH must be set to the auth database file");
+
+  return { port: parsedPort, nodeEnv, databasePath };
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Building2, Boxes, Globe2, LayoutDashboard, LogOut, Server, ShieldCheck, Users } from "lucide-react";
 import adminPackage from "../../../package.json";
 import { parseUserSummary, type UserSummary } from "admin_domain/common";
@@ -25,13 +25,25 @@ export function AdminShell({ token, onLogout }: { token: string; onLogout: () =>
   const [activeView, setActiveView] = useState<View>("dashboard");
   const isMasterAdmin = Boolean(currentUser?.isMasterAdmin);
 
+  /**
+   * The words are read at call time, not depended on.
+   *
+   * `texts()` builds a fresh object on every render, so listing it here made
+   * this effect re-run after its own `setCurrentUser` — which rendered, which
+   * built new words, which re-ran the effect. It called `/api/auth/me` about
+   * thirty-seven times a second for as long as the page stayed open, and
+   * nothing about it looked wrong on screen.
+   */
+  const words = useRef(text);
+  words.current = text;
+
   useEffect(() => {
     api("/api/auth/me", {}, token).then((value) => {
       const user = parseUserSummary(value);
-      if (!user) throw new Error(text[RSC.AUTH_ERROR_ALERT]);
+      if (!user) throw new Error(words.current[RSC.AUTH_ERROR_ALERT]);
       setCurrentUser(user);
     }).catch(onLogout);
-  }, [onLogout, text, token]);
+  }, [onLogout, token]);
 
   useEffect(() => {
     if (!isMasterAdmin && (activeView === "accounts" || activeView === "system" || activeView === "models")) setActiveView("dashboard");
