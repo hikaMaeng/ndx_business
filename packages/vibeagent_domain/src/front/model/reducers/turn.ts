@@ -1,24 +1,18 @@
 import type { VibeTurnFinal, VibeTurnStarted } from "../../../common/index.js";
-import type { VibeSnapshot } from "../state.js";
-import { patchTurn } from "./helpers.js";
+import type { VibeSessionModel } from "../VibeSessionModel.js";
 
-/** The only event carrying the prompt, so a replayed turn gets its title here. */
-export function turnStarted(snapshot: VibeSnapshot, event: VibeTurnStarted): VibeSnapshot {
-  return patchTurn(snapshot, event.turnKey, (turn) => ({ ...turn, prompt: turn.prompt || event.prompt }));
+/** The prompt, which the client may already have shown, and may not have. */
+export function turnStarted(model: VibeSessionModel, event: VibeTurnStarted): void {
+  model.ensureTurn(event.turnKey).change((turn) => {
+    if (event.prompt) turn.prompt = event.prompt;
+    turn.phase = "running";
+  });
 }
 
-/**
- * The turn is over, and this is what says so.
- *
- * It used to be the broker's terminal result that closed a turn, which worked
- * while one worker ran the whole thing. Now a turn is a chain of reactions and
- * each has its own terminal, so none of them means "the turn ended" — only the
- * domain knows that, and this is the domain saying it.
- */
-export function turnFinal(snapshot: VibeSnapshot, event: VibeTurnFinal): VibeSnapshot {
-  return patchTurn(snapshot, event.turnKey, (turn) => ({
-    ...turn,
-    answer: event.answer,
-    phase: event.stoppedBy === "error" ? "failed" : "done",
-  }));
+/** The turn is over. `stoppedBy` distinguishes an answer from a budget stop. */
+export function turnFinal(model: VibeSessionModel, event: VibeTurnFinal): void {
+  model.ensureTurn(event.turnKey).change((turn) => {
+    turn.phase = "done";
+    turn.answer = event.answer ?? "";
+  });
 }

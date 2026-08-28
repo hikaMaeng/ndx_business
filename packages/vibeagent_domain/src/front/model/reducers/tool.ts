@@ -1,6 +1,5 @@
 import type { VibeToolChunk, VibeToolCompleted, VibeToolFailed, VibeToolStarted } from "../../../common/index.js";
-import type { VibeSnapshot } from "../state.js";
-import { patchTool, patchTurn } from "./helpers.js";
+import type { VibeSessionModel } from "../VibeSessionModel.js";
 
 /**
  * The model asked for a command. This is the request, not its result.
@@ -10,28 +9,37 @@ import { patchTool, patchTurn } from "./helpers.js";
  * during the session it ran in never passes through the read model — so the
  * tally is kept from the blocks themselves rather than read back later.
  */
-export function toolStarted(snapshot: VibeSnapshot, event: VibeToolStarted): VibeSnapshot {
-  return patchTurn(snapshot, event.turnKey, (turn) => {
-    const patched = patchTool(turn, event.toolCallKey, event.seq, (tool) => ({ ...tool, command: event.command }));
-    return { ...patched, toolCalls: patched.blocks.filter((block) => block.kind === "tool").length };
+export function toolStarted(model: VibeSessionModel, event: VibeToolStarted): void {
+  const turn = model.ensureTurn(event.turnKey);
+  turn.patchTool(event.toolCallKey, event.seq, (tool) => { tool.command = event.command; });
+  turn.change((current) => { current.toolCalls = current.blocks.filter((block) => block.kind === "tool").length; });
+}
+
+export function toolStdout(model: VibeSessionModel, event: VibeToolChunk): void {
+  model.ensureTurn(event.turnKey).patchTool(event.toolCallKey, event.seq, (tool) => {
+    tool.stdout.push({ seq: event.seq, text: event.chunk });
   });
 }
 
-export function toolStdout(snapshot: VibeSnapshot, event: VibeToolChunk): VibeSnapshot {
-  return patchTurn(snapshot, event.turnKey, (turn) => patchTool(turn, event.toolCallKey, event.seq, (tool) => ({ ...tool, stdout: [...tool.stdout, { seq: event.seq, text: event.chunk }] })));
+export function toolStderr(model: VibeSessionModel, event: VibeToolChunk): void {
+  model.ensureTurn(event.turnKey).patchTool(event.toolCallKey, event.seq, (tool) => {
+    tool.stderr.push({ seq: event.seq, text: event.chunk });
+  });
 }
 
-export function toolStderr(snapshot: VibeSnapshot, event: VibeToolChunk): VibeSnapshot {
-  return patchTurn(snapshot, event.turnKey, (turn) => patchTool(turn, event.toolCallKey, event.seq, (tool) => ({ ...tool, stderr: [...tool.stderr, { seq: event.seq, text: event.chunk }] })));
-}
-
-export function toolCompleted(snapshot: VibeSnapshot, event: VibeToolCompleted): VibeSnapshot {
-  return patchTurn(snapshot, event.turnKey, (turn) => patchTool(turn, event.toolCallKey, event.seq, (tool) => ({
-    ...tool, done: true, exitCode: event.exitCode, timedOut: event.timedOut, durationMs: event.durationMs,
-  })));
+export function toolCompleted(model: VibeSessionModel, event: VibeToolCompleted): void {
+  model.ensureTurn(event.turnKey).patchTool(event.toolCallKey, event.seq, (tool) => {
+    tool.done = true;
+    tool.exitCode = event.exitCode;
+    tool.timedOut = event.timedOut;
+    tool.durationMs = event.durationMs;
+  });
 }
 
 /** The call never ran — a malformed request, not a command that exited badly. */
-export function toolFailed(snapshot: VibeSnapshot, event: VibeToolFailed): VibeSnapshot {
-  return patchTurn(snapshot, event.turnKey, (turn) => patchTool(turn, event.toolCallKey, event.seq, (tool) => ({ ...tool, done: true, failure: event.error })));
+export function toolFailed(model: VibeSessionModel, event: VibeToolFailed): void {
+  model.ensureTurn(event.turnKey).patchTool(event.toolCallKey, event.seq, (tool) => {
+    tool.done = true;
+    tool.failure = event.error;
+  });
 }

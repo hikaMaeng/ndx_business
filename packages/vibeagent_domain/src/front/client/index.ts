@@ -1,6 +1,6 @@
 import { BrokerClient, type ConnectionState } from "agent/front";
 import { VIBE_SESSION_OPEN_ACTION, VIBE_TURN_ACTION, normaliseWorkspacePath } from "../../common/index.js";
-import { VibeSessionModel, type TurnDigest } from "../model/index.js";
+import { SliceModel, VibeSessionModel, type TurnDigest } from "../model/index.js";
 import type { TurnBlock } from "../model/state.js";
 
 /** One folded block as the read model serves it. */
@@ -56,7 +56,6 @@ export interface VibeProject {
 
 export interface VibeClientOptions {
   token(): string;
-  onChange(): void;
 }
 
 /**
@@ -75,14 +74,25 @@ export interface VibeClientOptions {
  */
 export class VibeClient {
   readonly model = new VibeSessionModel();
-  private connection: ConnectionState = "connecting";
+
+  /**
+   * Everything the screen reads, each behind its own trigger.
+   *
+   * These were private fields plus one `onChange` callback that fired for all
+   * of them, so a reconnect re-rendered the transcript and a streamed token
+   * re-rendered the project list. A component now subscribes to the slice it
+   * reads and is not woken by the others.
+   */
+  readonly connection = new SliceModel<ConnectionState>("connecting");
+  readonly sessions = new SliceModel<VibeSessionListItem[]>([]);
+  readonly folders = new SliceModel<string[]>([]);
+  readonly loadingHistory = new SliceModel<boolean>(false);
+  /** The open session's id. Changing it swaps the whole surface. */
+  readonly sessionId = new SliceModel<string>("");
+
   private broker: BrokerClient | undefined;
-  private sessionId = "";
   private userId = "";
   private email = "";
-  private sessions: VibeSessionListItem[] = [];
-  private folders: string[] = [];
-  private loadingHistory = false;
   /** The folder a brand-new session must be opened with, held until the socket is up. */
   private pendingOpen: string | undefined;
   /**
@@ -95,16 +105,10 @@ export class VibeClient {
    */
   private readonly fetching = new Set<string>();
 
-  constructor(private readonly options: VibeClientOptions) {
-    this.model.subscribe(() => this.options.onChange());
-  }
+  constructor(private readonly options: VibeClientOptions) {}
 
-  getConnection(): ConnectionState { return this.connection; }
-  getSessionId(): string { return this.sessionId; }
-  getSessions(): VibeSessionListItem[] { return this.sessions; }
-  isLoadingHistory(): boolean { return this.loadingHistory; }
   /** A session is usable only once its folder is on record. */
-  isOpen(): boolean { return Boolean(this.sessionId) && Boolean(this.model.getSnapshot().workspace); }
+  isOpen(): boolean { return Boolean(this.sessionId.value) && Boolean(this.model.workspace.value); }
 
   /**
    * Projects, newest activity first.
@@ -115,8 +119,8 @@ export class VibeClient {
    */
   getProjects(): VibeProject[] {
     const byFolder = new Map<string, VibeProject>();
-    for (const folder of this.folders) byFolder.set(folder, { workspace: folder, sessions: [], lastActivityAt: "" });
-    for (const session of this.sessions) {
+    for (const folder of this.folders.value) byFolder.set(folder, { workspace: folder, sessions: [], lastActivityAt: "" });
+    for (const session of this.sessions.value) {
       const folder = session.workspace || "(폴더 미지정)";
       const project = byFolder.get(folder) ?? { workspace: folder, sessions: [], lastActivityAt: "" };
       project.sessions.push(session);
@@ -140,8 +144,7 @@ export class VibeClient {
     const response = await this.api("/api/vibe/sessions");
     if (!response.ok) return;
     const body = await response.json() as { sessions?: VibeSessionListItem[] };
-    this.sessions = body.sessions ?? [];
-    this.options.onChange();
+    this.sessions.set(body.sessions ?? []);
   }
 
   /** The folders under the projects root. These are the projects. */
@@ -149,8 +152,7 @@ export class VibeClient {
     const response = await this.api("/api/vibe/workspaces");
     if (!response.ok) return;
     const body = await response.json() as { workspaces?: string[] };
-    this.folders = body.workspaces ?? [];
-    this.options.onChange();
+    this.folders.set(body.workspaces ?? []);
   }
 
   /**
@@ -192,13 +194,13 @@ export class VibeClient {
 
   private flushPendingOpen(): void {
     const folder = this.pendingOpen;
-    if (!folder || !this.sessionId || !this.broker?.isOpen()) return;
+    if (!folder || !this.sessionId.value || !this.broker?.isOpen()) return;
     // userId is deliberately absent: the broker stamps it from the connection.
     this.broker.send({
       action: VIBE_SESSION_OPEN_ACTION,
-      transactionKey: `open:${this.sessionId}`,
-      sessionId: this.sessionId,
-      payload: { sessionKey: this.sessionId, workspace: folder },
+      transactionKey: `open:${this.sessionId.value}`,
+      sessionId: this.sessionId.value,
+      payload: { sessionKey: this.sessionId.value, workspace: folder },
     });
   }
 
@@ -217,22 +219,20 @@ export class VibeClient {
    */
   async openExisting(sessionId: string): Promise<void> {
     this.pendingOpen = undefined;
-    this.loadingHistory = true;
-    this.options.onChange();
+    this.loadingHistory.set(true);
     try {
       this.attach(sessionId, undefined);
-      const known = this.sessions.find((item) => item.sessionId === sessionId)?.workspace;
+      const known = this.sessions.value.find((item) => item.sessionId === sessionId)?.workspace;
       if (known) this.model.setWorkspace(known);
 
       const response = await this.api(`/api/vibe/sessions/${encodeURIComponent(sessionId)}/turns`);
       if (response.ok) {
         const body = await response.json() as { turns?: TurnDigest[] };
         // Guard against a slow answer for a session the person has already left.
-        if (this.sessionId === sessionId) this.model.hydrate(body.turns ?? []);
+        if (this.sessionId.value === sessionId) this.model.hydrate(body.turns ?? []);
       }
     } finally {
-      this.loadingHistory = false;
-      this.options.onChange();
+      this.loadingHistory.set(false);
     }
   }
 
@@ -242,13 +242,13 @@ export class VibeClient {
    * Nothing is fetched twice: a turn already holding its bodies is left alone.
    */
   async expandTurn(turnKey: string): Promise<void> {
-    const turn = this.model.getSnapshot().turns.find((candidate) => candidate.turnKey === turnKey);
+    const turn = this.model.turn(turnKey);
     if (!turn || turn.bodiesLoaded || this.fetching.has(turnKey)) return;
-    const sessionId = this.sessionId;
+    const sessionId = this.sessionId.value;
     this.fetching.add(turnKey);
     try {
       const response = await this.api(`/api/vibe/sessions/${encodeURIComponent(sessionId)}/turns/${encodeURIComponent(turnKey)}`);
-      if (!response.ok || this.sessionId !== sessionId) return;
+      if (!response.ok || this.sessionId.value !== sessionId) return;
       const body = await response.json() as { blocks?: BlockPayload[] };
       this.model.loadBlocks(turnKey, (body.blocks ?? []).map(toBlock));
     } finally {
@@ -261,18 +261,17 @@ export class VibeClient {
 
 
   private attach(sessionId: string, cursor: string | undefined): void {
-    this.sessionId = sessionId;
+    this.sessionId.set(sessionId);
     this.model.reset();
     this.model.setIdentity(sessionId, this.email);
     this.broker?.close();
     this.broker = new BrokerClient({
       token: this.options.token,
-      channels: () => [`vibe.${this.sessionId}`],
+      channels: () => [`vibe.${this.sessionId.value}`],
       ...(cursor ? { initialCursor: cursor } : {}),
       onState: (state) => {
-        this.connection = state;
+        this.connection.set(state);
         if (state === "online") this.flushPendingOpen();
-        this.options.onChange();
       },
       onEvent: (envelope) => this.model.apply(envelope),
     });
@@ -287,8 +286,8 @@ export class VibeClient {
     const sent = this.broker.send({
       action: VIBE_TURN_ACTION,
       transactionKey: turnKey,
-      sessionId: this.sessionId,
-      payload: { sessionKey: this.sessionId, turnKey, prompt: text },
+      sessionId: this.sessionId.value,
+      payload: { sessionKey: this.sessionId.value, turnKey, prompt: text },
     });
     if (!sent) return null;
     this.model.startTurn(turnKey, text);
@@ -298,8 +297,8 @@ export class VibeClient {
   close(): void {
     this.broker?.close();
     this.broker = undefined;
-    this.sessionId = "";
-    this.sessions = [];
+    this.sessionId.set("");
+    this.sessions.set([]);
     this.pendingOpen = undefined;
     this.model.reset();
   }

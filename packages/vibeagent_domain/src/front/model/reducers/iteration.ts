@@ -1,6 +1,5 @@
 import type { VibeIterationMessage, VibeIterationReasoning, VibeIterationStarted } from "../../../common/index.js";
-import type { VibeSnapshot } from "../state.js";
-import { appendText, patchTurn } from "./helpers.js";
+import type { VibeSessionModel } from "../VibeSessionModel.js";
 
 /**
  * Nothing to show yet — the first delta opens the block — but something to count.
@@ -10,14 +9,16 @@ import { appendText, patchTurn } from "./helpers.js";
  * model. So the same tally is kept here, from the same facts. `max` rather than
  * `+ 1` because a redelivered fact must not inflate it.
  */
-export function iterationStarted(snapshot: VibeSnapshot, event: VibeIterationStarted): VibeSnapshot {
-  return patchTurn(snapshot, event.turnKey, (turn) => ({ ...turn, iterations: Math.max(turn.iterations, event.iterationIndex + 1) }));
+export function iterationStarted(model: VibeSessionModel, event: VibeIterationStarted): void {
+  model.ensureTurn(event.turnKey).change((turn) => {
+    turn.iterations = Math.max(turn.iterations, event.iterationIndex + 1);
+  });
 }
 
-export function iterationReasoning(snapshot: VibeSnapshot, event: VibeIterationReasoning): VibeSnapshot {
-  return patchTurn(snapshot, event.turnKey, (turn) => appendText(turn, "reasoning", event.iterationIndex, event.seq, event.reasoning));
+export function iterationReasoning(model: VibeSessionModel, event: VibeIterationReasoning): void {
+  model.ensureTurn(event.turnKey).appendText("reasoning", event.iterationIndex, event.seq, event.reasoning);
 }
 
-export function iterationMessage(snapshot: VibeSnapshot, event: VibeIterationMessage): VibeSnapshot {
-  return patchTurn(snapshot, event.turnKey, (turn) => appendText(turn, "message", event.iterationIndex, event.seq, event.message));
+export function iterationMessage(model: VibeSessionModel, event: VibeIterationMessage): void {
+  model.ensureTurn(event.turnKey).appendText("message", event.iterationIndex, event.seq, event.message);
 }

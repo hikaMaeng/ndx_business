@@ -40,6 +40,13 @@ export type TurnBlock =
 export type ToolBlock = Extract<TurnBlock, { kind: "tool" }>;
 export type TextBlock = Extract<TurnBlock, { kind: "reasoning" | "message" }>;
 
+/**
+ * What a turn holds, as data.
+ *
+ * `TurnModel` implements this and adds the render trigger. The interface exists
+ * so pure readers — `blocksOf`, `toolsOf`, a renderer — can take a turn without
+ * taking a dependency on the Emitter machinery.
+ */
 export interface TurnView {
   turnKey: string;
   prompt: string;
@@ -66,22 +73,6 @@ export interface TurnView {
    */
   bodiesLoaded: boolean;
 }
-
-export interface VibeSnapshot {
-  sessionId: string;
-  userEmail: string;
-  /** The folder this session works in. Empty until its `session.opened` fact arrives. */
-  workspace: string;
-  /**
-   * A failure that belongs to the session rather than to any turn — most often
-   * a refused folder. Without somewhere to put it, a rejected open would be
-   * swallowed and the session would just never become usable.
-   */
-  sessionError: string;
-  turns: TurnView[];
-}
-
-export const EMPTY_SNAPSHOT: VibeSnapshot = { sessionId: "", userEmail: "", workspace: "", sessionError: "", turns: [] };
 
 export function emptyTurn(turnKey: string, prompt = ""): TurnView {
   return { turnKey, prompt, phase: "running", blocks: [], answer: "", error: "", iterations: 0, toolCalls: 0, bodiesLoaded: true };
