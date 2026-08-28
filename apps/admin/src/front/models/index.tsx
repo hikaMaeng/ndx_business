@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Boxes, Plus, RefreshCw, Save, X } from "lucide-react";
-import { ensureModelsFeatureModel } from "admin_domain/front";
 import {
-  parseModelCatalogSnapshot,
-  type CreateModelDefinitionRequest,
-  type CreateModelEndpointRequest,
+  ensureModelsFeatureModel, ModelsCommands, createEndpointDraft, createModelDefinitionDraft,
+  type EndpointDraft, type ModelDefinitionDraft,
+} from "admin_domain/front";
+import {
   type ModelDefinition,
   type ModelEndpoint,
   type ModelEndpointType,
@@ -18,65 +18,15 @@ import "./styles.css";
 
 export type { ModelsRequestApi } from "./types";
 
-type EndpointDraft = CreateModelEndpointRequest;
-type ModelDefinitionDraft = CreateModelDefinitionRequest;
-type EndpointSave = { (draft: EndpointDraft): Promise<void> };
+// Accepts whatever a command returns: the screen cares that it finished, not
+// what it answered.
+type EndpointSave = { (draft: EndpointDraft): Promise<unknown> };
 const endpointTypes: Array<[ModelEndpointType, RSC]> = [
   ["openai-chat-completion", RSC.MODELS_TYPE_OPENAI_CHAT_COMPLETION_LABEL],
   ["openai-responses", RSC.MODELS_TYPE_OPENAI_RESPONSES_LABEL],
   ["anthropic", RSC.MODELS_TYPE_ANTHROPIC_LABEL],
   ["gemini", RSC.MODELS_TYPE_GEMINI_LABEL],
 ];
-
-function createEndpointDraft(endpoint?: ModelEndpoint): EndpointDraft {
-  return endpoint
-    ? {
-        name: endpoint.name,
-        url: endpoint.url,
-        headerName: endpoint.headerName,
-        headerValue: endpoint.headerValue,
-        type: endpoint.type,
-      }
-    : {
-        name: "",
-        url: "",
-        headerName: "",
-        headerValue: "",
-        type: "openai-chat-completion",
-      };
-}
-
-function createModelDefinitionDraft(item?: ModelDefinition): ModelDefinitionDraft {
-  return item
-    ? {
-        identifier: item.identifier,
-        contextSize: item.contextSize,
-        temperature: item.temperature,
-        minP: item.minP,
-        topP: item.topP,
-        topK: item.topK,
-        repeatPenalty: item.repeatPenalty,
-        reasoning: item.reasoning,
-        supportsText: item.supportsText,
-        supportsImage: item.supportsImage,
-        supportsSound: item.supportsSound,
-        supportsVideo: item.supportsVideo,
-      }
-    : {
-        identifier: "",
-        contextSize: 0,
-        temperature: 1,
-        minP: 0,
-        topP: 1,
-        topK: 0,
-        repeatPenalty: 1,
-        reasoning: false,
-        supportsText: true,
-        supportsImage: false,
-        supportsSound: false,
-        supportsVideo: false,
-      };
-}
 
 function providerLabel(type: ModelEndpointType, text: Record<string, string>): string {
   return text[endpointTypes.find(([value]) => value === type)![1]];
@@ -309,103 +259,53 @@ export function ModelsScreen({ token, request }: { token: string; request: Model
   const model = useMemo(() => ensureModelsFeatureModel(token), [token]);
   const catalog = useModel(model.catalog).value;
   const selectedEndpointId = useModel(model.selection).value;
-  const [busy, setBusy] = useState(false);
-  const [loaded, setLoaded] = useState(false);
+  const progress = useModel(model.progress).value;
+  const { busy, loaded, error, status } = progress;
+
+  // Ephemeral, and deliberately not in the model: which dialog is open has no
+  // meaning outside this screen and nothing else reads it.
   const [creating, setCreating] = useState(false);
   const [modelDialog, setModelDialog] = useState<ModelDefinition | "create" | null>(null);
-  const [error, setError] = useState("");
-  const [status, setStatus] = useState("");
 
-  async function applyCatalog(path: string, options?: RequestInit): Promise<void> {
-    const value = parseModelCatalogSnapshot(await request(path, options, token));
-    if (!value) throw new Error(text[RSC.AUTH_ERROR_ALERT]);
-    model.catalog.set(value);
-  }
+  /**
+   * The feature's writes, which used to be six near-identical async functions
+   * in this component. The screen supplies the authed request and the words for
+   * each outcome; what to call, in what order, and what it does to the catalog
+   * is the domain's.
+   */
+  // The words are read through a ref, so re-translating cannot change this
+  // instance and re-run the effect below. `texts()` spreads its bundles, so it
+  // returns a new object every render — depending on it here spun the load
+  // effect for ever and froze the tab.
+  const words = useRef(text);
+  words.current = text;
+  const commands = useMemo(
+    () => new ModelsCommands(model, (path, options) => request(path, options, token), () => ({
+      failed: words.current[RSC.AUTH_ERROR_ALERT],
+      endpointCreated: words.current[RSC.MODELS_ENDPOINT_CREATED_STATUS],
+      endpointUpdated: words.current[RSC.MODELS_ENDPOINT_UPDATED_STATUS],
+      endpointRefreshed: words.current[RSC.MODELS_ENDPOINT_REFRESH_STATUS],
+      definitionCreated: words.current[RSC.MODELS_MODEL_CREATED_STATUS],
+      definitionUpdated: words.current[RSC.MODELS_MODEL_UPDATED_STATUS],
+    })),
+    [model, request, token],
+  );
 
-  async function load(): Promise<void> {
-    setBusy(true);
-    setError("");
-    try {
-      await applyCatalog("/api/models");
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : text[RSC.AUTH_ERROR_ALERT]);
-    } finally {
-      setBusy(false);
-      setLoaded(true);
-    }
-  }
+  useEffect(() => { void commands.load(); }, [commands]);
 
-  useEffect(() => {
-    void load();
-  }, [model, token]);
-
-  async function createEndpoint(draft: EndpointDraft): Promise<void> {
-    setBusy(true);
-    setError("");
-    try {
-      await applyCatalog("/api/models", { method: "POST", body: JSON.stringify(draft) });
-      setCreating(false);
-      setStatus(text[RSC.MODELS_ENDPOINT_CREATED_STATUS]);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : text[RSC.AUTH_ERROR_ALERT]);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function saveEndpoint(endpointId: string, draft: EndpointDraft): Promise<void> {
-    setBusy(true);
-    setError("");
-    try {
-      await applyCatalog(`/api/models/${endpointId}`, { method: "PUT", body: JSON.stringify(draft) });
-      setStatus(text[RSC.MODELS_ENDPOINT_UPDATED_STATUS]);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : text[RSC.AUTH_ERROR_ALERT]);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function refreshEndpoint(endpointId: string): Promise<void> {
-    setBusy(true);
-    setError("");
-    try {
-      await applyCatalog(`/api/models/${endpointId}/refresh`, { method: "POST" });
-      setStatus(text[RSC.MODELS_ENDPOINT_REFRESH_STATUS]);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : text[RSC.AUTH_ERROR_ALERT]);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function createDefinition(endpointId: string, draft: ModelDefinitionDraft): Promise<void> {
-    setBusy(true);
-    setError("");
-    try {
-      await applyCatalog(`/api/models/${endpointId}/models`, { method: "POST", body: JSON.stringify(draft) });
-      setModelDialog(null);
-      setStatus(text[RSC.MODELS_MODEL_CREATED_STATUS]);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : text[RSC.AUTH_ERROR_ALERT]);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function saveDefinition(endpointId: string, modelId: string, draft: ModelDefinitionDraft): Promise<void> {
-    setBusy(true);
-    setError("");
-    try {
-      await applyCatalog(`/api/models/${endpointId}/models/${modelId}`, { method: "PUT", body: JSON.stringify(draft) });
-      setModelDialog(null);
-      setStatus(text[RSC.MODELS_MODEL_UPDATED_STATUS]);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : text[RSC.AUTH_ERROR_ALERT]);
-    } finally {
-      setBusy(false);
-    }
-  }
+  // Closing a dialog is this screen's business, so it stays here — and it only
+  // closes when the command says it worked, which is why they return a verdict.
+  const createEndpoint = async (draft: EndpointDraft): Promise<void> => {
+    if (await commands.createEndpoint(draft)) setCreating(false);
+  };
+  const createDefinition = async (endpointId: string, draft: ModelDefinitionDraft): Promise<void> => {
+    if (await commands.createDefinition(endpointId, draft)) setModelDialog(null);
+  };
+  const saveDefinition = async (endpointId: string, modelId: string, draft: ModelDefinitionDraft): Promise<void> => {
+    if (await commands.saveDefinition(endpointId, modelId, draft)) setModelDialog(null);
+  };
+  const saveEndpoint = commands.saveEndpoint.bind(commands);
+  const refreshEndpoint = commands.refreshEndpoint.bind(commands);
 
   const selectedEndpoint = catalog.endpoints.find((endpoint) => endpoint.id === selectedEndpointId) ?? null;
   const selectedModels = selectedEndpoint
