@@ -74,7 +74,7 @@ const statements: readonly string[] = [
    */
   `CREATE TABLE IF NOT EXISTS policy (
      id text PRIMARY KEY,
-     kind text NOT NULL CHECK (kind IN ('skill', 'mcp', 'command', 'hook')),
+     kind text NOT NULL CHECK (kind IN ('skill', 'mcp', 'command', 'hook', 'prompt')),
      name text NOT NULL,
      organization_id text REFERENCES organizations(id) ON DELETE CASCADE,
      owner_id text REFERENCES users(id) ON DELETE CASCADE,
@@ -91,6 +91,10 @@ const statements: readonly string[] = [
    )`,
   // One entry per key per place. The partial indexes are how "one per place"
   // is said when two of the three columns are null.
+  // The kinds grew after the table shipped, and CREATE TABLE IF NOT EXISTS will
+  // not widen a CHECK on a table that already exists.
+  "ALTER TABLE policy DROP CONSTRAINT IF EXISTS policy_kind_check",
+  "ALTER TABLE policy ADD CONSTRAINT policy_kind_check CHECK (kind IN ('skill', 'mcp', 'command', 'hook', 'prompt'))",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_policy_organization ON policy(organization_id, kind, name) WHERE organization_id IS NOT NULL",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_policy_account_global ON policy(owner_id, kind, name) WHERE owner_id IS NOT NULL AND project_id IS NULL",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_policy_account_project ON policy(owner_id, project_id, kind, name) WHERE project_id IS NOT NULL",

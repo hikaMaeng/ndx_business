@@ -273,3 +273,12 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .turn-toggle:hover { border-color: var(--text-faint); color: var(--text); }
 .turn-counts { color: var(--text-faint); font-size: var(--text-sm); }
+
+/* --------------------------------------------------------- prompt bar ---- */
+/* Above the composer, because what it fills is right below it. Wraps rather
+   than scrolls: a prompt you cannot see is one you will not use. */
+.prompt-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; padding: .5rem .1rem 0; }
+.prompt-bar-label { color: var(--text-faint); font-size: var(--text-2xs); font-weight: 600; letter-spacing: .16em; text-transform: uppercase; }
+.prompt-chip { border-color: var(--line-strong); background: transparent; color: var(--text-dim); cursor: pointer; font-size: var(--text-xs); }
+.prompt-chip:hover:not(:disabled) { color: var(--text); border-color: var(--text-dim); }
+.prompt-chip:disabled { color: var(--text-faint); border-color: var(--line); cursor: default; }

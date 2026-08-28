@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { workspaceDisplayName } from "vibeagent_domain/common";
 import type { VibeClient } from "vibeagent_domain/front";
 import { useModel } from "../model/useModel.js";
@@ -24,6 +24,23 @@ function Composer({ client, onSent }: { client: VibeClient; onSent: () => void }
   const running = turns.some((turn) => turn.phase === "running");
   const box = useRef<HTMLTextAreaElement>(null);
 
+  /**
+   * The prompts this project offers, if any.
+   *
+   * Fetched once per project rather than kept in the model: nothing else reads
+   * them, they do not change while a session is open, and a failure to fetch
+   * them must leave a working composer. An empty list renders nothing at all.
+   */
+  const [prompts, setPrompts] = useState<Array<{ name: string; title: string; body: string }>>([]);
+  useEffect(() => {
+    if (!workspace) { setPrompts([]); return; }
+    let current = true;
+    void client.prompts(workspace)
+      .then((found) => { if (current) setPrompts(found); })
+      .catch(() => { if (current) setPrompts([]); });
+    return () => { current = false; };
+  }, [client, workspace]);
+
   const submit = (event: React.FormEvent): void => {
     event.preventDefault();
     const turnKey = client.submit(draft);
@@ -42,6 +59,36 @@ function Composer({ client, onSent }: { client: VibeClient; onSent: () => void }
   return (
     <>
       {notice ? <p className="notice" role="status" data-testid="workspace-notice">{notice}</p> : null}
+      {prompts.length ? (
+        <div className="prompt-bar" data-testid="prompt-bar">
+          <span className="prompt-bar-label">프롬프트</span>
+          {prompts.map((prompt) => (
+            <button
+              key={prompt.name}
+              type="button"
+              className="chip prompt-chip"
+              data-testid="prompt-chip"
+              disabled={!ready}
+              /**
+               * Fills the box and stops there.
+               *
+               * Deliberately not "send this prompt": what arrives is a starting
+               * point, and the person editing it before sending is the point of
+               * having them. The cursor is left at the end so typing continues
+               * the text rather than replacing it.
+               */
+              onClick={() => {
+                setDraft(prompt.body);
+                const field = box.current;
+                if (field) {
+                  field.focus();
+                  window.setTimeout(() => field.setSelectionRange(field.value.length, field.value.length), 0);
+                }
+              }}
+            >{prompt.title}</button>
+          ))}
+        </div>
+      ) : null}
       <form className="composer-bar" onSubmit={submit}>
         <textarea
           ref={box}

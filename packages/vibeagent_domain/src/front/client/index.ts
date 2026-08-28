@@ -1,5 +1,5 @@
 import { BrokerClient, type ConnectionState } from "agent/front";
-import { VIBE_SESSION_OPEN_ACTION, VIBE_TURN_ACTION, normaliseWorkspacePath } from "../../common/index.js";
+import { VIBE_SESSION_OPEN_ACTION, VIBE_TURN_ACTION, normaliseWorkspacePath, workspaceDisplayName } from "../../common/index.js";
 import { SliceModel, VibeSessionModel, type TurnDigest } from "../model/index.js";
 import type { TurnBlock } from "../model/state.js";
 
@@ -145,6 +145,25 @@ export class VibeClient {
     if (!response.ok) return;
     const body = await response.json() as { sessions?: VibeSessionListItem[] };
     this.sessions.set(body.sessions ?? []);
+  }
+
+  /**
+   * The prompts this project offers as starting points.
+   *
+   * Returned rather than put in the model: nothing outside the composer reads
+   * them, and a prompt that has not been picked is not state anything depends
+   * on. A failure is an empty list — a composer that works with no suggestions
+   * is better than one that will not draw.
+   */
+  async prompts(workspace: string): Promise<Array<{ name: string; title: string; body: string }>> {
+    // The session records where the folder is, under the account that owns it.
+    // The project record is keyed by the name alone, so the account half is
+    // dropped here rather than being a thing every caller has to remember.
+    const name = workspaceDisplayName(workspace);
+    const response = await this.api(`/api/vibe/prompts?workspace=${encodeURIComponent(name)}`);
+    if (!response.ok) return [];
+    const body = await response.json() as { prompts?: Array<{ name: string; title: string; body: string }> };
+    return body.prompts ?? [];
   }
 
   /** The folders under the projects root. These are the projects. */

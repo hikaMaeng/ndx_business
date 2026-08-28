@@ -76,5 +76,40 @@ export function workspaceRoutes(verifier: SessionVerifier): express.Router {
     }
   });
 
+  /**
+   * The prompts this account may start from, for one project.
+   *
+   * Not part of the session's context and deliberately so. A prompt is text a
+   * person picks, edits and sends — it belongs in the composer, not in front of
+   * the transcript, and keeping it out means it never disturbs the cached
+   * prefix however long it is.
+   *
+   * Resolved through the same three layers as everything else, so an
+   * organisation can publish a house prompt, an account can keep its own, and a
+   * project can have one for the work in hand.
+   */
+  router.get("/api/vibe/prompts", guard, async (request: AuthedRequest, response) => {
+    const workspace = String((request.query as Record<string, unknown>).workspace ?? "");
+    if (!workspace) { response.status(400).json({ error: "workspace is required" }); return; }
+    try {
+      const answer = await admin(`/api/projects/${encodeURIComponent(workspace)}/policy`, request.sessionToken!) as {
+        entries?: Array<{ kind: string; name: string; enabled: boolean; value: Record<string, unknown> }>;
+      };
+      const prompts = (answer.entries ?? [])
+        .filter((entry) => entry.kind === "prompt" && entry.enabled)
+        .map((entry) => ({
+          name: entry.name,
+          title: typeof entry.value.title === "string" ? entry.value.title : entry.name,
+          body: typeof entry.value.body === "string" ? entry.value.body : "",
+        }))
+        .filter((prompt) => prompt.body);
+      response.json({ prompts });
+    } catch (error) {
+      // A project with no record has no prompts, which is not a failure — it is
+      // the answer. Anything else is worth saying.
+      response.json({ prompts: [], note: error instanceof Error ? error.message : "unavailable" });
+    }
+  });
+
   return router;
 }
