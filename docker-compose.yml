@@ -54,12 +54,10 @@ services:
     # it never spoke to — admin runs its own on 127.0.0.1, and that service
     # existed only for the retired `agent` app.
     volumes:
-      - ${NDX_DATA_HOST_DIR:-${VIBE_WORKSPACE_HOST_DIR:-./workspace}}/.ndx/admin/data:/app/data
-      # The database Admin serves — accounts, the fact log, every session the
-      # coding agent has ever run. It was on an *anonymous* volume until now:
-      # declared by the base postgres image, named by nobody, mentioned in no
-      # compose file. A `down` followed by an `up` hands the container a new
-      # empty one, so the entire history was one command away from gone.
+      # The one store: accounts, organisations, projects, the fact log, the
+      # queues, and every session the coding agent has ever run. It was on an
+      # anonymous volume the base image declared and nothing named, so a `down`
+      # followed by an `up` handed the container a fresh empty one.
       - ${NDX_DATA_HOST_DIR:-${VIBE_WORKSPACE_HOST_DIR:-./workspace}}/.ndx/admin/postgres:/var/lib/postgresql
     networks:
       - ndx-business_internal

@@ -5,12 +5,11 @@ folder to copy, back up, or move to another machine.
 
 ```
 ${NDX_DATA_HOST_DIR:-./workspace}/
-  <project folders>/          the coding agent's projects, one per folder
+  <userId>/                   one directory per account
+    <project>/                a git repository from the moment it exists
   .ndx/
-    postgres/                 the standalone pgmq database (the `agent` app)
-    admin/
-      data/                   files Admin keeps outside the database
-      postgres/               the database Admin serves to the coding agent
+    admin/postgres/           the one database: accounts, organisations,
+                              projects, the fact log, the queues, sessions
 ```
 
 ## Why `.ndx` is inside the projects root and not beside it
@@ -35,9 +34,12 @@ services that own the data, and neither runs untrusted commands.
 
 | Was | Now |
 | --- | --- |
-| `ndx-business_postgres_data` (named volume) | `.ndx/postgres` |
-| `ndx-business_admin_data` (named volume) | `.ndx/admin/data` |
+| `ndx-business_postgres_data` (named volume) | gone with the `agent` app it served |
+| `ndx-business_admin_data` (named volume) | gone; Admin keeps nothing outside the database |
 | **an anonymous volume** | `.ndx/admin/postgres` |
+
+There is one store and one mount for it. Every named volume this project had is
+deleted; what is left is a host directory you can copy.
 
 The third row was a live defect, not a tidy-up. The database Admin serves —
 accounts, the fact log, and every session the coding agent has ever run — sat
