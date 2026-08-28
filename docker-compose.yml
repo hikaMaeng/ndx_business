@@ -106,32 +106,37 @@ services:
   # One process per kind of work, named for the work. The lines are drawn by
   # what the work costs and what it is allowed to touch, not by tidiness:
   #
-  #   inference    seconds to minutes per message, and the only one that costs
-  #                money. This is the one worth running more of.
-  #   tool-runner  the only one that executes commands nobody vetted, and so the
-  #                only one given a writable projects folder.
-  #   turn-control opening a session, deciding reply-or-tools, waiting for
-  #                parallel tools to land. Milliseconds, database only.
-  #   read-model   writes what the screen reads. Emits nothing and takes no
-  #                session lock, so if it falls behind the turn does not.
+  #   inference   seconds to minutes per message, and the only one that costs
+  #               money. This is the one worth running more of.
+  #   tool        the only one that executes commands nobody vetted, and so the
+  #               only one given a writable projects folder.
+  #   turn        opening a session, deciding reply-or-tools, waiting for
+  #               parallel tools to land. Milliseconds, database only.
+  #   read-model  folds the log into the two tables the transcript is read from,
+  #               so reopening a session does not replay 66,000 facts. Emits
+  #               nothing and takes no session lock, so if it falls behind the
+  #               screen lags and the turn does not.
+  #
+  # The name leads with `worker` because that is the character: which server it
+  # is matters before which job it took. The image column already says these are
+  # vibeagent, and the `-N` suffix is the replica number — these are the pieces
+  # meant to be scaled, so none of them takes a fixed container_name.
 
   # Calls the model. The slow, expensive step; scale this one first.
-  vibeagent-inference:
+  worker-inference:
     <<: *vibe-worker
     environment:
       AGENT_ROLE: worker
       AGENT_QUEUES: vibe_model
-      AGENT_POOL_MAX: 8
       AGENT_DATABASE_POOL_MAX: 8
 
   # Runs the agent's shell commands inside a project folder. The only container
   # that executes untrusted input, and the only worker given the projects root.
-  vibeagent-tool-runner:
+  worker-tool:
     <<: *vibe-worker
     environment:
       AGENT_ROLE: worker
       AGENT_QUEUES: vibe_tool
-      AGENT_POOL_MAX: 8
       AGENT_DATABASE_POOL_MAX: 8
     volumes:
       # Projects root. A host path, not a named volume: the browser runs on the
@@ -147,21 +152,19 @@ services:
 
   # The turn's decision points: open it, choose what follows a model reply, and
   # wait for parallel tool calls to all report in.
-  vibeagent-turn-control:
+  worker-turn:
     <<: *vibe-worker
     environment:
       AGENT_ROLE: worker
       AGENT_QUEUES: vibe_intake,vibe_decide,vibe_join
-      AGENT_POOL_MAX: 4
       AGENT_DATABASE_POOL_MAX: 4
 
   # Folds the fact log into the shape the transcript reads.
-  vibeagent-read-model:
+  worker-read-model:
     <<: *vibe-worker
     environment:
       AGENT_ROLE: worker
       AGENT_QUEUES: vibe_view
-      AGENT_POOL_MAX: 4
       AGENT_DATABASE_POOL_MAX: 4
 
   vibeagent-b:

@@ -117,7 +117,13 @@ export interface EventBrokerOptions {
   /** Decides whether a user may read a channel. Without it any authenticated user may replay any channel. */
   authorizeChannel?(channel: string, user: { id: string }): boolean;
   /** Extra HTTP routes this deployment needs. Mounted before the client bundle. */
-  extendHttp?(app: RequestListener): RequestListener;
+  /**
+   * Extra routes around the broker's own surface.
+   *
+   * The broker's database pool is handed over so the app does not open a
+   * second one to the same database for the same reads.
+   */
+  extendHttp?(app: RequestListener, database: Pool): RequestListener;
   /**
    * action -> the reactor queues that should receive a copy.
    *
@@ -192,7 +198,7 @@ export function createEventBroker(options: EventBrokerOptions): Service {
         ...(options.clientDir === undefined ? {} : { clientDir: options.clientDir }),
         ...(options.assetDir === undefined ? {} : { assetDir: options.assetDir }),
       });
-      standby.activate(options.extendHttp ? options.extendHttp(backend) : backend);
+      standby.activate(options.extendHttp ? options.extendHttp(backend, database) : backend);
       console.log(JSON.stringify({ event: "broker.gateway.listening", port: env.port, gatewayId: env.gatewayId, allowedActions: options.allowedActions }));
 
       const websocket = attachWebSocketTransport(
@@ -288,6 +294,16 @@ export interface WorkerServerOptions {
    * many cores this machine happens to have.
    */
   execute?: WorkerExecute;
+  /**
+   * The same, built with this server's database pool.
+   *
+   * Prefer it. A handler that opens its own pool makes the process hold two
+   * sets of connections to one database for the same kind of traffic, and
+   * that is how a process came to hold three. The reactors inside a worker
+   * server were never the problem — they share whatever pool they are given.
+   * The process was.
+   */
+  executeWith?(database: Pool): WorkerExecute;
   /** In-flight ceiling for inline execution. Ignored in thread mode. */
   maxConcurrent?: number;
   /**
@@ -313,7 +329,8 @@ export interface WorkerServerOptions {
  * therefore no outbox bridging the two.
  */
 export function createWorkerServer(options: WorkerServerOptions): Service {
-  if (Boolean(options.worker) === Boolean(options.execute)) throw new Error("createWorkerServer needs exactly one of worker (CPU-bound, thread) or execute (IO-bound, inline)");
+  const inlineCount = Number(Boolean(options.execute)) + Number(Boolean(options.executeWith));
+  if (Number(Boolean(options.worker)) + inlineCount !== 1) throw new Error("createWorkerServer needs exactly one of worker (CPU-bound, thread), execute or executeWith (IO-bound, inline)");
   const env = options.env ?? readEnv();
   const runtime = createRuntime(env);
   let stopService: (() => Promise<void>) | undefined;
@@ -342,10 +359,11 @@ export function createWorkerServer(options: WorkerServerOptions): Service {
       await prune();
       const retentionTimer = setInterval(() => { void prune().catch((error) => console.error(JSON.stringify({ event: "worker.retention.failed", error: error instanceof Error ? error.message : String(error) }))); }, 60 * 60 * 1_000);
 
-      const inline = Boolean(options.execute);
+      const execute = options.executeWith ? options.executeWith(database) : options.execute;
+      const inline = Boolean(execute);
       const maxInFlight = inline ? (options.maxConcurrent ?? 256) : env.maxWorkerThreads + env.maxQueue;
-      const pool = options.execute
-        ? createInlinePool(options.execute, maxInFlight)
+      const pool = execute
+        ? createInlinePool(execute, maxInFlight)
         : createWorkerPool({ minWorkerThreads: env.minWorkerThreads, maxWorkerThreads: env.maxWorkerThreads, maxQueue: env.maxQueue, workerUrl: options.worker! });
       const consumer = startWorkerConsumer({ queue, commandQueues, eventStore, executions, pool, metrics, visibilitySeconds: env.visibilityTimeoutSeconds, pollSeconds: env.pollSeconds, batchSize: env.pollBatchSize, maxInFlight, maxExecutionAttempts: env.maxExecutionAttempts, terminalPersistenceAlertAttempts: env.terminalPersistenceAlertAttempts, terminalPersistenceBackoffMaxSeconds: env.terminalPersistenceBackoffMaxSeconds });
       const server = internalHealthServer(runtime);

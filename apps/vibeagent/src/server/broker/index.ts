@@ -1,5 +1,4 @@
 import express from "express";
-import { Pool } from "pg";
 import { createEventBroker, readEnv, runService } from "agent/broker";
 import { VIBE_COMMAND_ACTIONS } from "vibeagent_domain/common";
 import { ensureSessionSchema, ensureViewSchema, ownsVibeChannel } from "vibeagent_domain/server";
@@ -30,12 +29,6 @@ import { workspaceRoutes } from "./routes/workspaces.js";
 export async function startBroker(): Promise<void> {
   const env = readEnv();
 
-  // A small pool: this role only reads. The reactors do the writing, in their
-  // own processes, against their own pools.
-  const pool = new Pool({ connectionString: env.databaseUrl, max: 4 });
-  await ensureSessionSchema(pool);
-  await ensureViewSchema(pool);
-
   const verifier = gatewayVerifier();
 
   await runService(createEventBroker({
@@ -57,10 +50,13 @@ export async function startBroker(): Promise<void> {
     // The broker polices replay requests with this; it still has no idea what a
     // vibe channel contains, only who may read one.
     authorizeChannel: (channel, user) => ownsVibeChannel(channel, user.id),
-    extendHttp: (brokerApp) => {
+    // The broker's own pool arrives here rather than a second one being opened
+    // beside it. These routes only read the projection.
+    extendHttp: (brokerApp, database) => {
       const app = express();
       app.use(express.json({ limit: "64kb" }));
-      app.use(sessionRoutes(pool, verifier));
+      void Promise.all([ensureSessionSchema(database), ensureViewSchema(database)]);
+      app.use(sessionRoutes(database, verifier));
       app.use(workspaceRoutes(verifier));
       // Everything this app did not claim falls through to the broker's own surface.
       app.use(brokerApp);

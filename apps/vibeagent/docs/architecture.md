@@ -34,7 +34,7 @@ Gateway의 channel 구독은 테이블이 아니라 프로세스 메모리다. �
 | 등장인물 | 어디에 있나 |
 | --- | --- |
 | 바이브에이전트 웹백엔드 (Express) + 이벤트 브로커 | `vibeagent` 컨테이너. 웹클라이언트도 여기서 나간다 |
-| 워커서버 | `vibeagent-inference` · `-tool-runner` · `-turn-control` · `-read-model` |
+| 워커서버 | `worker-inference` · `worker-tool` · `worker-turn` · `worker-read-model` |
 | PG 서버 (pg + vector + pgmq) | `admin` 컨테이너에 내장 |
 
 브로커를 웹백엔드에서 떼어낼 수 없다. 클라이언트는 브로커를 웹소켓 서버로
@@ -42,6 +42,21 @@ Gateway의 channel 구독은 테이블이 아니라 프로세스 메모리다. �
 
 워커는 `AGENT_QUEUES`로 자기가 볼 큐를 받는다. 목적별로 컨테이너를 쪼개든 하나에
 모으든 `docker-compose.yml`만 바뀐다.
+
+이름이 `worker`로 시작하는 것은 목록에서 어떤 서버인지가 무슨 일을 하는지보다
+먼저 읽혀야 하기 때문이다. 이미지 열이 vibeagent임을 말해 주고, 뒤의 `-N`은
+복제본 번호다 — 늘어나라고 만든 것들이라 `container_name`을 주지 않았다.
+`docker compose up -d --scale worker-inference=3` 이 실제로 동작한다.
+
+| 워커 | 큐 | 하는 일 |
+| --- | --- | --- |
+| `worker-inference` | `vibe_model` | 모델 호출. 메시지당 수십 초, 유일하게 돈이 든다 |
+| `worker-tool` | `vibe_tool` | bash 실행. 검증되지 않은 명령을 돌리는 유일한 컨테이너라 워크스페이스 쓰기 권한도 여기만 있다 |
+| `worker-turn` | `vibe_intake` `vibe_decide` `vibe_join` | 턴 개시, 답변/도구 판단, 병렬 도구 합류. 밀리초, DB만 |
+| `worker-read-model` | `vibe_view` | 로그를 `vibe_turn_view`·`vibe_block_view`로 접는다. 세션을 다시 열 때 과거 대화가 보이는 이유 |
+
+`worker-read-model`이 따로인 이유: fact를 남기지 않고 세션 잠금도 잡지 않는다.
+밀려도 턴은 안 막히고 화면만 뒤처진다.
 
 ### 없는 것
 
@@ -53,8 +68,16 @@ Gateway의 channel 구독은 테이블이 아니라 프로세스 메모리다. �
 그게 로그를 쓰는 이유다 — 적재는 다르다. 두 브로커가 같은 팩트에 반응하면 같은
 추론을 두 번 산다. 그래서 적재 루프만 advisory lock을 잡고, 잡은 쪽만 넣는다.
 
-### 커넥션 예산
+### 커넥션
 
-PG 서버 하나가 전부를 받는다. 프로세스마다 풀이 셋(런타임·큐·리액터)이므로
-`AGENT_DATABASE_POOL_MAX`와 `AGENT_POOL_MAX`를 서비스별로 적어 둔다. 상한은
-`POSTGRES_MAX_CONNECTIONS`(기본 200)다.
+PG 서버 하나가 전부를 받는다. 붙는 것은 프로세스뿐이다 — 워커서버 안의 리액터들은
+서버가 준 풀을 함께 쓰지 각자 붙지 않는다.
+
+한때 프로세스가 같은 DB에 풀을 **셋** 열었다. 런타임의 이벤트 로그용, 큐용, 그리고
+앱이 리액터에게 주려고 따로 만든 것. 셋째는 첫째와 같은 종류의 트래픽을 같은 DB에
+보내고 있었다. 지금은 서버가 자기 풀을 넘긴다 — 워커는 `executeWith`, 브로커는
+`extendHttp`의 둘째 인자.
+
+프로세스당 풀은 둘이고 `AGENT_DATABASE_POOL_MAX`가 둘 다의 상한이다. 실측 유휴는
+전체 12이며, 워커 넷과 브로커를 다 채워도 60 언저리다. `POSTGRES_MAX_CONNECTIONS`
+기본값 200은 필요해서가 아니라 `--scale` 여유다.
