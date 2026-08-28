@@ -1,8 +1,8 @@
 import express from "express";
 import { parseCreateProjectRequest } from "admin_domain/common";
 import {
-  createProject, deleteProject, listProjects, listProjectsByOrganization,
-  readProjectDefault, writeProjectDefault, type AdminDatabase,
+  createProject, deleteProject, findProject, listProjects, listProjectsByOrganization,
+  readProjectDefault, resolvePolicy, writeProjectDefault, type AdminDatabase,
 } from "admin_domain/server";
 import type { AuthenticatedRequest } from "../../permission/index.js";
 import { body, requireInput } from "../body.js";
@@ -53,6 +53,26 @@ export function registerProjectRoutes(app: express.Express, database: AdminDatab
     const content = (body(request) as { content?: unknown } | undefined)?.content;
     if (typeof content !== "string") { response.status(400).json({ error: "content must be a string" }); return; }
     response.json({ file: await writeProjectDefault(database, String(request.params.name), content) });
+  });
+
+  /**
+   * What one session may use, and who decided each of it.
+   *
+   * Asked for by the coding agent when it opens a session, on behalf of the
+   * account signing in. The account is the caller, never a parameter — reading
+   * somebody else's policy would be reading their organisation's.
+   */
+  app.get("/api/projects/:name/policy", async (request: AuthenticatedRequest, response) => {
+    const project = await findProject(database, request.user!.id, String(request.params.name));
+    if (!project) { response.status(404).json({ error: "no such project" }); return; }
+    response.json({
+      project,
+      entries: await resolvePolicy(database, {
+        ownerId: request.user!.id,
+        organizationId: project.organizationId,
+        projectId: project.id,
+      }),
+    });
   });
 
   /** The organisation's side: whose projects are running under it, and under its subtree. */

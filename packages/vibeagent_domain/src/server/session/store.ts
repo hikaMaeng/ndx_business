@@ -71,6 +71,33 @@ export class SessionStore {
     return { row: { sessionKey, workspace: held }, created: false };
   }
 
+  /**
+   * Writes the context this session runs with, once.
+   *
+   * `WHERE context_prefix = ''` is the once. Opening a session is retried like
+   * any other reaction, and a second composition would replace the instructions
+   * a running conversation was started under — and throw away the provider's
+   * cache for the whole transcript while doing it. The first write wins and the
+   * rest are no-ops.
+   */
+  async writeContext(sessionKey: string, prefix: string, suffix: string, recipe: Record<string, unknown>): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE vibe_session SET context_prefix = $2, context_suffix = $3, context_recipe = $4::jsonb, updated_at = now()
+        WHERE session_key = $1 AND context_prefix = ''`,
+      [sessionKey, prefix, suffix, JSON.stringify(recipe)],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async readContext(sessionKey: string): Promise<{ prefix: string; suffix: string; recipe: Record<string, unknown> }> {
+    const result = await this.pool.query<{ context_prefix: string; context_suffix: string; context_recipe: Record<string, unknown> }>(
+      "SELECT context_prefix, context_suffix, context_recipe FROM vibe_session WHERE session_key = $1",
+      [sessionKey],
+    );
+    const row = result.rows[0];
+    return { prefix: row?.context_prefix ?? "", suffix: row?.context_suffix ?? "", recipe: row?.context_recipe ?? {} };
+  }
+
   async find(sessionKey: string): Promise<SessionRow | null> {
     const result = await this.pool.query<{ workspace: string }>("SELECT workspace FROM vibe_session WHERE session_key = $1", [sessionKey]);
     const workspace = result.rows[0]?.workspace;

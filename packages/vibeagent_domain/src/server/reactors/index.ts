@@ -123,9 +123,18 @@ export const VIBE_REACTOR_GROUPS: Readonly<Record<string, ReactorGroup>> = {
 export function createVibeWorker(
   pool: Pool,
   groups: Readonly<Record<string, ReactorGroup>>,
+  /**
+   * Where a session's skills and project instructions come from.
+   *
+   * Supplied by the app, because the answer lives in the account service and
+   * this package must not learn how to reach it. Left out, sessions open with
+   * the built-in prompt and no skills.
+   */
+  policy?: ReactorGlobals["policy"],
 ): WorkerExecute {
   const globals: ReactorGlobals = {
     pool, config: readLoopConfig(), sessions: new SessionStore(pool), view: new ViewStore(pool),
+    ...(policy ? { policy } : {}),
   };
   const schema = Promise.all([ensureSessionSchema(pool), ensureViewSchema(pool)]);
 

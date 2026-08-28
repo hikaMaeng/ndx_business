@@ -85,4 +85,21 @@ export async function ensureSessionSchema(pool: Pool): Promise<void> {
     iteration_index integer NOT NULL,
     declared_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (session_key, turn_key, iteration_index))`);
+
+  /**
+   * The context this session was opened with, frozen.
+   *
+   * A column rather than a message row: it is not part of the conversation and
+   * must not be trimmed, summarised or replayed with it. Frozen because the
+   * provider caches by token prefix — recomposing it per call would throw the
+   * cache away on every call, and changing a running session’s instructions
+   * halfway is its own kind of wrong.
+   *
+   * `context_recipe` says what it was built from. The text is a projection of
+   * that; keeping both means a session can be explained without the log having
+   * to carry a copy of every prompt.
+   */
+  await pool.query("ALTER TABLE vibe_session ADD COLUMN IF NOT EXISTS context_prefix text NOT NULL DEFAULT ''");
+  await pool.query("ALTER TABLE vibe_session ADD COLUMN IF NOT EXISTS context_recipe jsonb NOT NULL DEFAULT '{}'::jsonb");
+  await pool.query("ALTER TABLE vibe_session ADD COLUMN IF NOT EXISTS context_suffix text NOT NULL DEFAULT ''");
 }

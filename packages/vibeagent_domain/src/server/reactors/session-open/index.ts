@@ -2,6 +2,8 @@ import type { EventEnvelope } from "agent/common";
 import type { WorkerEmit } from "agent/broker/worker";
 import { VIBE_ACTIONS, VIBE_SESSION_OPEN_ACTION, parseVibeSessionOpenRequest } from "../../../common/index.js";
 import { ensureWorkspaceDirectory, projectPath } from "../../workspace/index.js";
+import { composePrefix, describeContext } from "../../context/index.js";
+import { renderSkillIndex } from "../../context/loader.js";
 import type { ReactorGlobals } from "../context/index.js";
 
 export interface SessionOpenOutcome {
@@ -56,6 +58,31 @@ export async function openSession(
   await ensureWorkspaceDirectory(globals.config.workspaceRoot, workspace);
   const opened = await globals.sessions.open(request.sessionKey, workspace);
   if (!opened.created) return { sessionKey: request.sessionKey, workspace: opened.row.workspace, created: false };
+
+  /**
+   * The context is fixed here, and never again.
+   *
+   * Here rather than at the first turn because that is what "the session runs
+   * under these instructions" means: a turn is not the unit anything was
+   * decided for. Never again because the provider caches by token prefix, so
+   * recomposing would discard the cache for the whole transcript, and because
+   * changing what a running conversation was told halfway is its own kind of
+   * wrong. Configuration that changes after this reaches the next session.
+   */
+  const policy = await globals.policy?.(request.userId, opened.row.workspace) ?? { skills: [], baseVersion: "builtin" };
+  const parts = {
+    basePrompt: globals.config.systemPrompt,
+    tools: ["bash"] as const,
+    projectPath: `${globals.config.workspaceRoot}/${opened.row.workspace}`,
+    projectName: opened.row.workspace.split("/").slice(1).join("/") || opened.row.workspace,
+    agents: policy.agents ?? "",
+  };
+  await globals.sessions.writeContext(
+    request.sessionKey,
+    composePrefix(parts),
+    renderSkillIndex(policy.skills),
+    { ...describeContext(parts, policy.skills.filter((skill) => skill.enabled).map((skill) => ({ name: skill.name, description: "" })), policy.baseVersion) },
+  );
 
   const seq = await globals.sessions.allocateSequence(request.sessionKey, 1);
   emit({ action: VIBE_ACTIONS.sessionOpened, seq, key: `session.opened:${request.sessionKey}`, sessionKey: request.sessionKey, workspace: opened.row.workspace });

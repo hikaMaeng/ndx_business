@@ -1,7 +1,10 @@
 import { createWorkerServer, readEnv, runService } from "agent/broker";
 import { createVibeWorker } from "vibeagent_domain/server";
+import { findProject, resolvePolicy } from "admin_domain/server";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { GROUPS, REACTOR_QUEUES } from "../reactions/index.js";
-import { maxConcurrentTurns } from "../config.js";
+import { maxConcurrentTurns, workspaceRoot } from "../config.js";
 
 /**
  * The worker server: consumes reactor queues and runs one reaction per message.
@@ -33,7 +36,42 @@ export async function startWorker(): Promise<void> {
      * make this process hold two sets of connections for one kind of traffic.
      * The reactors share whatever they are given; the process is what counts.
      */
-    executeWith: (database) => createVibeWorker(database, groups),
+    executeWith: (database) => createVibeWorker(database, groups, async (userId, workspace) => {
+      /**
+       * What this session may use, answered from the one database.
+       *
+       * The account service owns the answer and its tables are in the same
+       * PostgreSQL, on this pool's search path — so the question costs a query
+       * rather than a service call and a credential the worker does not have.
+       * A worker only ever receives a verified `userId`; the broker stamps it
+       * over whatever the client sent.
+       *
+       * A project with no record — one made before projects had them — resolves
+       * to nothing rather than failing. A session should open.
+       */
+      const name = workspace.split("/").slice(1).join("/");
+      const project = name ? await findProject(database, userId, name) : null;
+      const entries = project
+        ? await resolvePolicy(database, {
+            ownerId: userId,
+            organizationId: project.organizationId,
+            projectId: project.id,
+            kind: "skill",
+          })
+        : [];
+
+      // The project's own instructions. Merging an organisation's on top of
+      // these is the next thing this wants; today it is the file or nothing.
+      let agents = "";
+      try { agents = await readFile(path.join(workspaceRoot, workspace, "AGENTS.md"), "utf8"); }
+      catch { /* most projects have none, and that is not a failure */ }
+
+      return {
+        baseVersion: project ? "policy" : "builtin",
+        skills: entries.map((entry) => ({ name: entry.name, enabled: entry.enabled, value: entry.value })),
+        agents,
+      };
+    }),
     queues: watched,
     maxConcurrent: maxConcurrentTurns,
   }));

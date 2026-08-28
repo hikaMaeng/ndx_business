@@ -2,6 +2,7 @@ import type { EventEnvelope } from "agent/common";
 import type { WorkerEmit } from "agent/broker/worker";
 import { VIBE_ACTIONS, parseIterationScope } from "../../../common/index.js";
 import { chat } from "../../llm/index.js";
+import type { ChatMessage } from "../../llm/index.js";
 import { BASH_TOOL_SCHEMA } from "../../tools/bash/index.js";
 import type { ReactorGlobals, SessionContext } from "../context/index.js";
 
@@ -31,8 +32,23 @@ export async function callModel(
   const scope = parseIterationScope(event.payload);
   if (!scope) throw new Error(`${VIBE_ACTIONS.turnStarted} requires turnKey and iterationIndex`);
 
-  const messages = await session.store.history(session.sessionKey);
-  if (!messages.length) throw new Error(`session ${session.sessionKey} has no history to send`);
+  const history = await session.store.history(session.sessionKey);
+  if (!history.length) throw new Error(`session ${session.sessionKey} has no history to send`);
+
+  /**
+   * Instructions in front, skills behind.
+   *
+   * The prefix is the same bytes on every call of this session, so the provider
+   * can reuse everything up to the newest message. The skill index goes after
+   * the history for the same reason in reverse: it changes, and putting it at
+   * the front would invalidate the whole transcript each time it did.
+   */
+  const context = await session.store.readContext(session.sessionKey);
+  const messages: ChatMessage[] = [
+    ...(context.prefix ? [{ role: "system" as const, content: context.prefix }] : []),
+    ...history,
+    ...(context.suffix ? [{ role: "system" as const, content: context.suffix }] : []),
+  ];
 
   emit({
     action: VIBE_ACTIONS.iterationStarted, seq: session.sequence.next(),

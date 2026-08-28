@@ -26,13 +26,15 @@ export async function openTurn(
   });
   if (!request) throw new Error(`${VIBE_TURN_ACTION} requires sessionKey, turnKey, userId and prompt`);
 
-  // The system prompt belongs to the session, not to a turn, so it is written
-  // once when the history is still empty.
-  const history = await session.store.history(session.sessionKey);
-  const opening = history.length ? [] : [{ role: "system" as const, content: globals.config.systemPrompt }];
-
+  /**
+   * Only the prompt. The instructions are not a message.
+   *
+   * They used to be written here as row zero of the history, which made them
+   * part of the conversation: trimmed with it, replayed with it, and frozen at
+   * whatever the configuration said the day the session opened. They live on
+   * the session now and are put in front of the history at call time.
+   */
   await session.store.appendMessages(session.sessionKey, [
-    ...opening,
     { turnKey: request.turnKey, iterationIndex: 0, role: "user", content: request.prompt },
   ]);
 

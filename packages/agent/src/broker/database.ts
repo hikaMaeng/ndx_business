@@ -14,7 +14,16 @@ import { Pool } from "pg";
  * another on the next query, so the only thing needed is to say so out loud.
  */
 export function createDatabasePool(databaseUrl: string, max = 16): Pool {
-  const pool = new Pool({ connectionString: databaseUrl, max });
+  /**
+   * Both schemas are on the path.
+   *
+   * One PostgreSQL holds the event log and the queues in `public` and the
+   * account service in `admin`. A worker that has to know which skills a
+   * session may use is asking a question the account service already answers,
+   * and it is a query away rather than a network call and a credential away.
+   * `public` leads, so nothing here changes meaning.
+   */
+  const pool = new Pool({ connectionString: databaseUrl, max, options: "-c search_path=public,admin" });
   pool.on("error", (error) => {
     console.warn(JSON.stringify({
       event: "database.pool.idle.dropped",

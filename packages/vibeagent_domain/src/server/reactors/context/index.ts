@@ -12,12 +12,36 @@ import type { ViewStore } from "../../view/index.js";
  * neither is occupied — the session's real state lives in the database, and this
  * is a handle to it.
  */
+/**
+ * What a session is given, once it has been worked out.
+ *
+ * Skills, and the merged project instructions. Which of them a session gets is
+ * decided by the account, its organisations and their policy — none of which
+ * this package knows anything about, which is why this arrives as an answer
+ * rather than as a place to go and ask.
+ */
+export interface SessionPolicy {
+  baseVersion: string;
+  skills: readonly { name: string; enabled: boolean; value: { description?: unknown } }[];
+  /** The cascading project instructions, already merged. Empty when there are none. */
+  agents?: string;
+}
+
 export interface ReactorGlobals {
   pool: Pool;
   config: LoopConfig;
   sessions: SessionStore;
   /** The read model. Only the projection touches it; everyone else ignores it. */
   view: ViewStore;
+  /**
+   * Asks who this session is and what it may use.
+   *
+   * Injected, and optional. The domain must not know that the answer comes from
+   * Admin over HTTP — only that something can produce one. Absent, a session
+   * opens with the built-in prompt and no skills, which is what a deployment
+   * with no policy configured should get rather than a failure.
+   */
+  policy?(userId: string, workspace: string): Promise<SessionPolicy>;
 }
 
 /** How many positions a reactor reserves before it starts emitting. */
