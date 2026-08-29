@@ -40,10 +40,12 @@
   "devDependencies": {
     "@types/node": "26.1.1",
     "@types/pg": "8.21.0",
+    "@types/yauzl": "3.4.0",
     "tsx": "4.21.0",
     "typescript": "5.9.3"
   },
   "dependencies": {
-    "pg": "8.23.0"
+    "pg": "8.23.0",
+    "yauzl": "3.4.0"
   }
 }
