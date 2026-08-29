@@ -10,6 +10,7 @@ import { registerOrganizationRoutes } from "./routes/organizations/index.js";
 import { registerPolicyRoutes } from "./routes/policy/index.js";
 import { registerProjectDefaultRoutes } from "./routes/project-defaults/index.js";
 import { registerProjectRoutes } from "./routes/projects/index.js";
+import { registerSkillRoutes } from "./routes/skills/index.js";
 
 /**
  * The database is an argument, not something this function goes and finds.
@@ -33,6 +34,7 @@ export function createApp(database: AdminDatabase) {
   registerProjectRoutes(app, database);
   registerProjectDefaultRoutes(app, database);
   registerPolicyRoutes(app, database);
+  registerSkillRoutes(app, database);
   registerModelRoutes(app, database);
   registerAdminRoutes(app, database);
   app.use(express.static(frontDir));

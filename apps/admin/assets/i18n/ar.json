@@ -184,5 +184,15 @@
   "admin.policy.enforce.label": "إلزام — لا يمكن لمن هم أدناه تجاوزه",
   "admin.policy.enforced.label": "ملزم",
   "admin.policy.disabled.label": "مُعطّل",
-  "admin.policy.empty.text": "لا شيء محدد في هذه الطبقة."
+  "admin.policy.empty.text": "لا شيء محدد في هذه الطبقة.",
+  "admin.skill.files.title": "الملفات",
+  "admin.skill.browse.button": "الملفات",
+  "admin.skill.upload.button": "رفع ملف zip",
+  "admin.skill.uploading.text": "جارٍ الرفع…",
+  "admin.skill.empty.text": "لا توجد ملفات بعد. ارفع ملف zip يحتوي على SKILL.md.",
+  "admin.skill.binary.label": "ليس نصًا",
+  "admin.skill.saved.text": "تم الحفظ",
+  "admin.skill.close.button": "إغلاق",
+  "admin.skill.delete.button": "حذف الملفات",
+  "admin.skill.save.button": "حفظ الملف"
 }

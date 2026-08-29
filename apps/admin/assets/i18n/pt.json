@@ -184,5 +184,15 @@
   "admin.policy.enforce.label": "Forçar — ninguém abaixo pode substituir",
   "admin.policy.enforced.label": "forçado",
   "admin.policy.disabled.label": "desligado",
-  "admin.policy.empty.text": "Nada definido nesta camada."
+  "admin.policy.empty.text": "Nada definido nesta camada.",
+  "admin.skill.files.title": "Arquivos",
+  "admin.skill.browse.button": "Arquivos",
+  "admin.skill.upload.button": "Enviar zip",
+  "admin.skill.uploading.text": "Enviando…",
+  "admin.skill.empty.text": "Ainda sem arquivos. Envie um zip contendo SKILL.md.",
+  "admin.skill.binary.label": "não é texto",
+  "admin.skill.saved.text": "Salvo",
+  "admin.skill.close.button": "Fechar",
+  "admin.skill.delete.button": "Excluir arquivos",
+  "admin.skill.save.button": "Salvar arquivo"
 }

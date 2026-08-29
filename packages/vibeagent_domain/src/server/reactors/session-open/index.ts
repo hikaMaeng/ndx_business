@@ -81,7 +81,7 @@ export async function openSession(
     request.sessionKey,
     composePrefix(parts),
     renderSkillIndex(policy.skills),
-    { ...describeContext(parts, policy.skills.filter((skill) => skill.enabled).map((skill) => ({ name: skill.name, description: "" })), policy.baseVersion) },
+    { ...describeContext(parts, policy.skills.filter((skill) => skill.enabled), policy.baseVersion) },
   );
 
   const seq = await globals.sessions.allocateSequence(request.sessionKey, 1);

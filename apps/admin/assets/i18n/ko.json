@@ -184,5 +184,15 @@
   "admin.policy.enforce.label": "강제 — 아래에서 덮어쓸 수 없음",
   "admin.policy.enforced.label": "강제",
   "admin.policy.disabled.label": "꺼짐",
-  "admin.policy.empty.text": "이 층에 설정된 것이 없습니다."
+  "admin.policy.empty.text": "이 층에 설정된 것이 없습니다.",
+  "admin.skill.files.title": "파일",
+  "admin.skill.browse.button": "파일",
+  "admin.skill.upload.button": "zip 올리기",
+  "admin.skill.uploading.text": "올리는 중…",
+  "admin.skill.empty.text": "아직 파일이 없습니다. SKILL.md가 든 zip을 올리세요.",
+  "admin.skill.binary.label": "텍스트 아님",
+  "admin.skill.saved.text": "저장됨",
+  "admin.skill.close.button": "닫기",
+  "admin.skill.delete.button": "파일 삭제",
+  "admin.skill.save.button": "파일 저장"
 }

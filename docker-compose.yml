@@ -59,6 +59,9 @@ services:
       # anonymous volume the base image declared and nothing named, so a `down`
       # followed by an `up` handed the container a fresh empty one.
       - ${NDX_DATA_HOST_DIR:-${VIBE_WORKSPACE_HOST_DIR:-./workspace}}/.ndx/admin/postgres:/var/lib/postgresql
+      # Skill bundles. Admin is where they are uploaded and edited, so this is
+      # the one mount of them that is writable.
+      - ${NDX_DATA_HOST_DIR:-${VIBE_WORKSPACE_HOST_DIR:-./workspace}}/.ndx/skills:/skills
     networks:
       - ndx-business_internal
   vibeagent:
@@ -149,6 +152,14 @@ services:
       # a real shell in there and `rm -rf` does not consult the folder listing
       # that hides dot-directories. An empty tmpfs over the path means the
       # agent cannot reach the database files at all.
+      # Skill bundles, read-only.
+      #
+      # Outside `/workspace` on purpose: `.ndx` is masked from this container
+      # by the tmpfs below, and skills have to be readable. Read-only because a
+      # skill is policy — an agent that can rewrite the instructions it was
+      # given is not being governed by them, and the kernel is a better place to
+      # say so than a sentence in a prompt.
+      - ${NDX_DATA_HOST_DIR:-${VIBE_WORKSPACE_HOST_DIR:-./workspace}}/.ndx/skills:/skills:ro
       - type: tmpfs
         target: /workspace/.ndx
 

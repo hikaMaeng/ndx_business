@@ -13,3 +13,4 @@ Minimal verified web-service baseline.
 | Testing | docs/testing.md |
 | Account test plan | docs/account-test-plan.md |
 | Organization acceptance plan | docs/organization-acceptance-plan.md |
+| Skills | docs/skills.md |

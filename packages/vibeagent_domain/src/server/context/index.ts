@@ -25,6 +25,14 @@ export interface SkillEntry {
   name: string;
   /** One line. The detail lives in the skill and is read when it is wanted. */
   description: string;
+  /**
+   * Where the skill's folder is, from the agent's side of the mount.
+   *
+   * Carried in the index because a name is not something you can open. The one
+   * action this index asks for is reading `SKILL.md`, and without the path that
+   * costs a search of a tree the agent has no map of.
+   */
+  path: string;
 }
 
 export interface ContextParts {
@@ -73,14 +81,31 @@ export function composePrefix(parts: ContextParts): string {
  */
 export function composeSuffix(skills: readonly SkillEntry[]): string {
   if (!skills.length) return "";
-  const lines = skills.map((skill) => `- **${skill.name}** — ${skill.description}`);
+  const lines = skills.flatMap((skill) => [`- **${skill.name}** — ${skill.description}`, `  ${skill.path}`]);
   return [
     "# Available skills",
     "",
-    "Each is a procedure this deployment has written down. When one covers the",
-    "task, read it before starting: they carry specifics no summary can.",
+    "Each is a folder this deployment has written: `SKILL.md` and whatever it",
+    "needs beside it. When one covers the task, read its `SKILL.md` before",
+    "starting — it carries specifics no one-line summary can.",
     "",
     ...lines,
+    "",
+    "## Using one",
+    "",
+    "`SKILL.md` is the whole contract. If a skill ships scripts, its `SKILL.md`",
+    "says what to run and how — there is no convention here to guess at, because",
+    "what a skill is made of is the skill's own business. Follow what it says and",
+    "do not infer a command from a file's extension or its permission bits.",
+    "",
+    "Two things hold for every skill, and they are why the instructions inside one",
+    "can be written as if the skill were the only thing that existed:",
+    "",
+    "- **The working directory is the project, not the skill.** A relative path in",
+    "  a command means somewhere in the project. To reach the skill's own files,",
+    "  use the path listed above.",
+    "- **The skill's folder is read-only.** Output goes in the project. A skill",
+    "  that appears to want to write beside itself is being read wrongly.",
     "",
   ].join("\n");
 }
@@ -100,7 +125,7 @@ export interface ContextRecipe {
   toolCount: number;
 }
 
-export function describeContext(parts: ContextParts, skills: readonly SkillEntry[], baseVersion: string): ContextRecipe {
+export function describeContext(parts: ContextParts, skills: readonly { name: string }[], baseVersion: string): ContextRecipe {
   return {
     baseVersion,
     skills: skills.map((skill) => skill.name),

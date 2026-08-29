@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fromBuffer as openZip, type Entry, type ZipFile } from "yauzl";
 
@@ -21,12 +21,23 @@ export const BUNDLE_LIMITS = {
   files: 500,
   /** Beyond this a path is not a skill layout, it is an attempt at something. */
   depth: 8,
+  /** How much of a file is read to decide whether it is text. */
+  sniffBytes: 4096,
 } as const;
 
-/** Extensions a person may edit in a browser. Anything else is shown but not opened. */
-const TEXT_EXTENSIONS = new Set([
-  ".md", ".txt", ".sh", ".bash", ".mjs", ".cjs", ".js", ".ts", ".json", ".yaml", ".yml",
-  ".toml", ".ini", ".env", ".py", ".rb", ".sql", ".csv", ".xml", ".html", ".css", ".gitignore",
+/**
+ * Extensions worth refusing without opening the file.
+ *
+ * A short list of things that are certainly not text, and nothing else. The
+ * decision below is made by looking at the bytes, so this exists only to skip
+ * the read for the obvious cases — not to enumerate what a skill may contain.
+ */
+const BINARY_EXTENSIONS = new Set([
+  ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".tif", ".tiff",
+  ".pdf", ".zip", ".gz", ".tar", ".bz2", ".xz", ".7z", ".rar",
+  ".woff", ".woff2", ".ttf", ".otf", ".eot",
+  ".mp3", ".mp4", ".wav", ".mov", ".avi", ".webm", ".ogg",
+  ".so", ".dll", ".dylib", ".exe", ".wasm", ".class", ".pyc", ".node",
 ]);
 
 export interface BundleFile {
@@ -60,11 +71,44 @@ export function resolveInBundle(root: string, requested: string): string {
   return resolved;
 }
 
-export function isEditable(filePath: string): boolean {
-  const name = path.basename(filePath).toLowerCase();
-  const extension = path.extname(name);
-  // A dotfile with no extension — `.gitignore`, `.npmrc` — is text people edit.
-  return TEXT_EXTENSIONS.has(extension) || (name.startsWith(".") && !extension);
+/**
+ * Whether a sample of bytes is text.
+ *
+ * Asked of the content rather than of the file name, because a skill decides
+ * for itself what it is made of. A whitelist of extensions would have to know
+ * about `.rs`, `.go`, `.lua`, `.tf`, `Makefile`, `Dockerfile` and whatever the
+ * next skill brings, and every gap in it shows up as a file a person can see
+ * but not open — which is exactly the file they need to fix.
+ *
+ * So the default is text, and only bytes that cannot be text say otherwise: a
+ * NUL, or a sequence UTF-8 cannot decode. `stream: true` holds back a partial
+ * character at the end of the sample rather than reporting the cut as damage.
+ *
+ * A UTF-16 or Latin-1 file is called binary here. That is the price of an
+ * editor that reads and writes UTF-8 and nothing else, and calling such a file
+ * editable would mean offering to save it back as something it is not.
+ */
+export function looksText(sample: Buffer): boolean {
+  if (sample.includes(0)) return false;
+  const decoded = new TextDecoder("utf8", { fatal: false }).decode(sample, { stream: true });
+  return !decoded.includes("�");
+}
+
+/** The fast half of the question: extensions not worth opening. */
+export function certainlyBinary(filePath: string): boolean {
+  return BINARY_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+}
+
+/** Whether an existing file may be opened in the editor. */
+export async function isTextFile(absolute: string): Promise<boolean> {
+  if (certainlyBinary(absolute)) return false;
+  const handle = await open(absolute, "r").catch(() => null);
+  if (!handle) return false;
+  try {
+    const buffer = Buffer.alloc(BUNDLE_LIMITS.sniffBytes);
+    const { bytesRead } = await handle.read(buffer, 0, BUNDLE_LIMITS.sniffBytes, 0);
+    return looksText(buffer.subarray(0, bytesRead));
+  } finally { await handle.close(); }
 }
 
 /** Every file in a bundle, deepest paths included, sorted so a tree renders in order. */
@@ -76,32 +120,43 @@ export async function listBundle(root: string): Promise<BundleFile[]> {
     catch { return; }
     for (const entry of entries) {
       const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) { await walk(path.join(directory, entry.name), relative); continue; }
+      const absolute = path.join(directory, entry.name);
+      if (entry.isDirectory()) { await walk(absolute, relative); continue; }
       if (!entry.isFile()) continue;
-      const info = await stat(path.join(directory, entry.name));
-      found.push({ path: relative, bytes: info.size, editable: isEditable(relative) });
+      const info = await stat(absolute);
+      found.push({
+        path: relative,
+        bytes: info.size,
+        editable: info.size <= BUNDLE_LIMITS.fileBytes && await isTextFile(absolute),
+      });
     }
   };
   await walk(path.resolve(root), "");
-  // Root files first, then nested, alphabetically inside each. SKILL.md is the
-  // one a person opens, and a listing that buries it under folders is one
-  // nobody scans.
-  const depth = (file: BundleFile): number => file.path.split("/").length;
-  return found.sort((left, right) => depth(left) - depth(right) || left.path.localeCompare(right.path));
+  // SKILL.md first, then root files, then nested, alphabetically inside each.
+  //
+  // SKILL.md is pinned rather than left to the alphabet because it is the file
+  // a person opens and the only one every skill has. Sorting by name alone put
+  // it behind a Makefile, which is correct alphabetically and wrong for reading
+  // — and the rule the sort exists to serve is the reading one.
+  const rank = (file: BundleFile): number => (file.path === "SKILL.md" ? 0 : file.path.split("/").length);
+  return found.sort((left, right) => rank(left) - rank(right) || left.path.localeCompare(right.path));
 }
 
 export async function readBundleFile(root: string, requested: string): Promise<string> {
   const target = resolveInBundle(root, requested);
-  if (!isEditable(target)) throw new Error("that file is not text");
   const info = await stat(target);
   if (info.size > BUNDLE_LIMITS.fileBytes) throw new Error("that file is too large to edit");
+  if (!await isTextFile(target)) throw new Error("that file is not text");
   return readFile(target, "utf8");
 }
 
 export async function writeBundleFile(root: string, requested: string, content: string): Promise<void> {
   const target = resolveInBundle(root, requested);
-  if (!isEditable(target)) throw new Error("that file is not text");
   if (Buffer.byteLength(content, "utf8") > BUNDLE_LIMITS.fileBytes) throw new Error("that file is too large");
+  // Judged on what is being written, not on what is already there: a new file
+  // has no bytes yet, and an edit that would leave behind something the editor
+  // cannot read back is the same mistake as opening a binary one.
+  if (certainlyBinary(target) || !looksText(Buffer.from(content, "utf8"))) throw new Error("that file is not text");
   await mkdir(path.dirname(target), { recursive: true });
   await writeFile(target, content, "utf8");
 }

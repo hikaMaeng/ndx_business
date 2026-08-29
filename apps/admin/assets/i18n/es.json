@@ -184,5 +184,15 @@
   "admin.policy.enforce.label": "Forzar — nadie por debajo puede anularlo",
   "admin.policy.enforced.label": "forzado",
   "admin.policy.disabled.label": "apagado",
-  "admin.policy.empty.text": "Nada configurado en esta capa."
+  "admin.policy.empty.text": "Nada configurado en esta capa.",
+  "admin.skill.files.title": "Archivos",
+  "admin.skill.browse.button": "Archivos",
+  "admin.skill.upload.button": "Subir zip",
+  "admin.skill.uploading.text": "Subiendo…",
+  "admin.skill.empty.text": "Aún no hay archivos. Sube un zip que contenga SKILL.md.",
+  "admin.skill.binary.label": "no es texto",
+  "admin.skill.saved.text": "Guardado",
+  "admin.skill.close.button": "Cerrar",
+  "admin.skill.delete.button": "Eliminar archivos",
+  "admin.skill.save.button": "Guardar archivo"
 }

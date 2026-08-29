@@ -8,6 +8,7 @@ import {
 } from "admin_domain/common";
 import { PolicyCommands, groupByKind, type PolicyScope } from "admin_domain/front";
 import { Button } from "../components/ui/button";
+import { SkillFiles } from "../skills";
 import type { Texts } from "../i18n";
 import { RSC } from "../resource";
 import type { OrganizationRequestApi as RequestApi } from "../organization/types";
@@ -36,6 +37,10 @@ export function PolicyScreen({
   const [entries, setEntries] = useState<PolicyEntry[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Which skill's files are open. A name rather than a flag: the panel is for
+  // one bundle, and switching rows should switch what is shown rather than
+  // stack a second copy of it.
+  const [browsing, setBrowsing] = useState("");
   const [draft, setDraft] = useState<{ kind: PolicyKind; name: string; mode: PolicyMode; enabled: boolean; value: Record<string, string> } | null>(null);
 
   const words = useRef(text);
@@ -56,6 +61,7 @@ export function PolicyScreen({
   const scopeKey = JSON.stringify(scope);
   useEffect(() => {
     let current = true;
+    setBrowsing("");
     void commands.list(JSON.parse(scopeKey) as PolicyScope).then((found) => { if (current) setEntries(found); });
     return () => { current = false; };
   }, [commands, scopeKey]);
@@ -136,6 +142,18 @@ export function PolicyScreen({
                       <span className="policy-name">{entry.name}</span>
                       {entry.mode === "enforced" ? <span className="chip policy-enforced" data-testid="policy-enforced">{text[RSC.ADMIN_POLICY_ENFORCED_LABEL]}</span> : null}
                       {entry.enabled ? null : <span className="chip policy-off" data-testid="policy-disabled">{text[RSC.ADMIN_POLICY_DISABLED_LABEL]}</span>}
+                      {/* Only a skill has files. The other kinds are a value in
+                          a row and nothing more, and a button that opened an
+                          empty folder for them would be a question with one
+                          answer. */}
+                      {kind === "skill" ? (
+                        <button
+                          type="button"
+                          className="text-button"
+                          data-testid="skill-browse"
+                          onClick={() => setBrowsing(browsing === entry.name ? "" : entry.name)}
+                        >{text[RSC.ADMIN_SKILL_BROWSE_BUTTON]}</button>
+                      ) : null}
                       <button type="button" className="text-button" onClick={() => startDraft(kind, entry)}>{text[RSC.ADMIN_POLICY_EDIT_BUTTON]}</button>
                       <button type="button" className="text-button" data-testid="policy-remove" onClick={() => void remove(entry)}>{text[RSC.ADMIN_POLICY_REMOVE_BUTTON]}</button>
                     </li>
@@ -146,6 +164,17 @@ export function PolicyScreen({
           );
         })}
       </div>
+
+      {browsing ? (
+        <SkillFiles
+          token={token}
+          request={request}
+          text={text}
+          scope={scope}
+          name={browsing}
+          onClose={() => setBrowsing("")}
+        />
+      ) : null}
 
       {draft ? (
         <form className="policy-form" onSubmit={save} data-testid="policy-form">

@@ -5,8 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
-  BUNDLE_LIMITS, bundleRoot, extractBundle, isEditable, listBundle,
-  readBundleFile, resolveInBundle, writeBundleFile,
+  BUNDLE_LIMITS, bundleRoot, certainlyBinary, extractBundle, isTextFile, listBundle,
+  looksText, readBundleFile, resolveInBundle, writeBundleFile,
 } from "./index.js";
 
 function useDirectory(t: { after: (fn: () => void) => void }): string {
@@ -84,6 +84,21 @@ test("an ordinary bundle unpacks", async (t) => {
   assert.deepEqual(files.map((file) => file.path), ["SKILL.md", "references/notes.md", "scripts/check.mjs"], "root files first, then nested");
   assert.equal(readFileSync(path.join(root, "scripts/check.mjs"), "utf8"), "console.log('ok');\n");
   assert.ok(files.every((file) => file.editable), "md and mjs are text a person may edit");
+});
+
+test("SKILL.md leads the listing, whatever else is beside it", async (t) => {
+  const root = useDirectory(t);
+  // Not left to the alphabet: a root file whose name sorts earlier — a Makefile
+  // does — would push the one file every skill has, and the one a person opens,
+  // into second place.
+  const files = await extractBundle(root, makeZip([
+    { name: "Makefile", content: "check:\n" },
+    { name: "AGENTS.md", content: "x\n" },
+    { name: "SKILL.md", content: "# skill\n" },
+    { name: "scripts/run.lua", content: "print(1)\n" },
+  ]));
+
+  assert.deepEqual(files.map((file) => file.path), ["SKILL.md", "AGENTS.md", "Makefile", "scripts/run.lua"]);
 });
 
 test("an entry that climbs out of the bundle is refused", async (t) => {
@@ -167,6 +182,41 @@ test("an edit cannot write outside the bundle either", async (t) => {
   assert.equal(existsSync(path.join(root, "..", "escaped.md")), false);
 });
 
+test("a skill may be made of files nobody listed in advance", async (t) => {
+  const root = useDirectory(t);
+  // The point of deciding by content: what a skill is made of is the skill's
+  // business. An extension whitelist would show every one of these and open
+  // none of them — and the one a person needs to fix is always the one missing.
+  await extractBundle(root, makeZip([
+    { name: "Makefile", content: "build:\n\tcargo build\n" },
+    { name: "Dockerfile", content: "FROM scratch\n" },
+    { name: "scripts/main.rs", content: "fn main() {}\n" },
+    { name: "scripts/run.lua", content: "print(1)\n" },
+    { name: "infra/main.tf", content: "resource \"null_resource\" \"a\" {}\n" },
+  ]));
+
+  const listed = await listBundle(root);
+  assert.ok(listed.every((file) => file.editable), listed.map((file) => file.path + ":" + file.editable).join(" "));
+  assert.equal(await readBundleFile(root, "scripts/main.rs"), "fn main() {}\n");
+});
+
+test("a binary file with a text-looking name is still refused", async (t) => {
+  const root = useDirectory(t);
+  // A name is a claim; the bytes are the fact. This .md holds a NUL.
+  await extractBundle(root, makeZip([{ name: "notes.md", content: "hello\u0000world" }]));
+  await assert.rejects(() => readBundleFile(root, "notes.md"), /not text/);
+  assert.equal((await listBundle(root))[0]?.editable, false);
+});
+
+test("a saved edit has to be text too", async (t) => {
+  const root = useDirectory(t);
+  await extractBundle(root, makeZip([{ name: "SKILL.md", content: "x" }]));
+  // Judged on what is being written: the file on disk is fine, the new content
+  // is not, and saving it would leave a file the editor cannot open again.
+  await assert.rejects(() => writeBundleFile(root, "SKILL.md", "bad\u0000byte"), /not text/);
+  assert.equal(await readBundleFile(root, "SKILL.md"), "x", "and the good version survived");
+});
+
 test("an edit lands, and a new file may be created inside", async (t) => {
   const root = useDirectory(t);
   await extractBundle(root, makeZip([{ name: "SKILL.md", content: "before" }]));
@@ -178,11 +228,23 @@ test("an edit lands, and a new file may be created inside", async (t) => {
   assert.deepEqual((await listBundle(root)).map((file) => file.path), ["SKILL.md", "scripts/new.mjs"]);
 });
 
-test("a dotfile with no extension is text", () => {
-  assert.equal(isEditable(".gitignore"), true);
-  assert.equal(isEditable("a/.npmrc"), true);
-  assert.equal(isEditable("logo.png"), false);
-  assert.equal(isEditable("archive.tar.gz"), false);
+test("text is decided by the bytes, not by the name", async (t) => {
+  assert.equal(looksText(Buffer.from("# hello\n", "utf8")), true);
+  assert.equal(looksText(Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00])), false, "a NUL is not text");
+  assert.equal(looksText(Buffer.from([0xff, 0xfe, 0x41])), false, "nor are bytes UTF-8 cannot decode");
+  assert.equal(looksText(Buffer.alloc(0)), true, "an empty file is an editable empty file");
+
+  // A multi-byte character cut by the sniff boundary is a cut, not damage.
+  assert.equal(looksText(Buffer.from("\uac00\ub098\ub2e4", "utf8").subarray(0, 4)), true);
+
+  // The extension fast path only refuses what is certainly not text.
+  assert.equal(certainlyBinary("assets/logo.png"), true);
+  assert.equal(certainlyBinary("Makefile"), false);
+  assert.equal(certainlyBinary(".gitignore"), false);
+
+  const root = useDirectory(t);
+  await writeBundleFile(root, ".gitignore", "node_modules\n");
+  assert.equal(await isTextFile(path.join(path.resolve(root), ".gitignore")), true);
 });
 
 test("the same skill name in two layers gets two folders", () => {

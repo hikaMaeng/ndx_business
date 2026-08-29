@@ -184,5 +184,15 @@
   "admin.policy.enforce.label": "Imposer — personne en dessous ne peut l'outrepasser",
   "admin.policy.enforced.label": "imposé",
   "admin.policy.disabled.label": "désactivé",
-  "admin.policy.empty.text": "Rien de défini à ce niveau."
+  "admin.policy.empty.text": "Rien de défini à ce niveau.",
+  "admin.skill.files.title": "Fichiers",
+  "admin.skill.browse.button": "Fichiers",
+  "admin.skill.upload.button": "Téléverser un zip",
+  "admin.skill.uploading.text": "Téléversement…",
+  "admin.skill.empty.text": "Aucun fichier. Téléversez un zip contenant SKILL.md.",
+  "admin.skill.binary.label": "pas du texte",
+  "admin.skill.saved.text": "Enregistré",
+  "admin.skill.close.button": "Fermer",
+  "admin.skill.delete.button": "Supprimer les fichiers",
+  "admin.skill.save.button": "Enregistrer le fichier"
 }

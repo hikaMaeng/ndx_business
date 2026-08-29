@@ -22,7 +22,13 @@ import type { ViewStore } from "../../view/index.js";
  */
 export interface SessionPolicy {
   baseVersion: string;
-  skills: readonly { name: string; enabled: boolean; value: { description?: unknown } }[];
+  skills: readonly {
+    name: string;
+    enabled: boolean;
+    value: { description?: unknown };
+    /** Whose copy won, which is also where its files are. */
+    origin: { source: "account-project" | "account" | "organization"; sourceId: string; projectId?: string | null };
+  }[];
   /** The cascading project instructions, already merged. Empty when there are none. */
   agents?: string;
 }

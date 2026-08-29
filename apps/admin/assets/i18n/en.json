@@ -184,5 +184,15 @@
   "admin.policy.enforce.label": "Enforce — nobody below can override this",
   "admin.policy.enforced.label": "enforced",
   "admin.policy.disabled.label": "off",
-  "admin.policy.empty.text": "Nothing set at this layer."
+  "admin.policy.empty.text": "Nothing set at this layer.",
+  "admin.skill.files.title": "Files",
+  "admin.skill.browse.button": "Files",
+  "admin.skill.upload.button": "Upload zip",
+  "admin.skill.uploading.text": "Uploading…",
+  "admin.skill.empty.text": "No files yet. Upload a zip containing SKILL.md.",
+  "admin.skill.binary.label": "not text",
+  "admin.skill.saved.text": "Saved",
+  "admin.skill.close.button": "Close",
+  "admin.skill.delete.button": "Delete files",
+  "admin.skill.save.button": "Save file"
 }

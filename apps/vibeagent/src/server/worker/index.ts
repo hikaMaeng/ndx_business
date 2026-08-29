@@ -68,7 +68,11 @@ export async function startWorker(): Promise<void> {
 
       return {
         baseVersion: project ? "policy" : "builtin",
-        skills: entries.map((entry) => ({ name: entry.name, enabled: entry.enabled, value: entry.value })),
+        // The origin travels with the entry: it says which layer's copy won,
+        // and the bundles are stored per layer, so it is also where the files
+        // are. Dropping it here would leave the session with a list of names
+        // and no way to reach any of them.
+        skills: entries.map((entry) => ({ name: entry.name, enabled: entry.enabled, value: entry.value, origin: entry.origin })),
         agents,
       };
     }),

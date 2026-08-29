@@ -184,5 +184,15 @@
   "admin.policy.enforce.label": "बाध्य करें — नीचे कोई इसे नहीं बदल सकता",
   "admin.policy.enforced.label": "बाध्य",
   "admin.policy.disabled.label": "बंद",
-  "admin.policy.empty.text": "इस परत पर कुछ भी सेट नहीं है।"
+  "admin.policy.empty.text": "इस परत पर कुछ भी सेट नहीं है।",
+  "admin.skill.files.title": "फ़ाइलें",
+  "admin.skill.browse.button": "फ़ाइलें",
+  "admin.skill.upload.button": "ज़िप अपलोड करें",
+  "admin.skill.uploading.text": "अपलोड हो रहा है…",
+  "admin.skill.empty.text": "अभी कोई फ़ाइल नहीं। SKILL.md वाली ज़िप अपलोड करें।",
+  "admin.skill.binary.label": "टेक्स्ट नहीं",
+  "admin.skill.saved.text": "सहेजा गया",
+  "admin.skill.close.button": "बंद करें",
+  "admin.skill.delete.button": "फ़ाइलें हटाएँ",
+  "admin.skill.save.button": "फ़ाइल सहेजें"
 }

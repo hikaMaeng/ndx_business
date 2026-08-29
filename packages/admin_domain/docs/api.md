@@ -34,4 +34,37 @@ Public exports:
 | `updateModelDefinition` | Persists sampling, reasoning, and modality options. | `src/server/models/index.ts#updateModelDefinition` |
 | `ensureModelsFeatureModel` | Token-keyed catalog and selected-endpoint front slices. | `src/front/models/model/store.ts#ensureModelsFeatureModel` |
 
+## Skill bundle surface
+
+A skill is a folder, not a row. The `policy` row of kind `skill` names one and
+says what it is for; the folder holds `SKILL.md` and whatever the skill needs
+beside it. Bundles live under a root the admin container mounts read-write and
+the tool container mounts read-only.
+
+| Export | Purpose | Defined in |
+| --- | --- | --- |
+| `BUNDLE_LIMITS` | Size, count, and depth ceilings applied before anything is written. | `src/server/skills/index.ts#BUNDLE_LIMITS` |
+| `resolveInBundle` | The single path rule: resolves a requested path and refuses any that leaves the folder. | `src/server/skills/index.ts#resolveInBundle` |
+| `bundleRoot` | Where one skill's files sit, keyed by the layer that owns them. | `src/server/skills/index.ts#bundleRoot` |
+| `extractBundle` | Unpacks an uploaded zip, replacing the previous version. | `src/server/skills/index.ts#extractBundle` |
+| `listBundle` | Every file, `SKILL.md` first, each marked editable or not. | `src/server/skills/index.ts#listBundle` |
+| `readBundleFile`, `writeBundleFile` | Read and write one text file inside a bundle. | `src/server/skills/index.ts#readBundleFile` |
+| `looksText`, `certainlyBinary`, `isTextFile` | Whether a file may be opened, decided by its bytes rather than its name. | `src/server/skills/index.ts#looksText` |
+| `deleteBundle` | Removes a skill's files. | `src/server/skills/index.ts#deleteBundle` |
+
+Two decisions carry the rest:
+
+**Editability is decided by content.** There is no list of blessed extensions.
+A skill may be made of `.rs`, `.lua`, `.tf`, a `Makefile`, a `Dockerfile`, or
+something nobody has thought of; a whitelist would list every one of those and
+open only the ones that were guessed — and the file a person needs to fix is
+always the one missing from the guess. Only bytes that cannot be text (a NUL, a
+sequence UTF-8 cannot decode) mark a file as not editable.
+
+**Path safety is one function.** A zip entry names its own path, and so does an
+editor request, so both arrive from outside. `resolveInBundle` checks the
+resolved answer rather than the requested string, which is why the list of
+tricks — `..`, a leading slash, a backslash, a drive letter — does not have to
+be complete.
+
 Add APIs only when a requested product behavior needs a durable domain contract.

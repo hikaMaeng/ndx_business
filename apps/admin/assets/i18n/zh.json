@@ -184,5 +184,15 @@
   "admin.policy.enforce.label": "强制 — 下级无法覆盖",
   "admin.policy.enforced.label": "强制",
   "admin.policy.disabled.label": "关闭",
-  "admin.policy.empty.text": "此层未设置任何内容。"
+  "admin.policy.empty.text": "此层未设置任何内容。",
+  "admin.skill.files.title": "文件",
+  "admin.skill.browse.button": "文件",
+  "admin.skill.upload.button": "上传 zip",
+  "admin.skill.uploading.text": "上传中…",
+  "admin.skill.empty.text": "还没有文件。请上传包含 SKILL.md 的 zip。",
+  "admin.skill.binary.label": "非文本",
+  "admin.skill.saved.text": "已保存",
+  "admin.skill.close.button": "关闭",
+  "admin.skill.delete.button": "删除文件",
+  "admin.skill.save.button": "保存文件"
 }

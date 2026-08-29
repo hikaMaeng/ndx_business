@@ -43,11 +43,11 @@ export function Login({ onLogin, onSignup }: { onLogin: (token: string) => void;
       </CardHeader>
       <CardContent>
         <form className="form-stack" onSubmit={submit}>
-          <label>{text[RSC.AUTH_EMAIL_LABEL]}<input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
-          <label>{text[RSC.AUTH_PASSWORD_LABEL]}<input required minLength={8} type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+          <label>{text[RSC.AUTH_EMAIL_LABEL]}<input required data-testid="auth-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
+          <label>{text[RSC.AUTH_PASSWORD_LABEL]}<input required data-testid="auth-password" minLength={8} type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
           {error && <p role="alert" className="error-text">{error}</p>}
           <Button type="submit">{text[RSC.AUTH_LOGIN_BUTTON]}</Button>
-          <Button type="button" variant="outline" onClick={signupAccount}>{text[RSC.AUTH_SIGNUP_BUTTON]}</Button>
+          <Button type="button" data-testid="auth-signup" variant="outline" onClick={signupAccount}>{text[RSC.AUTH_SIGNUP_BUTTON]}</Button>
         </form>
       </CardContent>
     </Card>
