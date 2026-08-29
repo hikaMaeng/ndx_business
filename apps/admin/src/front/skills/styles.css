@@ -16,6 +16,10 @@
 
 .skill-files-body { display: grid; gap: .8rem; grid-template-columns: minmax(12rem, 18rem) 1fr; align-items: start; }
 @media (max-width: 60rem) { .skill-files-body { grid-template-columns: 1fr; } }
+/* Nothing uploaded yet: one column, so the message is not sitting beside a
+   column that exists only to be empty. */
+.skill-files-body.is-single { grid-template-columns: 1fr; }
+.skill-editor-hint { margin: .3rem 0 0; color: var(--text-disabled); font-size: var(--text-xs); }
 
 .skill-file-list { display: flex; flex-direction: column; gap: .1rem; margin: 0; padding: 0; list-style: none; max-height: 26rem; overflow-y: auto; }
 .skill-file {

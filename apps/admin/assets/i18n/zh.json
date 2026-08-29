@@ -194,5 +194,7 @@
   "admin.skill.saved.text": "已保存",
   "admin.skill.close.button": "关闭",
   "admin.skill.delete.button": "删除文件",
-  "admin.skill.save.button": "保存文件"
+  "admin.skill.save.button": "保存文件",
+  "admin.skill.delete.confirm": "删除该技能的所有文件？技能条目本身会保留。",
+  "admin.skill.select.hint": "选择一个文件以查看或编辑。"
 }

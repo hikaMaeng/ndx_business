@@ -102,4 +102,16 @@ export async function ensureSessionSchema(pool: Pool): Promise<void> {
   await pool.query("ALTER TABLE vibe_session ADD COLUMN IF NOT EXISTS context_prefix text NOT NULL DEFAULT ''");
   await pool.query("ALTER TABLE vibe_session ADD COLUMN IF NOT EXISTS context_recipe jsonb NOT NULL DEFAULT '{}'::jsonb");
   await pool.query("ALTER TABLE vibe_session ADD COLUMN IF NOT EXISTS context_suffix text NOT NULL DEFAULT ''");
+  /**
+   * The MCP servers this session may reach, keyed by name.
+   *
+   * A column of its own rather than a section of the prompt. Two reasons, and
+   * either would be enough: the model is shown skills, not servers, so a server
+   * in the prompt would present one capability under two names; and this is the
+   * part of a session that can change while it runs, which is exactly what must
+   * not sit in a prefix the whole transcript is cached behind.
+   *
+   * The tool side reads it when a skill asks it to. The model never sees it.
+   */
+  await pool.query("ALTER TABLE vibe_session ADD COLUMN IF NOT EXISTS mcp_servers jsonb NOT NULL DEFAULT '{}'::jsonb");
 }

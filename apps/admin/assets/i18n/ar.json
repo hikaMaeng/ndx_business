@@ -194,5 +194,7 @@
   "admin.skill.saved.text": "تم الحفظ",
   "admin.skill.close.button": "إغلاق",
   "admin.skill.delete.button": "حذف الملفات",
-  "admin.skill.save.button": "حفظ الملف"
+  "admin.skill.save.button": "حفظ الملف",
+  "admin.skill.delete.confirm": "حذف جميع ملفات هذه المهارة؟ يبقى إدخال المهارة نفسه.",
+  "admin.skill.select.hint": "اختر ملفًا لقراءته أو تحريره."
 }

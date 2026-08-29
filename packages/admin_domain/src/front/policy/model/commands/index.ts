@@ -84,6 +84,25 @@ export class PolicyCommands {
     }, false);
   }
 
+  /**
+   * The organisations whose entries this actor may edit.
+   *
+   * Asked of the same snapshot the organisation screen uses, and filtered by
+   * the same permission the policy routes enforce — `canUpdate` is projected
+   * from `canManage`, which is what `requireOrganizationManage` reads. Deriving
+   * it from anything else produces a chip that saves and then fails, which is
+   * the worst of the three possible answers.
+   */
+  layers(): Promise<Array<{ id: string; name: string }>> {
+    return this.run(async () => {
+      const answer = await this.request("/api/organizations") as {
+        organizations?: Array<{ id: string; name: string }>;
+        access?: { nodes?: Array<{ organizationId: string; canUpdate: boolean }> };
+      };
+      return manageableOrganizations(answer);
+    }, []);
+  }
+
   /** What one project actually gets, with the losers, for the "why is mine different" view. */
   resolved(projectName: string): Promise<unknown> {
     return this.run(
@@ -108,4 +127,23 @@ export function groupByKind(entries: readonly PolicyEntry[]): Array<[PolicyKind,
   const groups = new Map<PolicyKind, PolicyEntry[]>();
   for (const entry of entries) groups.set(entry.kind, [...(groups.get(entry.kind) ?? []), entry]);
   return [...groups.entries()].sort(([left], [right]) => left.localeCompare(right));
+}
+
+/**
+ * The manageable organisations in a snapshot, named.
+ *
+ * Separate from the fetch so the rule can be tested without a server, and
+ * because it is the rule — not the request — that has to keep agreeing with
+ * what the server enforces.
+ */
+export function manageableOrganizations(snapshot: {
+  organizations?: Array<{ id: string; name: string }>;
+  access?: { nodes?: Array<{ organizationId: string; canUpdate: boolean }> };
+}): Array<{ id: string; name: string }> {
+  const allowed = new Set(
+    (snapshot.access?.nodes ?? []).filter((node) => node.canUpdate).map((node) => node.organizationId),
+  );
+  return (snapshot.organizations ?? [])
+    .filter((organization) => allowed.has(organization.id))
+    .map((organization) => ({ id: organization.id, name: organization.name }));
 }

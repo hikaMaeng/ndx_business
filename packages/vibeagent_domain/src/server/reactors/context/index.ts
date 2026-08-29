@@ -25,10 +25,15 @@ export interface SessionPolicy {
   skills: readonly {
     name: string;
     enabled: boolean;
-    value: { description?: unknown };
+    value: { description?: unknown; mcp?: unknown };
     /** Whose copy won, which is also where its files are. */
     origin: { source: "account-project" | "account" | "organization"; sourceId: string; projectId?: string | null };
   }[];
+  /**
+   * The MCP servers configured for this session, before any skill has claimed
+   * one. Resolved into bindings at open, and never written into the prompt.
+   */
+  mcp?: readonly { name: string; enabled: boolean; value: Record<string, unknown> }[];
   /** The cascading project instructions, already merged. Empty when there are none. */
   agents?: string;
 }

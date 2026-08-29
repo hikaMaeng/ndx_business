@@ -104,7 +104,7 @@ export function SkillFiles({
   };
 
   const remove = async () => {
-    if (!window.confirm(name)) return;
+    if (!window.confirm(`${text[RSC.ADMIN_SKILL_DELETE_CONFIRM]}\n\n${name}`)) return;
     if (await run(() => request(`${base}/bundle${suffix}`, { method: "DELETE" }, token))) {
       setFiles([]); setOpen(""); setContent("");
     }
@@ -143,7 +143,7 @@ export function SkillFiles({
 
       {error ? <p role="alert" className="error-text">{error}</p> : null}
 
-      <div className="skill-files-body">
+      <div className={`skill-files-body ${files.length ? "" : "is-single"}`}>
         {files.length ? (
           <ul className="skill-file-list" data-testid="skill-file-list">
             {files.map((file) => (
@@ -187,6 +187,8 @@ export function SkillFiles({
               {saved ? <span className="skill-saved" data-testid="skill-saved">{text[RSC.ADMIN_SKILL_SAVED_TEXT]}</span> : null}
             </div>
           </div>
+        ) : files.length ? (
+          <p className="skill-editor-hint" data-testid="skill-editor-hint">{text[RSC.ADMIN_SKILL_SELECT_HINT]}</p>
         ) : null}
       </div>
     </section>

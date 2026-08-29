@@ -51,14 +51,17 @@ export async function startWorker(): Promise<void> {
        */
       const name = workspace.split("/").slice(1).join("/");
       const project = name ? await findProject(database, userId, name) : null;
-      const entries = project
-        ? await resolvePolicy(database, {
+      const ask = async (kind: "skill" | "mcp") => project
+        ? resolvePolicy(database, {
             ownerId: userId,
             organizationId: project.organizationId,
             projectId: project.id,
-            kind: "skill",
+            kind,
           })
         : [];
+      // Both in one moment. A session that took its skills from one merge and
+      // its servers from another is a session nobody configured.
+      const [entries, mcpEntries] = await Promise.all([ask("skill"), ask("mcp")]);
 
       // The project's own instructions. Merging an organisation's on top of
       // these is the next thing this wants; today it is the file or nothing.
@@ -73,6 +76,7 @@ export async function startWorker(): Promise<void> {
         // are. Dropping it here would leave the session with a list of names
         // and no way to reach any of them.
         skills: entries.map((entry) => ({ name: entry.name, enabled: entry.enabled, value: entry.value, origin: entry.origin })),
+        mcp: mcpEntries.map((entry) => ({ name: entry.name, enabled: entry.enabled, value: entry.value })),
         agents,
       };
     }),

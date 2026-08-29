@@ -80,13 +80,37 @@ export class SessionStore {
    * cache for the whole transcript while doing it. The first write wins and the
    * rest are no-ops.
    */
-  async writeContext(sessionKey: string, prefix: string, suffix: string, recipe: Record<string, unknown>): Promise<boolean> {
+  async writeContext(
+    sessionKey: string,
+    prefix: string,
+    suffix: string,
+    recipe: Record<string, unknown>,
+    // Written in the same statement as the prompt, and guarded by the same
+    // once: a session whose servers were settled at a different moment from its
+    // instructions is a session nobody configured.
+    mcp: Record<string, unknown> = {},
+  ): Promise<boolean> {
     const result = await this.pool.query(
-      `UPDATE vibe_session SET context_prefix = $2, context_suffix = $3, context_recipe = $4::jsonb, updated_at = now()
+      `UPDATE vibe_session SET context_prefix = $2, context_suffix = $3, context_recipe = $4::jsonb,
+                               mcp_servers = $5::jsonb, updated_at = now()
         WHERE session_key = $1 AND context_prefix = ''`,
-      [sessionKey, prefix, suffix, JSON.stringify(recipe)],
+      [sessionKey, prefix, suffix, JSON.stringify(recipe), JSON.stringify(mcp)],
     );
     return (result.rowCount ?? 0) > 0;
+  }
+
+  /**
+   * The servers the tool side may reach for this session.
+   *
+   * Read separately from the context because the two have different readers:
+   * the prompt goes to the model, this does not.
+   */
+  async readMcpServers(sessionKey: string): Promise<Record<string, unknown>> {
+    const result = await this.pool.query<{ mcp_servers: Record<string, unknown> }>(
+      "SELECT mcp_servers FROM vibe_session WHERE session_key = $1",
+      [sessionKey],
+    );
+    return result.rows[0]?.mcp_servers ?? {};
   }
 
   async readContext(sessionKey: string): Promise<{ prefix: string; suffix: string; recipe: Record<string, unknown> }> {

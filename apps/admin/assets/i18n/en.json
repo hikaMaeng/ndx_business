@@ -194,5 +194,7 @@
   "admin.skill.saved.text": "Saved",
   "admin.skill.close.button": "Close",
   "admin.skill.delete.button": "Delete files",
-  "admin.skill.save.button": "Save file"
+  "admin.skill.save.button": "Save file",
+  "admin.skill.delete.confirm": "Delete every file in this skill? The skill entry itself stays.",
+  "admin.skill.select.hint": "Select a file to read or edit it."
 }

@@ -194,5 +194,7 @@
   "admin.skill.saved.text": "सहेजा गया",
   "admin.skill.close.button": "बंद करें",
   "admin.skill.delete.button": "फ़ाइलें हटाएँ",
-  "admin.skill.save.button": "फ़ाइल सहेजें"
+  "admin.skill.save.button": "फ़ाइल सहेजें",
+  "admin.skill.delete.confirm": "इस स्किल की सभी फ़ाइलें हटाएँ? स्किल प्रविष्टि बनी रहेगी।",
+  "admin.skill.select.hint": "पढ़ने या संपादित करने के लिए फ़ाइल चुनें।"
 }

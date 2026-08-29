@@ -194,5 +194,7 @@
   "admin.skill.saved.text": "Salvo",
   "admin.skill.close.button": "Fechar",
   "admin.skill.delete.button": "Excluir arquivos",
-  "admin.skill.save.button": "Salvar arquivo"
+  "admin.skill.save.button": "Salvar arquivo",
+  "admin.skill.delete.confirm": "Excluir todos os arquivos desta habilidade? A entrada da habilidade permanece.",
+  "admin.skill.select.hint": "Selecione um arquivo para ler ou editar."
 }

@@ -66,6 +66,8 @@ export enum RSC {
   ADMIN_SKILL_SAVED_TEXT = "admin.skill.saved.text",
   ADMIN_SKILL_CLOSE_BUTTON = "admin.skill.close.button",
   ADMIN_SKILL_DELETE_BUTTON = "admin.skill.delete.button",
+  ADMIN_SKILL_DELETE_CONFIRM = "admin.skill.delete.confirm",
+  ADMIN_SKILL_SELECT_HINT = "admin.skill.select.hint",
   ADMIN_NAV_POLICY = "admin.nav.policy",
   ADMIN_SESSIONS_TITLE_TEXT = "admin.sessions.title.text",
   ADMIN_SESSIONS_SUBTITLE_TEXT = "admin.sessions.subtitle.text",

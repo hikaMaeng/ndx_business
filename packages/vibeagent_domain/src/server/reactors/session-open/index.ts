@@ -4,6 +4,7 @@ import { VIBE_ACTIONS, VIBE_SESSION_OPEN_ACTION, parseVibeSessionOpenRequest } f
 import { ensureWorkspaceDirectory, projectPath } from "../../workspace/index.js";
 import { composePrefix, describeContext } from "../../context/index.js";
 import { renderSkillIndex } from "../../context/loader.js";
+import { mcpSessionData, resolveMcpBindings } from "../../context/mcp.js";
 import type { ReactorGlobals } from "../context/index.js";
 
 export interface SessionOpenOutcome {
@@ -77,11 +78,25 @@ export async function openSession(
     projectName: opened.row.workspace.split("/").slice(1).join("/") || opened.row.workspace,
     agents: policy.agents ?? "",
   };
+  /**
+   * The servers each skill asked for, bound to what the deployment configured.
+   *
+   * What could not be bound is recorded in the recipe rather than thrown: one
+   * skill naming a server nobody configured should not stop the session from
+   * opening with the others, and "the skill did nothing" reads the same for a
+   * missing entry, a disabled one, and one whose URL was mistyped.
+   */
+  const mcp = resolveMcpBindings(policy.skills, policy.mcp ?? []);
   await globals.sessions.writeContext(
     request.sessionKey,
     composePrefix(parts),
     renderSkillIndex(policy.skills),
-    { ...describeContext(parts, policy.skills.filter((skill) => skill.enabled), policy.baseVersion) },
+    {
+      ...describeContext(parts, policy.skills.filter((skill) => skill.enabled), policy.baseVersion),
+      mcpServers: mcp.bindings.map((binding) => binding.name),
+      mcpProblems: mcp.problems,
+    },
+    mcpSessionData(mcp),
   );
 
   const seq = await globals.sessions.allocateSequence(request.sessionKey, 1);

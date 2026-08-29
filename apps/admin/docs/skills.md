@@ -59,9 +59,79 @@ as though its skill were the only thing that existed:
   through the path in the index.
 - **The skill's folder is read-only.** Output goes in the project.
 
+## Layers
+
+An entry belongs to exactly one layer, and the layer decides both where it is
+stored and who may edit it.
+
+| Layer | Who may edit | May enforce |
+| --- | --- | --- |
+| Organisation | anyone who may manage that organisation | yes |
+| Project | the account that owns the project | no |
+| Account | the account itself | no |
+
+The chips on the screen are derived from the same permission the routes enforce
+— `canUpdate`, which is projected from `canManage`. Deriving them from anything
+else produces a chip that saves and is then refused, which looks like it worked.
+
+**Enforcement is absent, not disabled, on the personal layers.** Only an
+organisation can bind those beneath it, so on an account layer the checkbox
+would be a question with one answer.
+
 ## MCP
 
-MCP servers are configured as policy entries of kind `mcp`, and a skill binds
-the ones it needs. They stay out of the session context: an MCP server listed
-beside the skill that wraps it would show one capability under two names, and
-the choice between them is a choice with no right answer.
+MCP servers are policy entries of kind `mcp`, and a skill declares which it
+needs in its own `mcp` field. The binding is the skill's: a skill says what it
+needs, and the deployment says what those are. An MCP entry nothing declares is
+configured and unreachable, which is a fine thing to be.
+
+### Transports
+
+An MCP server is reached over stdio or over SSE, and the two share nothing but a
+description.
+
+| Transport | Fields |
+| --- | --- |
+| `stdio` | `command`, `args`, `env` |
+| `sse` | `url`, `headers` |
+
+Declared in `POLICY_VARIANTS`, so a third transport needs no new form — the same
+way a sixth kind needs no new screen. The form keeps every field in the draft
+while it is open, so looking at the other transport does not discard what was
+typed, and sends only the fields on screen: a command left over from a glance at
+stdio is not part of an SSE server, and storing it would make one entry describe
+two things.
+
+An SSE URL must be `https`, except on localhost. An MCP server is handed
+whatever the session can reach, and sending that over plain http is not a
+decision to make by leaving a field the way it was typed.
+
+An entry with no command, or no URL, is **refused rather than defaulted**. It is
+not a server waiting on something else; it is one somebody stopped halfway
+through, and a plausible default moves the failure to the point of connection,
+where the reason is gone.
+
+### Why they are not in the prompt
+
+The session is shown skills. An MCP server listed beside the skill that wraps it
+would show one capability under two names, and the choice between them is a
+choice with no right answer.
+
+There is a second reason, and it would be enough on its own: a server can be
+reconfigured while a session runs, and anything mutable in the prefix costs the
+provider's cache for the whole transcript.
+
+So the bound servers are stored in `vibe_session.mcp_servers`, written in the
+same statement as the prompt and under the same once-only guard. The tool side
+reads them when a skill asks; the model never sees them.
+
+What could not be bound is recorded in the session's recipe with a reason —
+`unknown`, `disabled`, or `unusable`. All three look identical from the
+outside ("the skill did nothing"), and one skill's broken binding does not stop
+a session from opening with the others.
+
+### Not yet connected
+
+Entries are validated, bound, and stored where the tool side can read them. The
+stdio process and the SSE client are not written. A skill naming a server today
+gets a correct answer to "which server" and no connection.

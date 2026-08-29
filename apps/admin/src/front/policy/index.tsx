@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   POLICY_KINDS,
   POLICY_VALUE_FIELDS,
+  POLICY_VARIANTS,
   type PolicyEntry,
   type PolicyKind,
   type PolicyMode,
@@ -25,14 +26,20 @@ import type { OrganizationRequestApi as RequestApi } from "../organization/types
  * a sixth kind needs no new form here.
  */
 export function PolicyScreen({
-  token, request, text, organizations,
+  token, request, text,
 }: {
   token: string;
   request: RequestApi;
   text: Texts;
-  /** The organisations this actor may manage. Empty means only personal layers. */
-  organizations: Array<{ id: string; name: string }>;
 }) {
+  /**
+   * The layers this actor may edit, asked for here rather than handed down.
+   *
+   * The shell has no reason to know which organisations can hold policy, and
+   * when it passed the list it passed an empty one — an account layer and
+   * nothing else, with no way to tell that from an actor who manages nothing.
+   */
+  const [organizations, setOrganizations] = useState<Array<{ id: string; name: string }>>([]);
   const [scope, setScope] = useState<PolicyScope>({ layer: "account" });
   const [entries, setEntries] = useState<PolicyEntry[]>([]);
   const [busy, setBusy] = useState(false);
@@ -66,22 +73,54 @@ export function PolicyScreen({
     return () => { current = false; };
   }, [commands, scopeKey]);
 
+  useEffect(() => { void commands.layers().then(setOrganizations); }, [commands]);
+
   const reload = async () => setEntries(await commands.list(scope));
 
-  const startDraft = (kind: PolicyKind, existing?: PolicyEntry) => setDraft({
-    kind,
-    name: existing?.name ?? "",
-    mode: existing?.mode ?? "default",
-    enabled: existing?.enabled ?? true,
-    value: Object.fromEntries(
-      POLICY_VALUE_FIELDS[kind].map((field) => [field, String(existing?.value[field] ?? "")]),
-    ),
-  });
+  /**
+   * Every field a kind can carry, including the ones its other variants use.
+   *
+   * All of them are kept in the draft even though only one variant's are shown,
+   * so switching transport to look at the other one and switching back does not
+   * erase what was typed. Only the shown ones are sent.
+   */
+  const allFields = (kind: PolicyKind): string[] => [
+    ...POLICY_VALUE_FIELDS[kind],
+    ...Object.values(POLICY_VARIANTS[kind]?.options ?? {}).flat(),
+  ];
+
+  /** The fields on screen right now: the kind's own, plus the chosen variant's. */
+  const shownFields = (kind: PolicyKind, value: Record<string, string>): string[] => {
+    const variant = POLICY_VARIANTS[kind];
+    if (!variant) return [...POLICY_VALUE_FIELDS[kind]];
+    const chosen = value[variant.field] || Object.keys(variant.options)[0];
+    return [...POLICY_VALUE_FIELDS[kind], ...(variant.options[chosen] ?? [])];
+  };
+
+  const startDraft = (kind: PolicyKind, existing?: PolicyEntry) => {
+    const variant = POLICY_VARIANTS[kind];
+    setDraft({
+      kind,
+      name: existing?.name ?? "",
+      mode: existing?.mode ?? "default",
+      enabled: existing?.enabled ?? true,
+      value: {
+        ...Object.fromEntries(allFields(kind).map((field) => [field, String(existing?.value[field] ?? "")])),
+        // A variant with nothing chosen is a form that cannot be filled in, so
+        // it opens on the first option rather than on none.
+        ...(variant ? { [variant.field]: String(existing?.value[variant.field] ?? Object.keys(variant.options)[0]) } : {}),
+      },
+    });
+  };
 
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!draft?.name.trim()) return;
-    if (await commands.save(scope, draft)) { setDraft(null); await reload(); }
+    const value = Object.fromEntries(
+      shownFields(draft.kind, draft.value).map((field) => [field, draft.value[field] ?? ""]),
+    );
+    if (POLICY_VARIANTS[draft.kind]) value[POLICY_VARIANTS[draft.kind]!.field] = draft.value[POLICY_VARIANTS[draft.kind]!.field] ?? "";
+    if (await commands.save(scope, { ...draft, value })) { setDraft(null); await reload(); }
   };
 
   const remove = async (entry: PolicyEntry) => {
@@ -187,8 +226,28 @@ export function PolicyScreen({
               required
             />
           </label>
+          {/* A choice before the fields it decides. A select rather than free
+              text: the options are a closed set, and typing one wrong produces
+              an entry that looks configured and connects to nothing. */}
+          {POLICY_VARIANTS[draft.kind] ? (
+            <label>
+              <span>{POLICY_VARIANTS[draft.kind]!.field}</span>
+              <select
+                data-testid={`policy-variant-${POLICY_VARIANTS[draft.kind]!.field}`}
+                value={draft.value[POLICY_VARIANTS[draft.kind]!.field] ?? ""}
+                onChange={(event) => setDraft({
+                  ...draft,
+                  value: { ...draft.value, [POLICY_VARIANTS[draft.kind]!.field]: event.target.value },
+                })}
+              >
+                {Object.keys(POLICY_VARIANTS[draft.kind]!.options).map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           {/* Generated from what the kind declares it carries. */}
-          {POLICY_VALUE_FIELDS[draft.kind].map((field) => (
+          {shownFields(draft.kind, draft.value).map((field) => (
             <label key={field}>
               <span>{field}</span>
               <textarea

@@ -194,5 +194,7 @@
   "admin.skill.saved.text": "Guardado",
   "admin.skill.close.button": "Cerrar",
   "admin.skill.delete.button": "Eliminar archivos",
-  "admin.skill.save.button": "Guardar archivo"
+  "admin.skill.save.button": "Guardar archivo",
+  "admin.skill.delete.confirm": "¿Eliminar todos los archivos de esta habilidad? La entrada de la habilidad permanece.",
+  "admin.skill.select.hint": "Selecciona un archivo para leerlo o editarlo."
 }
