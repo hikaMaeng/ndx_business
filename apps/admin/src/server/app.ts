@@ -7,6 +7,7 @@ import { registerAdminRoutes } from "./routes/admin/index.js";
 import { registerAuthRoutes } from "./routes/auth/index.js";
 import { registerModelRoutes } from "./routes/models/index.js";
 import { registerOrganizationRoutes } from "./routes/organizations/index.js";
+import { registerPolicyRoutes } from "./routes/policy/index.js";
 import { registerProjectDefaultRoutes } from "./routes/project-defaults/index.js";
 import { registerProjectRoutes } from "./routes/projects/index.js";
 
@@ -31,6 +32,7 @@ export function createApp(database: AdminDatabase) {
   registerOrganizationRoutes(app, database);
   registerProjectRoutes(app, database);
   registerProjectDefaultRoutes(app, database);
+  registerPolicyRoutes(app, database);
   registerModelRoutes(app, database);
   registerAdminRoutes(app, database);
   app.use(express.static(frontDir));

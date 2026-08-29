@@ -3,7 +3,7 @@ import test from "node:test";
 import { adminDatabaseReachable, useAdminDatabase } from "../testing/index.js";
 import type { AdminDatabase } from "../database/index.js";
 import { createProject } from "../projects/index.js";
-import { clearPolicy, policyChain, resolvePolicy, setPolicy } from "./index.js";
+import { clearPolicy, listPolicy, policyChain, resolvePolicy, setPolicy } from "./index.js";
 
 const reachable = await adminDatabaseReachable();
 const needs = { skip: reachable ? false : "no PostgreSQL at TEST_DATABASE_URL" };
@@ -155,4 +155,34 @@ test("kinds do not collide, and one kind can be asked for alone", needs, async (
 
   const skills = await resolvePolicy(database, { ownerId: "u1", organizationId: "team", projectId: project.id, kind: "skill" });
   assert.deepEqual(skills.map((entry) => entry.value.which), ["skill"]);
+});
+
+test("the editing view shows one layer, not the merge", needs, async (t) => {
+  const { database, project } = await world(t);
+  await setPolicy(database, { kind: "skill", name: "deploy", organizationId: "root", value: { from: "root" } });
+  await setPolicy(database, { kind: "skill", name: "deploy", ownerId: "u1", value: { from: "account" } });
+  await setPolicy(database, { kind: "skill", name: "local", ownerId: "u1", projectId: project.id, value: { from: "project" } });
+
+  // Somebody editing the organisation must see what the organisation says —
+  // showing the merge would present a row they cannot edit as one they can.
+  const orgView = await listPolicy(database, { organizationId: "root" });
+  assert.deepEqual(orgView.map((entry) => entry.value.from), ["root"]);
+  assert.equal(orgView[0]!.organizationId, "root", "the editing view says where it lives, which the merge view does not");
+  assert.ok(orgView[0]!.id, "and identifies the row, so a form can address it");
+
+  // And the account's global layer is its own, without the project's.
+  const accountView = await listPolicy(database, { ownerId: "u1" });
+  assert.deepEqual(accountView.map((entry) => entry.name), ["deploy"]);
+
+  const projectView = await listPolicy(database, { ownerId: "u1", projectId: project.id });
+  assert.deepEqual(projectView.map((entry) => entry.name), ["local"]);
+});
+
+test("a name is what makes an entry the same entry across layers", needs, async (t) => {
+  const { database, resolve } = await world(t);
+  // Two layers, one name: the merge has something to decide. Two names would
+  // just be two entries, and no layer could ever override the other.
+  await setPolicy(database, { kind: "skill", name: "deploy", organizationId: "team", value: { from: "team" } });
+  await setPolicy(database, { kind: "skill", name: "deploy", ownerId: "u1", value: { from: "account" } });
+  assert.equal((await resolve()).length, 1, "one name is one setting, whoever wrote it");
 });
