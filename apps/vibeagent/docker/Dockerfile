@@ -12,17 +12,27 @@ FROM node:26-slim
 # --- system tools -----------------------------------------------------------
 #
 # bash is part of the runtime contract: it is the agent's only built-in tool.
-# The rest are what published skills reach for — document and image conversion,
-# PDF handling — plus the shared libraries a headless Chromium needs.
+# The rest is what published skills reach for — document, image and media
+# conversion, PDF handling, OCR — plus the shared libraries a headless Chromium
+# needs.
 #
-# Kept in one layer, before anything that changes per build, so a code change
-# never re-downloads any of it.
+# LibreOffice is here as its three component packages rather than the umbrella
+# one, and with recommends off: the umbrella pulls a desktop this container has
+# no screen for. It is the largest single thing in the image and it is here
+# because converting Office formats to PDF is what the document skills are for,
+# and nothing else in Debian does it.
+#
+# One layer, before anything that changes per build, so a code change never
+# re-downloads any of it.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       bash git ca-certificates curl unzip \
       python3 python3-pip python3-venv python-is-python3 \
       poppler-utils qpdf \
       imagemagick ghostscript \
       pandoc \
+      ffmpeg \
+      tesseract-ocr tesseract-ocr-eng tesseract-ocr-kor \
+      libreoffice-core libreoffice-writer libreoffice-calc libreoffice-impress \
       fonts-liberation fonts-dejavu-core fonts-noto-cjk \
       libnss3 libnspr4 libdbus-1-3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
       libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
@@ -36,21 +46,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # to install anything at the moment it needs it — which would also mean a
 # network call in the middle of a task.
 #
-# This list is what the published catalogue actually imports, measured rather
-# than guessed: pypdf, pdfplumber, pdf2image and Pillow between them cover every
-# PDF and image script; playwright is the browser half; the document libraries
-# are what the Office skills use. requests / bs4 / lxml / pyyaml are the ones
-# any script reaches for without thinking.
-#
 # PEP 668 marks the system Python as externally managed; this image *is* the
-# environment, so the flag says what is already true rather than working around
-# a protection.
-RUN pip3 install --no-cache-dir --break-system-packages \
-      pypdf pdfplumber pdf2image pillow reportlab \
-      python-docx openpyxl python-pptx markitdown \
-      playwright \
-      requests beautifulsoup4 lxml pyyaml markdown \
-      defusedxml
+# environment, so the flag states what is already true rather than working
+# around a protection.
+COPY apps/vibeagent/docker/requirements.txt /tmp/requirements.txt
+RUN pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements.txt \
+    && rm /tmp/requirements.txt
 
 # --- the headless browser ---------------------------------------------------
 #
@@ -70,8 +71,18 @@ COPY --chown=node:node apps/vibeagent/dist ./dist
 # still has a writable path instead of failing on the first tool call.
 RUN mkdir -p /workspace && chown -R node:node /workspace
 
+# `HOME` is set because LibreOffice, Jupyter and matplotlib all want somewhere to
+# write a profile, and a process with no home writes to `/` and fails there.
+# `MPLBACKEND` keeps matplotlib from looking for a display it will not find; a
+# plot in this container is a file, never a window.
 ENV NODE_ENV=production PORT=18081 VIBE_WORKSPACE_ROOT=/workspace \
-    PYTHONDONTWRITEBYTECODE=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+    HOME=/home/node \
+    PYTHONDONTWRITEBYTECODE=1 PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    MPLBACKEND=Agg \
+    JUPYTER_PLATFORM_DIRS=1
+RUN mkdir -p /home/node/.cache /home/node/.config /home/node/.local \
+    && chown -R node:node /home/node
+
 USER node
 EXPOSE 18081
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=5 CMD node -e "fetch('http://127.0.0.1:' + (process.env.PORT || 18081) + '/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"

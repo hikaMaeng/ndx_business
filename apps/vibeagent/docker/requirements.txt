@@ -1,0 +1,69 @@
+# Python available to every skill, installed globally into the tool runtime.
+#
+# In a file rather than inline in the Dockerfile because this is the list people
+# will actually argue about, and a list worth reviewing should be readable
+# without reading a build.
+#
+# Not pinned yet. Two builds a month apart can therefore differ, which is a
+# deliberate simplicity and the obvious thing to regret later.
+
+# --- documents ---------------------------------------------------------------
+# Reading and writing Office formats directly. LibreOffice converts between
+# them; these edit them without starting a program.
+python-docx
+python-pptx
+openpyxl
+markitdown[all]
+pypandoc
+
+# --- PDF ---------------------------------------------------------------------
+# The catalogue's PDF skills reach for all four: pypdf to manipulate, pdfplumber
+# to read structure, pdf2image to rasterise, reportlab to create.
+pypdf
+pdfplumber
+pdf2image
+reportlab
+
+# --- images and OCR ----------------------------------------------------------
+pillow
+pytesseract
+
+# --- browser -----------------------------------------------------------------
+# The library. Its Chromium is installed separately in the Dockerfile, because
+# a browser is not a Python package and lives outside site-packages.
+playwright
+
+# --- notebooks ---------------------------------------------------------------
+# A kernel that outlives one command.
+#
+# Running Python as a series of one-shot scripts throws away every variable
+# between them, so anything exploratory has to re-derive its own state — reload
+# the file, re-fit the model, re-parse the document — on each step. A kernel
+# keeps it, which turns "run this script" into "keep working in the same
+# session", and nbconvert makes the result something a person can be handed.
+ipykernel
+jupyter-client
+nbclient
+nbconvert
+nbformat
+jupyterlab
+
+# --- data --------------------------------------------------------------------
+# The trio anything analytical assumes is present. matplotlib is configured for
+# a headless backend by the environment, not here.
+numpy
+pandas
+matplotlib
+tabulate
+
+# --- everyday ----------------------------------------------------------------
+requests
+httpx
+beautifulsoup4
+lxml
+pyyaml
+markdown
+defusedxml
+python-dateutil
+jinja2
+rich

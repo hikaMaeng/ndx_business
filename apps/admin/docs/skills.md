@@ -54,25 +54,58 @@ elsewhere runs here.
 
 | | |
 | --- | --- |
-| Shells and VCS | `bash`, `git`, `curl`, `unzip` |
-| Runtimes | `node`, `npm`, `npx`, `python3`, `pip3` |
+| Shell and VCS | `bash`, `git`, `curl`, `unzip` |
+| Runtimes | `node`, `npm`, `npx`, `python3` (and `python`), `pip3` |
 | Browser | Chromium via Playwright, at `PLAYWRIGHT_BROWSERS_PATH=/opt/playwright` |
-| Documents | `pandoc`, `markitdown` |
-| PDF | `pdftoppm`, `pdftotext`, `qpdf`, `ghostscript`, `pypdf`, `pdfplumber`, `pdf2image` |
-| Images | `convert` / ImageMagick, `pillow` |
-| Office formats | `python-docx`, `openpyxl`, `python-pptx` |
-| Everyday Python | `requests`, `beautifulsoup4`, `lxml`, `pyyaml`, `markdown`, `defusedxml`, `reportlab` |
+| Documents | LibreOffice (`soffice`, headless), `pandoc`, `markitdown` |
+| PDF | `pdftoppm`, `pdftotext`, `qpdf`, `ghostscript` |
+| Images and OCR | ImageMagick, `tesseract` (English and Korean) |
+| Media | `ffmpeg` |
+| Notebooks | `jupyter`, `nbconvert`, an `ipykernel` |
+| Fonts | Liberation, DejaVu, Noto CJK |
+
+Python libraries are listed in `apps/vibeagent/docker/requirements.txt` — in a
+file rather than inline in the Dockerfile, because that is the list people will
+actually argue about, and a list worth reviewing should be readable without
+reading a build. It covers documents (`python-docx`, `python-pptx`,
+`openpyxl`), PDF (`pypdf`, `pdfplumber`, `pdf2image`, `reportlab`), images
+(`pillow`, `pytesseract`), notebooks, data (`numpy`, `pandas`, `matplotlib`),
+and the everyday ones any script assumes.
 
 Installed **globally**, not per skill. A skill's folder is read-only and the
 project is not the place for a virtualenv, so there is nowhere for a skill to
 install anything at the moment it needs it — and doing so would mean a network
 call in the middle of a task.
 
-The list is what the published catalogue actually imports, measured rather than
-guessed. It will not cover everything: a skill needing something absent says so
-in its `SKILL.md`, and the requirement list on the screen is where that shows
-up. Adding to the image is a deployment decision, and the right place to make it
-is `apps/vibeagent/docker/Dockerfile`.
+### A kernel, not only scripts
+
+`ipykernel` and `nbclient` are here because running Python as a series of
+one-shot scripts throws away every variable between them: anything exploratory
+has to reload the file, re-fit the model, re-parse the document on each step. A
+kernel keeps that state, which turns "run this script" into "keep working in the
+same session", and `nbconvert` turns the result into something a person can be
+handed.
+
+### Three environment variables that matter
+
+Each of them is the difference between a tool being installed and being usable,
+and each fails in a way that reads as the tool's fault:
+
+- `HOME=/home/node` — LibreOffice, Jupyter and matplotlib all want somewhere to
+  write a profile. A process with no home writes to `/` and fails there.
+- `MPLBACKEND=Agg` — matplotlib otherwise looks for a display. A plot in this
+  container is a file, never a window.
+- `PLAYWRIGHT_BROWSERS_PATH=/opt/playwright` — set at build and not kept in the
+  environment, the runtime looks elsewhere and reports a browser that is plainly
+  present as missing.
+
+### What is still not here
+
+The list will not cover everything, and it is not meant to. A skill needing
+something absent says so in its `SKILL.md`, and the requirement list on the
+screen is where that shows up — at install time rather than mid-task. Adding to
+the image is a deployment decision, and its place is
+`apps/vibeagent/docker/Dockerfile`.
 
 ## Where the files live
 
