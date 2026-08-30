@@ -27,6 +27,28 @@ the previous version's files behind produces a bundle matching neither archive.
 Every text file opens in the editor. Which files those are is decided by looking
 at the bytes, not at the extension — see `admin_domain/docs/api.md` for why.
 
+## What a skill needs
+
+Uploading reads `SKILL.md` for the commands it tells an agent to run, and the
+skills screen lists them. Read from the prose that is actually followed rather
+than from a separate declaration, because a separate declaration is one more
+thing to fall out of step.
+
+Only code counts — fenced blocks, indented blocks, inline spans — because
+`make`, `go` and `convert` are ordinary English words as well as commands, and
+a skill saying "make sure to go through the references" is not asking for a
+build system. A fence.s language tag counts too: a block of Python source
+contains no `python`, so a skill that only shows source would otherwise read as
+needing nothing.
+
+**This says what a skill asks for, not what the runtime has.** The tool image
+ships bash, git, node and python3 — the last because most published skills are
+Python and a skill that cannot start is not a capability. Anything heavier
+(LibreOffice, ImageMagick, a language toolchain) is left out on purpose: a base
+image that grew to cover every dependency would be guessing at everyone.s, and
+the list on the screen is there so the gap is visible where a skill is
+installed rather than where an agent finally fails to run it.
+
 ## Where the files live
 
 | Layer | Path |

@@ -11,6 +11,13 @@ interface BundleFile {
   editable: boolean;
 }
 
+interface BundleManifest {
+  name?: string;
+  description?: string;
+  /** The commands this skill's own instructions tell an agent to run. */
+  requires?: string[];
+}
+
 const query = (scope: PolicyScope): string =>
   scope.layer === "organization" ? `?organizationId=${encodeURIComponent(scope.organizationId)}`
   : scope.layer === "project" ? `?projectId=${encodeURIComponent(scope.projectId)}`
@@ -40,6 +47,7 @@ export function SkillFiles({
   onClose: () => void;
 }) {
   const [files, setFiles] = useState<BundleFile[]>([]);
+  const [manifest, setManifest] = useState<BundleManifest>({});
   const [open, setOpen] = useState<string>("");
   const [content, setContent] = useState("");
   const [busy, setBusy] = useState(false);
@@ -59,8 +67,9 @@ export function SkillFiles({
   }, []);
 
   const load = useCallback(async () => {
-    const answer = await run(() => request(`${base}/files${suffix}`, undefined, token)) as { files?: BundleFile[] } | null;
+    const answer = await run(() => request(`${base}/files${suffix}`, undefined, token)) as { files?: BundleFile[]; manifest?: BundleManifest } | null;
     setFiles(answer?.files ?? []);
+    setManifest(answer?.manifest ?? {});
   }, [base, request, run, suffix, token]);
 
   useEffect(() => { void load(); }, [load]);
@@ -97,10 +106,10 @@ export function SkillFiles({
     const answer = await run(() => request(`${base}/bundle${suffix}`, {
       method: "POST",
       body: JSON.stringify({ archive: btoa(binary) }),
-    }, token)) as { files?: BundleFile[] } | null;
+    }, token)) as { files?: BundleFile[]; manifest?: BundleManifest } | null;
     // A new upload replaces the folder, so whatever was open is a file from a
     // version that no longer exists.
-    if (answer) { setFiles(answer.files ?? []); setOpen(""); setContent(""); }
+    if (answer) { setFiles(answer.files ?? []); setManifest(answer.manifest ?? {}); setOpen(""); setContent(""); }
   };
 
   const remove = async () => {
@@ -142,6 +151,19 @@ export function SkillFiles({
       </header>
 
       {error ? <p role="alert" className="error-text">{error}</p> : null}
+
+      {/* What the skill's own instructions tell an agent to run.
+          Shown here because this is where somebody decides to install it — a
+          skill that wants LibreOffice is worth knowing about before an agent
+          discovers it mid-task and reports a missing command. */}
+      {manifest.requires?.length ? (
+        <p className="skill-requires" data-testid="skill-requires">
+          <span className="skill-requires-label">{text[RSC.ADMIN_SKILL_REQUIRES_LABEL]}</span>
+          {manifest.requires.map((command) => (
+            <code key={command} data-testid="skill-requirement">{command}</code>
+          ))}
+        </p>
+      ) : null}
 
       <div className={`skill-files-body ${files.length ? "" : "is-single"}`}>
         {files.length ? (

@@ -44,8 +44,13 @@ export function registerSkillRoutes(app: express.Express, database: AdminDatabas
     response.status(400).json({ error: error instanceof Error ? error.message : "Skill file access failed" });
 
   app.get("/api/skills/:name/files", async (request: AuthenticatedRequest, response) => {
-    try { response.json({ files: await listBundle(await locate(request, String(request.params.name))) }); }
-    catch (error) { refuse(response, error); }
+    try {
+      const root = await locate(request, String(request.params.name));
+      // The manifest comes back with the listing, not only with the upload that
+      // installed it: what a skill needs is a fact about the skill, and it is
+      // wanted by whoever opens it next rather than only by whoever put it there.
+      response.json({ files: await listBundle(root), manifest: await readBundleManifest(root) });
+    } catch (error) { refuse(response, error); }
   });
 
   app.get("/api/skills/:name/file", async (request: AuthenticatedRequest, response) => {

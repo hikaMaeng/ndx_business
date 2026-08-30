@@ -196,5 +196,6 @@
   "admin.skill.delete.button": "Supprimer les fichiers",
   "admin.skill.save.button": "Enregistrer le fichier",
   "admin.skill.delete.confirm": "Supprimer tous les fichiers de cette compétence ? L'entrée elle-même est conservée.",
-  "admin.skill.select.hint": "Sélectionnez un fichier pour le lire ou le modifier."
+  "admin.skill.select.hint": "Sélectionnez un fichier pour le lire ou le modifier.",
+  "admin.skill.requires.label": "Nécessite"
 }

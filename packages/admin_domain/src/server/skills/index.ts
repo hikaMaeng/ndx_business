@@ -173,6 +173,19 @@ export async function writeBundleFile(root: string, requested: string, content: 
 export interface BundleManifest {
   name?: string;
   description?: string;
+  /**
+   * Commands the skill's own instructions tell an agent to run.
+   *
+   * Read from `SKILL.md` rather than declared separately, because a separate
+   * declaration is one more thing to fall out of step with the prose that
+   * actually gets followed. This is what the skill *asks for*; whether the tool
+   * container has it is a different question, answered where that is known.
+   *
+   * Approximate on purpose. It exists so somebody installing a skill can see
+   * that it wants LibreOffice before an agent discovers it at runtime, not to
+   * decide anything.
+   */
+  requires?: string[];
 }
 
 /**
@@ -199,13 +212,117 @@ export function parseFrontmatter(text: string): Record<string, string> {
     if (!pair) { key = ""; continue; }
     key = pair[1];
     let value = pair[2].trim();
-    if ((value.startsWith('"') && value.endsWith('"') && value.length > 1)
-      || (value.startsWith("'") && value.endsWith("'") && value.length > 1)) {
-      value = value.slice(1, -1);
-    }
+    // Quoted because the value contains a colon, which is also the character
+    // that ended the key. The quotes are the escape, not part of the sentence.
+    const quoted = (mark: string): boolean => value.startsWith(mark) && value.endsWith(mark) && value.length > 1;
+    if (quoted('"') || quoted("'")) value = value.slice(1, -1);
     fields[key] = value;
   }
   return fields;
+}
+
+/**
+ * Commands worth noticing in a skill's instructions.
+ *
+ * A closed list, because the alternative is treating every word in a code block
+ * as a dependency and reporting `cd` and `ls` as requirements. Adding to it is
+ * cheap; guessing is not.
+ */
+const KNOWN_COMMANDS = [
+  "python3", "python", "pip3", "pip", "uv", "uvx",
+  "node", "npx", "npm", "pnpm", "yarn", "deno", "bun",
+  "bash", "sh", "make", "cmake", "git",
+  "ruby", "perl", "php", "go", "cargo", "rustc", "java", "mvn", "gradle", "dotnet",
+  "soffice", "libreoffice", "pdftoppm", "pdftotext", "qpdf", "gs",
+  "ffmpeg", "convert", "magick", "tesseract", "pandoc", "markitdown",
+  "docker", "kubectl", "terraform", "aws", "gcloud", "az",
+] as const;
+
+/**
+ * The parts of a markdown document that are code.
+ *
+ * Fenced blocks, indented blocks, and inline spans. Nothing else is looked at,
+ * because `make`, `go`, `convert` and `magick` are ordinary English words as
+ * well as commands, and a skill that says "make sure to go through the
+ * references" is not asking for a build system.
+ */
+function codeRegions(text: string): { regions: string[]; languages: string[] } {
+  const regions: string[] = [];
+  const languages: string[] = [];
+  const lines = text.split(/\r?\n/);
+  let fence = "";
+  let block: string[] = [];
+  for (const line of lines) {
+    const opening = /^\s*(```+|~~~+)\s*([A-Za-z0-9_+-]*)/.exec(line);
+    if (fence) {
+      if (opening && line.trim().startsWith(fence)) { regions.push(block.join("\n")); block = []; fence = ""; }
+      else block.push(line);
+      continue;
+    }
+    if (opening) {
+      fence = opening[1];
+      // The tag names what runs the block. A page of Python contains no
+      // `python` command, so a skill that only shows source would otherwise
+      // read as needing nothing at all.
+      if (opening[2]) languages.push(opening[2].toLowerCase());
+      continue;
+    }
+    // An indented block: four spaces or a tab, which is how SKILL.md files that
+    // avoid fences write their commands.
+    if (/^(?: {4}|\t)\S/.test(line)) { regions.push(line.trim()); continue; }
+    for (const span of line.matchAll(/`([^`]+)`/g)) regions.push(span[1]);
+  }
+  if (block.length) regions.push(block.join("\n"));
+  return { regions, languages };
+}
+
+/** What a fence's language tag implies about the runtime a skill needs. */
+const LANGUAGE_COMMANDS: Readonly<Record<string, string>> = {
+  python: "python3", py: "python3", python3: "python3",
+  bash: "bash", sh: "bash", shell: "bash", zsh: "bash", console: "bash",
+  javascript: "node", js: "node", mjs: "node", typescript: "node", ts: "node",
+  ruby: "ruby", rb: "ruby", perl: "perl", php: "php", go: "go", rust: "cargo",
+  java: "java", makefile: "make", dockerfile: "docker",
+};
+
+/**
+ * The commands a skill's instructions name.
+ *
+ * Read from `SKILL.md` rather than declared separately, because a separate
+ * declaration is one more thing to fall out of step with the prose that is
+ * actually followed.
+ *
+ * Only the first word of a command line counts. A path argument mentioning
+ * `scripts/convert.py` is not a dependency on ImageMagick, and treating every
+ * matching word as one turns a short useful list into a long ignored one.
+ */
+export function requiredCommands(text: string): string[] {
+  const known = new Set<string>(KNOWN_COMMANDS);
+  const found = new Set<string>();
+  const { regions, languages } = codeRegions(text);
+  for (const language of languages) {
+    const command = LANGUAGE_COMMANDS[language];
+    if (command) found.add(command);
+  }
+  for (const region of regions) {
+    for (const line of region.split(/\r?\n/)) {
+      // A shell line may be prefixed by a prompt, chained, or piped; each
+      // segment starts a command of its own.
+      for (const segment of line.replace(/^\s*[$>#]\s+/, "").split(/(?:\|\||&&|[|;])/)) {
+        const first = segment.trim().split(/\s+/)[0] ?? "";
+        // `VAR=1 python x.py` — the assignment is not the command.
+        const command = /^[A-Za-z_][A-Za-z0-9_]*=/.test(first) ? segment.trim().split(/\s+/)[1] ?? "" : first;
+        const bare = command.replace(/^.*\//, "");
+        if (known.has(bare)) found.add(bare);
+      }
+    }
+  }
+  // One name per runtime. A skill that writes `python` and one that writes
+  // `python3` are asking for the same thing, and a list that reports both makes
+  // a reader compare two entries to learn nothing.
+  if (found.delete("python")) found.add("python3");
+  if (found.delete("pip")) found.add("pip3");
+  return [...found].sort();
 }
 
 /** Reads a bundle's own account of itself, or nothing if it does not give one. */
@@ -217,6 +334,8 @@ export async function readBundleManifest(root: string): Promise<BundleManifest> 
   const manifest: BundleManifest = {};
   if (fields.name?.trim()) manifest.name = fields.name.trim();
   if (fields.description?.trim()) manifest.description = fields.description.trim();
+  const requires = requiredCommands(text);
+  if (requires.length) manifest.requires = requires;
   return manifest;
 }
 

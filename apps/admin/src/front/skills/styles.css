@@ -48,3 +48,13 @@
   tab-size: 2;
 }
 .skill-saved { color: var(--text-description); font-size: var(--text-xs); }
+
+/* What a skill asks to be able to run. Quiet: it is context for a decision,
+   not a warning — whether the runtime has these is a separate question, and
+   claiming to answer it here would be claiming to know the tool image. */
+.skill-requires { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem; margin: 0; }
+.skill-requires-label { color: var(--text-disabled); font-size: var(--text-xs); }
+.skill-requires code {
+  padding: .05rem .35rem; border: 1px solid var(--border); border-radius: .25rem;
+  color: var(--text-secondary); font-family: var(--mono); font-size: var(--text-2xs);
+}
