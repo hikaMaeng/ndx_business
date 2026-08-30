@@ -41,13 +41,38 @@ build system. A fence.s language tag counts too: a block of Python source
 contains no `python`, so a skill that only shows source would otherwise read as
 needing nothing.
 
-**This says what a skill asks for, not what the runtime has.** The tool image
-ships bash, git, node and python3 — the last because most published skills are
-Python and a skill that cannot start is not a capability. Anything heavier
-(LibreOffice, ImageMagick, a language toolchain) is left out on purpose: a base
-image that grew to cover every dependency would be guessing at everyone.s, and
-the list on the screen is there so the gap is visible where a skill is
-installed rather than where an agent finally fails to run it.
+**This says what a skill asks for. What the runtime has is below.**
+
+## What the runtime provides
+
+The tool container is a Debian image, not Alpine. Alpine is musl, and both the
+browsers Playwright ships and a good deal of the Python wheel ecosystem are
+built against glibc — on Alpine each has to be swapped for a distribution
+package and pointed at by hand, which is a stream of small breakages a skill
+author cannot see coming. The larger base buys one property: a skill written
+elsewhere runs here.
+
+| | |
+| --- | --- |
+| Shells and VCS | `bash`, `git`, `curl`, `unzip` |
+| Runtimes | `node`, `npm`, `npx`, `python3`, `pip3` |
+| Browser | Chromium via Playwright, at `PLAYWRIGHT_BROWSERS_PATH=/opt/playwright` |
+| Documents | `pandoc`, `markitdown` |
+| PDF | `pdftoppm`, `pdftotext`, `qpdf`, `ghostscript`, `pypdf`, `pdfplumber`, `pdf2image` |
+| Images | `convert` / ImageMagick, `pillow` |
+| Office formats | `python-docx`, `openpyxl`, `python-pptx` |
+| Everyday Python | `requests`, `beautifulsoup4`, `lxml`, `pyyaml`, `markdown`, `defusedxml`, `reportlab` |
+
+Installed **globally**, not per skill. A skill's folder is read-only and the
+project is not the place for a virtualenv, so there is nowhere for a skill to
+install anything at the moment it needs it — and doing so would mean a network
+call in the middle of a task.
+
+The list is what the published catalogue actually imports, measured rather than
+guessed. It will not cover everything: a skill needing something absent says so
+in its `SKILL.md`, and the requirement list on the screen is where that shows
+up. Adding to the image is a deployment decision, and the right place to make it
+is `apps/vibeagent/docker/Dockerfile`.
 
 ## Where the files live
 
