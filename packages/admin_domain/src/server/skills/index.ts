@@ -161,6 +161,65 @@ export async function writeBundleFile(root: string, requested: string, content: 
   await writeFile(target, content, "utf8");
 }
 
+/**
+ * What a skill says about itself.
+ *
+ * Real skills carry their name and description in `SKILL.md`'s frontmatter,
+ * because that is the file that travels with them. Asking an admin to retype
+ * the description into a row is asking for two copies of one sentence, and the
+ * one in the row is the one that stops being true — it is not next to anything
+ * that changes when the skill does.
+ */
+export interface BundleManifest {
+  name?: string;
+  description?: string;
+}
+
+/**
+ * The leading `---` block of a markdown file, as key/value pairs.
+ *
+ * Deliberately small. This reads two fields out of a header that skills in the
+ * wild write by hand; a YAML parser would accept structures this has no use for
+ * and would have to be kept in step with a spec nobody here is reading. A key
+ * whose value is not a plain scalar is skipped rather than guessed at.
+ */
+export function parseFrontmatter(text: string): Record<string, string> {
+  const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
+  if (!match) return {};
+  const fields: Record<string, string> = {};
+  let key = "";
+  for (const line of match[1].split(/\r?\n/)) {
+    // A continuation: a wrapped value is indented under its key, and joining it
+    // back is the difference between a description and its first clause.
+    if (key && /^\s+\S/.test(line) && !/^\s*[A-Za-z0-9_-]+:/.test(line)) {
+      fields[key] = `${fields[key]} ${line.trim()}`.trim();
+      continue;
+    }
+    const pair = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
+    if (!pair) { key = ""; continue; }
+    key = pair[1];
+    let value = pair[2].trim();
+    if ((value.startsWith('"') && value.endsWith('"') && value.length > 1)
+      || (value.startsWith("'") && value.endsWith("'") && value.length > 1)) {
+      value = value.slice(1, -1);
+    }
+    fields[key] = value;
+  }
+  return fields;
+}
+
+/** Reads a bundle's own account of itself, or nothing if it does not give one. */
+export async function readBundleManifest(root: string): Promise<BundleManifest> {
+  const target = path.join(path.resolve(root), "SKILL.md");
+  const text = await readFile(target, "utf8").catch(() => "");
+  if (!text) return {};
+  const fields = parseFrontmatter(text);
+  const manifest: BundleManifest = {};
+  if (fields.name?.trim()) manifest.name = fields.name.trim();
+  if (fields.description?.trim()) manifest.description = fields.description.trim();
+  return manifest;
+}
+
 export async function deleteBundle(root: string): Promise<void> {
   await rm(path.resolve(root), { recursive: true, force: true });
 }

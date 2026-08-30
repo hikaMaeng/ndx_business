@@ -1,7 +1,7 @@
 import express from "express";
 import {
-  BUNDLE_LIMITS, bundleRoot, deleteBundle, extractBundle, listBundle,
-  readBundleFile, requireOrganizationManage, writeBundleFile,
+  BUNDLE_LIMITS, bundleRoot, deleteBundle, extractBundle, listBundle, listPolicy,
+  readBundleFile, readBundleManifest, requireOrganizationManage, setPolicy, writeBundleFile,
   type AdminDatabase,
 } from "admin_domain/server";
 import type { AuthenticatedRequest } from "../../permission/index.js";
@@ -26,16 +26,19 @@ export function registerSkillRoutes(app: express.Express, database: AdminDatabas
    * parameters, and splitting them is how a route ends up resolving one layer
    * and authorising another.
    */
-  const locate = async (request: AuthenticatedRequest, name: string) => {
+  const place = async (request: AuthenticatedRequest) => {
     const scope = request.query as Record<string, string | undefined>;
     if (scope.organizationId) {
       await requireOrganizationManage(database, request.user!.id, scope.organizationId, Boolean(request.user!.isMasterAdmin));
-      return bundleRoot(SKILLS_ROOT, { organizationId: scope.organizationId }, name);
+      return { organizationId: scope.organizationId };
     }
     return scope.projectId
-      ? bundleRoot(SKILLS_ROOT, { projectId: scope.projectId }, name)
-      : bundleRoot(SKILLS_ROOT, { ownerId: request.user!.id }, name);
+      ? { ownerId: request.user!.id, projectId: scope.projectId }
+      : { ownerId: request.user!.id };
   };
+
+  const locate = async (request: AuthenticatedRequest, name: string) =>
+    bundleRoot(SKILLS_ROOT, await place(request), name);
 
   const refuse = (response: express.Response, error: unknown) =>
     response.status(400).json({ error: error instanceof Error ? error.message : "Skill file access failed" });
@@ -84,8 +87,40 @@ export function registerSkillRoutes(app: express.Express, database: AdminDatabas
       try {
         const buffer = Buffer.from(archive, "base64");
         if (buffer.byteLength > BUNDLE_LIMITS.totalBytes) throw new Error("the archive is too large");
-        const root = await locate(request, String(request.params.name));
-        response.status(201).json({ files: await extractBundle(root, buffer) });
+        const name = String(request.params.name);
+        const scope = await place(request);
+        const root = bundleRoot(SKILLS_ROOT, scope, name);
+        const files = await extractBundle(root, buffer);
+
+        /**
+         * The skill's own account of itself wins.
+         *
+         * A real skill states its description in `SKILL.md`'s frontmatter,
+         * because that file travels with it. Copying that sentence into a row
+         * by hand produces two versions of it, and the row's is the one that
+         * goes stale — it sits next to nothing that changes when the skill
+         * does. So an upload updates the row rather than asking anyone to.
+         *
+         * Only when the bundle says something. A skill with no frontmatter
+         * leaves whatever a person wrote, because overwriting a description
+         * with an empty one would remove the entry from the session index
+         * entirely, and "I uploaded files and the skill disappeared" is not a
+         * sentence this should be able to produce.
+         */
+        const manifest = await readBundleManifest(root);
+        if (manifest.description) {
+          const existing = (await listPolicy(database, scope))
+            .find((entry) => entry.kind === "skill" && entry.name === name);
+          await setPolicy(database, {
+            ...scope,
+            kind: "skill",
+            name,
+            mode: existing?.mode,
+            enabled: existing?.enabled,
+            value: { ...existing?.value, description: manifest.description },
+          });
+        }
+        response.status(201).json({ files, manifest });
       } catch (error) { refuse(response, error); }
     });
 

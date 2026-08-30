@@ -9,6 +9,17 @@ what the session reads when that line turns out to be relevant.
 
 ## Uploading and editing
 
+A skill states its own description in `SKILL.md`s frontmatter, and uploading
+reads it into the policy row. Nobody retypes it. A description copied by hand
+exists in two places, and the copy in the row is the one that goes stale — it
+sits next to nothing that changes when the skill does.
+
+A bundle with no frontmatter leaves whatever description is already there.
+Blanking it would drop the skill out of the session index entirely, and
+"I uploaded files and the skill disappeared" is not a sentence this should be
+able to produce.
+
+
 Skills arrive as a zip and are browsed and edited in the admin afterwards. A
 second upload **replaces** rather than merges: it is a new version, and leaving
 the previous version's files behind produces a bundle matching neither archive.
