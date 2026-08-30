@@ -9,6 +9,7 @@ x-vibe-worker: &vibe-worker
   build:
     context: .
     dockerfile: apps/vibeagent/docker/Dockerfile
+    target: service
   image: ndx-business-vibeagent:latest
   init: true
   restart: unless-stopped
@@ -68,6 +69,7 @@ services:
     build:
       context: .
       dockerfile: apps/vibeagent/docker/Dockerfile
+      target: service
     image: ndx-business-vibeagent:latest
     container_name: vibeagent
     init: true
@@ -139,6 +141,16 @@ services:
   # that executes untrusted input, and the only worker given the projects root.
   worker-tool:
     <<: *vibe-worker
+    # The one container that runs what a skill ships, and so the only one that
+    # carries a runtime to run it in. The others move events, call a model and
+    # fold a read model; none of them has ever opened a document or started a
+    # browser, and giving them three gigabytes to run JavaScript was paying for
+    # a capability they cannot use.
+    build:
+      context: .
+      dockerfile: apps/vibeagent/docker/Dockerfile
+      target: tool
+    image: ndx-business-vibeagent-tool:latest
     environment:
       AGENT_ROLE: worker
       AGENT_QUEUES: vibe_tool

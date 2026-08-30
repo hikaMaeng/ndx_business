@@ -43,6 +43,22 @@ needing nothing.
 
 **This says what a skill asks for. What the runtime has is below.**
 
+## Which container has it
+
+Only `worker-tool`. It is the one container that runs what a skill ships; the
+web backend and the other three workers move events, call a model and fold a
+read model, and none of them has ever opened a document or started a browser.
+
+| Image | Used by | Carries |
+| --- | --- | --- |
+| `ndx-business-vibeagent` | vibeagent, worker-turn, worker-inference, worker-read-model | node, bash, git |
+| `ndx-business-vibeagent-tool` | worker-tool | everything below |
+
+Both are built from one Dockerfile as two targets, sharing a base layer. The
+heavy stages sit *before* the code layer on purpose: extending a finished
+application image would put them after it, and then a one-line change would
+rebuild a browser.
+
 ## What the runtime provides
 
 The tool container is a Debian image, not Alpine. Alpine is musl, and both the
