@@ -6,5 +6,6 @@ export * from "./models/index.js";
 export * from "./projects/index.js";
 export * from "./testing/index.js";
 export * from "./policy/index.js";
+export * from "./inference/index.js";
 export { requireOrganizationManage, requireOrganizationAdminAll, canListOrganizationAccounts } from "./organizations/authorization/index.js";
 export * from "./skills/index.js";

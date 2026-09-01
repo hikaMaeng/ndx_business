@@ -1,6 +1,6 @@
 import { createWorkerServer, readEnv, runService } from "agent/broker";
 import { createVibeWorker } from "vibeagent_domain/server";
-import { findProject, resolvePolicy } from "admin_domain/server";
+import { findProject, resolveInference, resolvePolicy } from "admin_domain/server";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { GROUPS, REACTOR_QUEUES } from "../reactions/index.js";
@@ -62,6 +62,7 @@ export async function startWorker(): Promise<void> {
       // Both in one moment. A session that took its skills from one merge and
       // its servers from another is a session nobody configured.
       const [entries, mcpEntries] = await Promise.all([ask("skill"), ask("mcp")]);
+      const inference = await resolveInference(database, project?.organizationId ?? null);
 
       // The project's own instructions. Merging an organisation's on top of
       // these is the next thing this wants; today it is the file or nothing.
@@ -77,6 +78,10 @@ export async function startWorker(): Promise<void> {
         // and no way to reach any of them.
         skills: entries.map((entry) => ({ name: entry.name, enabled: entry.enabled, value: entry.value, origin: entry.origin })),
         mcp: mcpEntries.map((entry) => ({ name: entry.name, enabled: entry.enabled, value: entry.value })),
+        // Which model, resolved from the project.s organisation upwards. A
+        // project outside any organisation, or one whose chain configures
+        // nothing, gets the deployment default.
+        ...(inference ? { inference } : {}),
         agents,
       };
     }),

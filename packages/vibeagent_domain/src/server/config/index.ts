@@ -79,6 +79,12 @@ export function readLoopConfig(source: NodeJS.ProcessEnv = process.env): LoopCon
     ...(source.VIBE_INFERENCE_API_KEY ? { apiKey: source.VIBE_INFERENCE_API_KEY } : {}),
     temperature: ratio(source, "VIBE_INFERENCE_TEMPERATURE", 0.15),
     topP: ratio(source, "VIBE_INFERENCE_TOP_P", 0.9),
+    // Left out of the request entirely when unset rather than defaulted here:
+    // these three differ per model family, and a value invented by this file
+    // would be a decision nobody made hiding behind a default.
+    ...(source.VIBE_INFERENCE_TOP_K ? { topK: positive(source, "VIBE_INFERENCE_TOP_K", 20) } : {}),
+    ...(source.VIBE_INFERENCE_MIN_P ? { minP: ratio(source, "VIBE_INFERENCE_MIN_P", 0) } : {}),
+    ...(source.VIBE_INFERENCE_REPEAT_PENALTY ? { repeatPenalty: Number(source.VIBE_INFERENCE_REPEAT_PENALTY) } : {}),
     maxTokens: positive(source, "VIBE_INFERENCE_MAX_TOKENS", 8192),
     requestTimeoutMs: positive(source, "VIBE_INFERENCE_TIMEOUT_MS", 300_000),
     streamFlushMs: positive(source, "VIBE_INFERENCE_STREAM_FLUSH_MS", 120),

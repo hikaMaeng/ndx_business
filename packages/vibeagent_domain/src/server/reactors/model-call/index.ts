@@ -56,7 +56,18 @@ export async function callModel(
     turnKey: scope.turnKey, iterationIndex: scope.iterationIndex,
   });
 
-  const reply = await chat(globals.config, messages, [BASH_TOOL_SCHEMA], signal, (delta) => {
+  /**
+   * The session's model, over the container's.
+   *
+   * The container's configuration is a fallback, not the answer: it is the same
+   * for every session on the machine, and which model an agent runs on is a
+   * decision an organisation makes. Merged rather than replaced so a deployment
+   * that registered a model but no timeout still gets a timeout.
+   */
+  const chosen = await session.store.readInference(session.sessionKey) as Partial<typeof globals.config>;
+  const config = Object.keys(chosen).length ? { ...globals.config, ...chosen } : globals.config;
+
+  const reply = await chat(config, messages, [BASH_TOOL_SCHEMA], signal, (delta) => {
     if (delta.reasoning) {
       emit({
         action: VIBE_ACTIONS.iterationReasoning, seq: session.sequence.next(),
@@ -92,6 +103,32 @@ export async function callModel(
     ...(reply.toolCalls.length ? { toolCalls: reply.toolCalls } : {}),
   }]);
 
+  /**
+   * A reply with nothing in it is not an answer.
+   *
+   * "No tool calls" used to be the whole test, so a model that returned empty
+   * content and asked for nothing ended the turn as though it had finished.
+   * What a person saw was a request, a pause, and then nothing — no result, no
+   * error, no reason. The turn had "succeeded".
+   *
+   * A thinking model makes this reachable in a way the previous one did not: it
+   * spends its budget on reasoning and can emit a couple of newlines as the
+   * visible half. That is a model stopping, not a model answering, and the two
+   * should not look the same from outside.
+   *
+   * Said out loud rather than retried. Retrying is a policy — how many times,
+   * with what nudge, at whose cost — and inventing one here would bury the
+   * behaviour under a workaround before anybody had seen it happen.
+   */
+  const empty = !reply.toolCalls.length && !reply.content.trim();
+  if (empty) {
+    emit({
+      action: VIBE_ACTIONS.iterationMessage, seq: session.sequence.next(),
+      turnKey: scope.turnKey, iterationIndex: scope.iterationIndex,
+      message: "The model ended the turn without a reply and without asking for anything.",
+    });
+  }
+
   emit({
     action: VIBE_ACTIONS.modelReplied, seq: session.sequence.next(),
     // The decisive one. Two of these would run the decision twice and fan out
@@ -99,6 +136,9 @@ export async function callModel(
     key: `model.replied:${scope.turnKey}:${scope.iterationIndex}`,
     turnKey: scope.turnKey, iterationIndex: scope.iterationIndex,
     toolCalls: reply.toolCalls.length, answered: !reply.toolCalls.length,
+    // Recorded separately from `answered` so the fact log can tell a turn that
+    // finished from one that gave up, without changing what the loop does.
+    ...(empty ? { empty: true } : {}),
     audience: "worker",
   });
 

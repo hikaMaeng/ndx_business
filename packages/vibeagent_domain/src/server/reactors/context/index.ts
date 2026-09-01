@@ -36,6 +36,26 @@ export interface SessionPolicy {
   mcp?: readonly { name: string; enabled: boolean; value: Record<string, unknown> }[];
   /** The cascading project instructions, already merged. Empty when there are none. */
   agents?: string;
+  /**
+   * The model this session should run on.
+   *
+   * Absent when a deployment has registered none, in which case the worker's own
+   * configuration stands in. Present, it overrides it — a business decides what
+   * its people's agents run on, and an environment variable on a container is
+   * not where that decision belongs.
+   */
+  inference?: {
+    baseUrl: string;
+    apiKey?: string;
+    model: string;
+    temperature: number;
+    topP: number;
+    topK: number;
+    minP: number;
+    repeatPenalty: number;
+    /** Which organisation supplied it, or null for the deployment default. */
+    organizationId: string | null;
+  };
 }
 
 export interface ReactorGlobals {

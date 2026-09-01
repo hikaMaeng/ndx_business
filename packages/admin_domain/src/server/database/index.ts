@@ -37,6 +37,19 @@ const statements: readonly string[] = [
   "CREATE TABLE IF NOT EXISTS model_endpoints (id text PRIMARY KEY, name text NOT NULL, url text NOT NULL, header_name text NOT NULL DEFAULT '', header_value text NOT NULL DEFAULT '', api_type text NOT NULL CHECK (api_type IN ('openai-chat-completion', 'openai-responses', 'anthropic', 'gemini')), created_at text NOT NULL, updated_at text NOT NULL)",
   "CREATE TABLE IF NOT EXISTS model_definitions (id text PRIMARY KEY, endpoint_id text NOT NULL REFERENCES model_endpoints(id) ON DELETE CASCADE, identifier text NOT NULL, context_size integer NOT NULL DEFAULT 0 CHECK (context_size >= 0), temperature double precision NOT NULL DEFAULT 1, min_p double precision NOT NULL DEFAULT 0 CHECK (min_p >= 0 AND min_p <= 1), top_p double precision NOT NULL DEFAULT 1 CHECK (top_p >= 0 AND top_p <= 1), top_k integer NOT NULL DEFAULT 0 CHECK (top_k >= 0), repeat_penalty double precision NOT NULL DEFAULT 1, reasoning integer NOT NULL DEFAULT 0 CHECK (reasoning IN (0, 1)), supports_text integer NOT NULL DEFAULT 1 CHECK (supports_text IN (0, 1)), supports_image integer NOT NULL DEFAULT 0 CHECK (supports_image IN (0, 1)), supports_sound integer NOT NULL DEFAULT 0 CHECK (supports_sound IN (0, 1)), supports_video integer NOT NULL DEFAULT 0 CHECK (supports_video IN (0, 1)), created_at text NOT NULL, updated_at text NOT NULL, UNIQUE(endpoint_id, identifier))",
   "CREATE INDEX IF NOT EXISTS idx_model_definitions_endpoint ON model_definitions(endpoint_id, identifier)",
+  /**
+   * The one model a deployment falls back to.
+   *
+   * A column with a partial unique index rather than a settings row holding an
+   * id: this way "the default" is a property of a model that exists, and it
+   * cannot outlive the row it names. A settings row pointing at a deleted model
+   * is a deployment that looks configured and cannot open a session.
+   *
+   * The index is what makes "the one" true. Without it, two rows can both claim
+   * it and which one answers becomes a question about row order.
+   */
+  "ALTER TABLE model_definitions ADD COLUMN IF NOT EXISTS is_default integer NOT NULL DEFAULT 0 CHECK (is_default IN (0, 1))",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_model_definitions_default ON model_definitions(is_default) WHERE is_default = 1",
   "CREATE TABLE IF NOT EXISTS organization_inference_services (organization_id text NOT NULL REFERENCES organizations(id) ON DELETE CASCADE, endpoint_id text NOT NULL REFERENCES model_endpoints(id) ON DELETE CASCADE, PRIMARY KEY (organization_id, endpoint_id))",
   "CREATE TABLE IF NOT EXISTS organization_inference_models (organization_id text NOT NULL, endpoint_id text NOT NULL, model_id text NOT NULL REFERENCES model_definitions(id) ON DELETE CASCADE, active integer NOT NULL DEFAULT 1 CHECK (active IN (0, 1)), PRIMARY KEY (organization_id, endpoint_id, model_id), FOREIGN KEY (organization_id, endpoint_id) REFERENCES organization_inference_services(organization_id, endpoint_id) ON DELETE CASCADE)",
   "CREATE INDEX IF NOT EXISTS idx_organization_inference_models_service ON organization_inference_models(organization_id, endpoint_id)",

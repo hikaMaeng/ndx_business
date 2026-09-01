@@ -46,6 +46,17 @@ export interface LlmConfig {
   /** Coding wants near-deterministic output; see docs/constraints.md. */
   temperature: number;
   topP: number;
+  /**
+   * The rest of the sampling window.
+   *
+   * Optional because not every endpoint accepts them, and sending a parameter a
+   * server does not know is a 400 rather than something ignored. Omitted when
+   * unset, so a deployment that says nothing gets the endpoint's own defaults
+   * instead of ours.
+   */
+  topK?: number;
+  minP?: number;
+  repeatPenalty?: number;
   maxTokens: number;
   requestTimeoutMs: number;
   /**
@@ -94,6 +105,9 @@ export async function chat(
       ...(tools.length ? { tools, tool_choice: "auto" } : {}),
       temperature: config.temperature,
       top_p: config.topP,
+      ...(config.topK === undefined ? {} : { top_k: config.topK }),
+      ...(config.minP === undefined ? {} : { min_p: config.minP }),
+      ...(config.repeatPenalty === undefined ? {} : { repetition_penalty: config.repeatPenalty }),
       max_tokens: config.maxTokens,
       stream: true,
     }),

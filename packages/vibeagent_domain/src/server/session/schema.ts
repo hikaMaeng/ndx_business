@@ -114,4 +114,17 @@ export async function ensureSessionSchema(pool: Pool): Promise<void> {
    * The tool side reads it when a skill asks it to. The model never sees it.
    */
   await pool.query("ALTER TABLE vibe_session ADD COLUMN IF NOT EXISTS mcp_servers jsonb NOT NULL DEFAULT '{}'::jsonb");
+  /**
+   * The model this session runs on, and the sampling registered for it.
+   *
+   * Which model is not the signed-in person's choice: it comes from the
+   * project's organisation, or the nearest ancestor of it that has one, or the
+   * deployment default. Stored here because it is decided once, at open — a
+   * session whose model changed halfway would have a transcript half of which
+   * was written by something else.
+   *
+   * Empty means the resolution found nothing and the worker's own configuration
+   * is standing in, which is what a deployment with no models registered gets.
+   */
+  await pool.query("ALTER TABLE vibe_session ADD COLUMN IF NOT EXISTS inference jsonb NOT NULL DEFAULT '{}'::jsonb");
 }

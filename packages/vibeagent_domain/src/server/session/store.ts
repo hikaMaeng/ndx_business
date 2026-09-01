@@ -89,14 +89,27 @@ export class SessionStore {
     // once: a session whose servers were settled at a different moment from its
     // instructions is a session nobody configured.
     mcp: Record<string, unknown> = {},
+    // Written with the prompt and under the same once: the instructions and the
+    // thing that reads them were decided in one moment, and a session that took
+    // them from two is a session nobody configured.
+    inference: Record<string, unknown> = {},
   ): Promise<boolean> {
     const result = await this.pool.query(
       `UPDATE vibe_session SET context_prefix = $2, context_suffix = $3, context_recipe = $4::jsonb,
-                               mcp_servers = $5::jsonb, updated_at = now()
+                               mcp_servers = $5::jsonb, inference = $6::jsonb, updated_at = now()
         WHERE session_key = $1 AND context_prefix = ''`,
-      [sessionKey, prefix, suffix, JSON.stringify(recipe), JSON.stringify(mcp)],
+      [sessionKey, prefix, suffix, JSON.stringify(recipe), JSON.stringify(mcp), JSON.stringify(inference)],
     );
     return (result.rowCount ?? 0) > 0;
+  }
+
+  /** The model this session was opened with. Empty when nothing was resolved. */
+  async readInference(sessionKey: string): Promise<Record<string, unknown>> {
+    const result = await this.pool.query<{ inference: Record<string, unknown> }>(
+      "SELECT inference FROM vibe_session WHERE session_key = $1",
+      [sessionKey],
+    );
+    return result.rows[0]?.inference ?? {};
   }
 
   /**
