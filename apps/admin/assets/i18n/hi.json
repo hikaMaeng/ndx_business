@@ -197,5 +197,15 @@
   "admin.skill.save.button": "फ़ाइल सहेजें",
   "admin.skill.delete.confirm": "इस स्किल की सभी फ़ाइलें हटाएँ? स्किल प्रविष्टि बनी रहेगी।",
   "admin.skill.select.hint": "पढ़ने या संपादित करने के लिए फ़ाइल चुनें।",
-  "admin.skill.requires.label": "आवश्यक"
+  "admin.skill.requires.label": "आवश्यक",
+  "organization.node.model.single.label": "मॉडल",
+  "organization.node.model.single.placeholder": "मूल संगठन से प्राप्त करें",
+  "organization.node.model.single.hint": "प्रति संगठन एक मॉडल। उप-संगठन अपना निर्धारित न करें तो यही उपयोग करते हैं; श्रृंखला में कहीं भी न हो तो डिफ़ॉल्ट मॉडल उपयोग होता है।",
+  "organization.node.model.single.clear.button": "हटाएँ",
+  "organization.node.model.single.inherited.text": "{name} से प्राप्त",
+  "models.model.default.badge": "डिफ़ॉल्ट",
+  "models.model.default.set.button": "डिफ़ॉल्ट बनाएँ",
+  "models.model.default.clear.button": "डिफ़ॉल्ट हटाएँ",
+  "models.model.default.hint": "जब खाता किसी संगठन का नहीं है, या उसकी संगठन-श्रृंखला में कहीं कुछ निर्धारित नहीं है, तब उपयोग होता है। केवल एक मॉडल डिफ़ॉल्ट हो सकता है।",
+  "models.model.default.none.text": "कोई डिफ़ॉल्ट मॉडल नहीं। किसी संगठन से बाहर के खाते सत्र नहीं खोल सकते।"
 }

@@ -97,7 +97,6 @@ export async function openSession(
       mcpProblems: mcp.problems,
     },
     mcpSessionData(mcp),
-    policy.inference ?? {},
   );
 
   const seq = await globals.sessions.allocateSequence(request.sessionKey, 1);

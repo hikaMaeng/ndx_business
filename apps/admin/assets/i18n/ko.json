@@ -197,5 +197,15 @@
   "admin.skill.save.button": "파일 저장",
   "admin.skill.delete.confirm": "이 스킬의 파일을 전부 삭제할까요? 스킬 항목 자체는 남습니다.",
   "admin.skill.select.hint": "파일을 선택하면 읽고 편집할 수 있습니다.",
-  "admin.skill.requires.label": "필요"
+  "admin.skill.requires.label": "필요",
+  "organization.node.model.single.label": "모델",
+  "organization.node.model.single.placeholder": "상위 조직에서 물려받기",
+  "organization.node.model.single.hint": "조직당 모델 하나. 하위 조직은 자기 것을 정하지 않으면 이것을 씁니다. 상위로 올라가며 아무 데도 없으면 기본 모델을 씁니다.",
+  "organization.node.model.single.clear.button": "해제",
+  "organization.node.model.single.inherited.text": "{name}에서 물려받음",
+  "models.model.default.badge": "기본",
+  "models.model.default.set.button": "기본으로 지정",
+  "models.model.default.clear.button": "기본 해제",
+  "models.model.default.hint": "계정이 어느 조직에도 속하지 않거나, 조직 계층을 거슬러 올라가며 아무 데도 설정이 없을 때 쓰입니다. 기본 모델은 하나만 지정할 수 있습니다.",
+  "models.model.default.none.text": "기본 모델이 없습니다. 조직에 속하지 않은 계정은 세션을 열 수 없습니다."
 }

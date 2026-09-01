@@ -1,5 +1,5 @@
 import type {
-  OrganizationInferenceServiceOption,
+  OrganizationInferenceModel,
   OrganizationSnapshot,
 } from "../../../../common/protocol/organization/index.js";
 import type { UserSummary } from "../../../../common/protocol/auth/index.js";
@@ -30,17 +30,44 @@ export function addableAccounts(
     .slice(0, limit);
 }
 
-/** The inference services this node has not attached yet. */
-export function unattachedInferenceServices(
+/** The one model this node chose for itself, if it chose one. */
+export function chosenInferenceModel(
   snapshot: OrganizationSnapshot,
   organizationId: string,
-): OrganizationInferenceServiceOption[] {
-  const attached = new Set(
-    snapshot.inferenceServices
-      .filter((service) => service.organizationId === organizationId)
-      .map((service) => service.endpointId),
-  );
-  return snapshot.inferenceServiceOptions.filter((option) => !attached.has(option.endpointId));
+): OrganizationInferenceModel | undefined {
+  return snapshot.inferenceModels.find((model) => model.organizationId === organizationId);
+}
+
+/**
+ * The model a node that chose nothing will actually run on, and whose it is.
+ *
+ * The server resolves this by walking ancestors nearest-first and stopping at
+ * the first one with a model, so the walk is repeated here in that order — a
+ * screen that showed the root's model where the parent had its own would be
+ * telling somebody the wrong thing about the session they are about to start.
+ *
+ * Undefined means nothing is set anywhere up the chain, which is the deployment
+ * default answering. Naming it is Models' business, not this screen's.
+ *
+ * The seen set guards a parent link that points back into its own chain: the
+ * data should never contain one, and looping forever over a bad row is a worse
+ * way to find that out than rendering nothing.
+ */
+export function inheritedInferenceModel(
+  snapshot: OrganizationSnapshot,
+  organizationId: string,
+): { model: OrganizationInferenceModel; organizationName: string } | undefined {
+  const seen = new Set<string>([organizationId]);
+  let parentId = snapshot.organizations.find((one) => one.id === organizationId)?.parentId ?? null;
+  while (parentId && !seen.has(parentId)) {
+    seen.add(parentId);
+    const ancestor = snapshot.organizations.find((one) => one.id === parentId);
+    if (!ancestor) return undefined;
+    const model = chosenInferenceModel(snapshot, ancestor.id);
+    if (model) return { model, organizationName: ancestor.name };
+    parentId = ancestor.parentId;
+  }
+  return undefined;
 }
 
 /** The scope this account holds here, if any. What a toggle needs to know before it acts. */

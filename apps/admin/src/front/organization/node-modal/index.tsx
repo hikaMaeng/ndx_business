@@ -11,7 +11,8 @@ import {
   type UserSummary,
 } from "admin_domain/common";
 import {
-  OrganizationCommands, addableAccounts, heldResponsibility, membersOf, unattachedInferenceServices,
+  OrganizationCommands, addableAccounts, chosenInferenceModel, heldResponsibility,
+  inheritedInferenceModel, membersOf,
 } from "admin_domain/front";
 import { Button } from "../../components/ui/button";
 import type { Texts } from "../../i18n";
@@ -65,10 +66,10 @@ export function OrganizationNodeModal({
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
   const members = membersOf(snapshot, organization.id);
-  const inferenceServices = snapshot.inferenceServices.filter(
-    (service) => service.organizationId === organization.id,
-  );
-  const availableInferenceServices = unattachedInferenceServices(snapshot, organization.id);
+  const inferenceModel = chosenInferenceModel(snapshot, organization.id);
+  // Only worth working out when this node sets nothing: with its own model
+  // chosen, what an ancestor picked changes nothing about what runs here.
+  const inherited = inferenceModel ? undefined : inheritedInferenceModel(snapshot, organization.id);
   const suggestions = addableAccounts(accounts, members, query);
 
   useEffect(() => {
@@ -125,10 +126,8 @@ export function OrganizationNodeModal({
   const removeMember = (userId: string) => commands.removeMember(organization.id, userId);
   const toggleResponsibility = (userId: string, scope: "node" | "subtree") =>
     commands.setResponsibility(organization.id, userId, scope, heldResponsibility(snapshot, organization.id, userId));
-  const addInferenceService = (endpointId: string) => commands.addInferenceService(organization.id, endpointId);
-  const removeInferenceService = (endpointId: string) => commands.removeInferenceService(organization.id, endpointId);
-  const toggleInferenceModel = (endpointId: string, modelId: string, active: boolean) =>
-    commands.setInferenceModelActive(organization.id, endpointId, modelId, !active);
+  const setInferenceModel = (modelId: string) => commands.setInferenceModel(organization.id, modelId);
+  const clearInferenceModel = () => commands.clearInferenceModel(organization.id);
 
   return (
     <div
@@ -446,111 +445,64 @@ export function OrganizationNodeModal({
             role="tabpanel"
             className="organization-models-panel"
           >
-            <label className="organization-inference-service-select">
-              {text[RSC.ORGANIZATION_NODE_MODEL_SERVICE_LABEL]}
+            <div className="organization-inference-model-select">
+              <label htmlFor="organization-inference-model">
+                {text[RSC.ORGANIZATION_NODE_MODEL_SINGLE_LABEL]}
+              </label>
+              {/*
+                One control, and the empty option is a real choice rather than a
+                prompt to make one: picking it hands the node back to its
+                parent's model, which is the same thing the Clear button does.
+                The value is driven by the snapshot rather than by local state
+                so a rejected write cannot leave the select showing a model the
+                organisation was never given.
+              */}
               <select
-                aria-label={text[RSC.ORGANIZATION_NODE_MODEL_SERVICE_LABEL]}
-                defaultValue=""
+                id="organization-inference-model"
+                data-testid="organization-inference-model-select"
+                value={inferenceModel?.modelId ?? ""}
                 disabled={!permission.canUpdate || busy}
-                onChange={(event) => {
-                  void addInferenceService(event.target.value);
-                  event.currentTarget.value = "";
-                }}
+                onChange={(event) => void setInferenceModel(event.target.value)}
               >
                 <option value="">
-                  {text[RSC.ORGANIZATION_NODE_MODEL_SERVICE_PLACEHOLDER]}
+                  {text[RSC.ORGANIZATION_NODE_MODEL_SINGLE_PLACEHOLDER]}
                 </option>
-                {availableInferenceServices.map((service) => (
-                  <option key={service.endpointId} value={service.endpointId}>
-                    {service.name}
+                {snapshot.inferenceModelOptions.map((option) => (
+                  <option key={option.modelId} value={option.modelId}>
+                    {`${option.endpointName} — ${option.identifier}`}
                   </option>
                 ))}
               </select>
-            </label>
-            {inferenceServices.length ? (
-              <div className="organization-inference-service-list">
-                {inferenceServices.map((service) => (
-                  <article
-                    className="organization-inference-service"
-                    key={service.endpointId}
-                  >
-                    <header>
-                      <h3>{service.name}</h3>
-                      {permission.canUpdate && (
-                        <button
-                          type="button"
-                          className="organization-inference-service-remove"
-                          aria-label={
-                            text[
-                              RSC
-                                .ORGANIZATION_NODE_MODEL_SERVICE_REMOVE_BUTTON
-                            ]
-                          }
-                          onClick={() =>
-                            void removeInferenceService(service.endpointId)
-                          }
-                          disabled={busy}
-                        >
-                          <Trash2 aria-hidden="true" />
-                        </button>
-                      )}
-                    </header>
-                    {service.models.length ? (
-                      <div className="organization-inference-model-list">
-                        {service.models.map((model) => (
-                          <div
-                            className="organization-inference-model"
-                            key={model.modelId}
-                          >
-                            <strong>{model.identifier}</strong>
-                            {permission.canUpdate ? (
-                              <button
-                                type="button"
-                                className="organization-model-toggle"
-                                aria-pressed={model.active}
-                                onClick={() =>
-                                  void toggleInferenceModel(
-                                    service.endpointId,
-                                    model.modelId,
-                                    model.active,
-                                  )
-                                }
-                                disabled={busy}
-                              >
-                                {text[
-                                  model.active
-                                    ? RSC.ORGANIZATION_NODE_MODEL_ACTIVE_BUTTON
-                                    : RSC.ORGANIZATION_NODE_MODEL_INACTIVE_BUTTON
-                                ]}
-                              </button>
-                            ) : (
-                              <span
-                                className="organization-model-toggle"
-                                aria-pressed={model.active}
-                              >
-                                {text[
-                                  model.active
-                                    ? RSC.ORGANIZATION_NODE_MODEL_ACTIVE_BUTTON
-                                    : RSC.ORGANIZATION_NODE_MODEL_INACTIVE_BUTTON
-                                ]}
-                              </span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="organization-model-empty">
-                        {text[RSC.ORGANIZATION_NODE_MODEL_EMPTY_MESSAGE]}
-                      </p>
-                    )}
-                  </article>
-                ))}
-              </div>
-            ) : (
-              <p className="organization-model-empty">
-                {text[RSC.ORGANIZATION_NODE_MODEL_EMPTY_MESSAGE]}
+              {permission.canUpdate && inferenceModel && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  data-testid="organization-inference-model-clear"
+                  onClick={() => void clearInferenceModel()}
+                  disabled={busy}
+                >
+                  {text[RSC.ORGANIZATION_NODE_MODEL_SINGLE_CLEAR_BUTTON]}
+                </Button>
+              )}
+            </div>
+            {!inferenceModel && inherited && (
+              <p
+                className="organization-model-inherited"
+                data-testid="organization-inference-model-inherited"
+              >
+                {text[RSC.ORGANIZATION_NODE_MODEL_SINGLE_INHERITED_TEXT].replace(
+                  "{name}",
+                  inherited.organizationName,
+                )}
+                <strong>{inherited.model.identifier}</strong>
               </p>
             )}
+            <p
+              className="organization-model-hint"
+              data-testid="organization-inference-model-hint"
+            >
+              {text[RSC.ORGANIZATION_NODE_MODEL_SINGLE_HINT]}
+            </p>
           </div>
         )}
       </section>

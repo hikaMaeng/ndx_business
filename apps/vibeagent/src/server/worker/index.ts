@@ -62,7 +62,6 @@ export async function startWorker(): Promise<void> {
       // Both in one moment. A session that took its skills from one merge and
       // its servers from another is a session nobody configured.
       const [entries, mcpEntries] = await Promise.all([ask("skill"), ask("mcp")]);
-      const inference = await resolveInference(database, project?.organizationId ?? null);
 
       // The project's own instructions. Merging an organisation's on top of
       // these is the next thing this wants; today it is the file or nothing.
@@ -78,12 +77,29 @@ export async function startWorker(): Promise<void> {
         // and no way to reach any of them.
         skills: entries.map((entry) => ({ name: entry.name, enabled: entry.enabled, value: entry.value, origin: entry.origin })),
         mcp: mcpEntries.map((entry) => ({ name: entry.name, enabled: entry.enabled, value: entry.value })),
-        // Which model, resolved from the project.s organisation upwards. A
-        // project outside any organisation, or one whose chain configures
-        // nothing, gets the deployment default.
-        ...(inference ? { inference } : {}),
         agents,
       };
+    }, async (workspace) => {
+      /**
+       * Which model, resolved from the project's organisation upwards, once per
+       * call.
+       *
+       * Per call and not per session because nothing about a request names a
+       * model: the request is an event, and which endpoint answers it is a
+       * decision the owning organisation makes and remakes. Reading it here
+       * means a change in Admin reaches the next inference call rather than the
+       * next session, and nobody has to end a conversation to be moved.
+       *
+       * The owner is the first segment of the workspace path, which the open
+       * reactor composed from the account the broker verified — so it is the
+       * signed-in account, not something a client could name. A project with no
+       * record, or one outside every organisation, falls through to the
+       * deployment default rather than failing; a turn should run.
+       */
+      const [ownerId, ...rest] = workspace.split("/");
+      const name = rest.join("/");
+      const project = ownerId && name ? await findProject(database, ownerId, name) : null;
+      return resolveInference(database, project?.organizationId ?? null);
     }),
     queues: watched,
     maxConcurrent: maxConcurrentTurns,

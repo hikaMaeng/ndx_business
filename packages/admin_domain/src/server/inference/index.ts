@@ -101,11 +101,12 @@ export async function defaultInference(database: AdminDatabase): Promise<Resolve
  * model attached. `policyChain` already returns ancestors nearest-first, so the
  * order here is the inheritance order and not a second opinion about it.
  *
- * An organisation with a service attached but every model switched off counts
- * as *not configured*, and the search continues past it. Switching a model off
- * is how somebody says "not this one"; reading it as "nothing above this
- * either" would make one disabled row silently cut a subtree off from its
- * parent's choice.
+ * An organisation whose model is switched off counts as *not configured*, and
+ * the search continues past it. Switching a model off is how somebody says
+ * "not this one"; reading it as "nothing above this either" would make one
+ * disabled row silently cut a subtree off from its parent's choice. Rows left
+ * inactive by the one-model-per-organisation migration land here too, and they
+ * must not stop the walk any more than a hand-disabled one does.
  */
 export async function resolveInference(
   database: AdminDatabase,
@@ -113,13 +114,15 @@ export async function resolveInference(
 ): Promise<ResolvedInference | null> {
   const ask = queries(database);
   for (const id of await policyChain(database, organizationId)) {
+    // No tie-break, because there is no tie to break: a partial unique index on
+    // `organization_inference_models(organization_id) WHERE active = 1` lets an
+    // organisation hold one active model and no more. Ordering by identifier
+    // here used to decide, silently, something the organisation never said.
     const row = await ask.get(`
       ${SELECT}
       JOIN organization_inference_models m
         ON m.endpoint_id = d.endpoint_id AND m.model_id = d.id
        WHERE m.organization_id = ? AND m.active = 1
-       ORDER BY d.identifier
-       LIMIT 1
     `, id) as Row | undefined;
     if (row) return shape(row, id);
   }

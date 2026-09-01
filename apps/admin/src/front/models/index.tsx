@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Boxes, Plus, RefreshCw, Save, X } from "lucide-react";
+import { ArrowLeft, Boxes, Plus, RefreshCw, Save, Star, StarOff, X } from "lucide-react";
 import {
   ensureModelsFeatureModel, ModelsCommands, createEndpointDraft, createModelDefinitionDraft,
   type EndpointDraft, type ModelDefinitionDraft,
@@ -30,6 +30,32 @@ const endpointTypes: Array<[ModelEndpointType, RSC]> = [
 
 function providerLabel(type: ModelEndpointType, text: Record<string, string>): string {
   return text[endpointTypes.find(([value]) => value === type)![1]];
+}
+
+/**
+ * Which model the deployment falls back to, stated on both views.
+ *
+ * The empty case is not "nothing has been configured yet". A deployment with no
+ * default cannot open a session for an account that belongs to no organisation,
+ * so the screen names that consequence rather than leaving a blank where a
+ * model name would be and letting an administrator read it as optional.
+ */
+function DefaultModelSummary({ model, text }: { model: ModelDefinition | null; text: Record<string, string> }) {
+  return (
+    <div className="models-default-summary" data-testid="models-default-summary">
+      {model ? (
+        <p className="models-default-current" data-testid="models-default-current">
+          <span className="models-default-badge">{text[RSC.MODELS_MODEL_DEFAULT_BADGE]}</span>
+          <strong>{model.identifier}</strong>
+        </p>
+      ) : (
+        <p role="status" className="models-default-none" data-testid="models-default-none">
+          {text[RSC.MODELS_MODEL_DEFAULT_NONE_TEXT]}
+        </p>
+      )}
+      <p className="models-default-hint">{text[RSC.MODELS_MODEL_DEFAULT_HINT]}</p>
+    </div>
+  );
 }
 
 function EndpointForm({
@@ -287,6 +313,10 @@ export function ModelsScreen({ token, request }: { token: string; request: Model
       endpointRefreshed: words.current[RSC.MODELS_ENDPOINT_REFRESH_STATUS],
       definitionCreated: words.current[RSC.MODELS_MODEL_CREATED_STATUS],
       definitionUpdated: words.current[RSC.MODELS_MODEL_UPDATED_STATUS],
+      // Moving the default is an update to a model, and the bundles have no
+      // sentence of its own for it; the badge that appears next to the model
+      // says which one it landed on.
+      defaultChanged: words.current[RSC.MODELS_MODEL_UPDATED_STATUS],
     })),
     [model, request, token],
   );
@@ -306,7 +336,12 @@ export function ModelsScreen({ token, request }: { token: string; request: Model
   };
   const saveEndpoint = commands.saveEndpoint.bind(commands);
   const refreshEndpoint = commands.refreshEndpoint.bind(commands);
+  const setDefault = commands.setDefault.bind(commands);
 
+  // Searched across the whole catalog rather than the selected endpoint's
+  // models, because the default belongs to the deployment: the model holding it
+  // may sit under an endpoint the administrator is not currently looking at.
+  const defaultModel = catalog.models.find((item) => item.isDefault) ?? null;
   const selectedEndpoint = catalog.endpoints.find((endpoint) => endpoint.id === selectedEndpointId) ?? null;
   const selectedModels = selectedEndpoint
     ? catalog.models.filter((item) => item.endpointId === selectedEndpoint.id)
@@ -351,21 +386,52 @@ export function ModelsScreen({ token, request }: { token: string; request: Model
               </Button>
             </div>
           </div>
+          <DefaultModelSummary model={defaultModel} text={text} />
           {selectedModels.length === 0 ? (
             <p className="models-empty">{text[RSC.MODELS_ENDPOINT_MODELS_EMPTY_MESSAGE]}</p>
           ) : (
-            <div className="models-definitions" aria-label={text[RSC.MODELS_ENDPOINT_MODELS_LABEL]}>
+            <div className="models-definitions" role="list" aria-label={text[RSC.MODELS_ENDPOINT_MODELS_LABEL]}>
               {selectedModels.map((item) => (
-                <button
-                  className="models-definition"
+                // The row is a container, not a control: the default action is a
+                // button of its own and cannot be nested inside the button that
+                // opens the model for editing.
+                <div
+                  className="models-definition-row"
                   key={item.id}
-                  type="button"
-                  onClick={() => setModelDialog(item)}
-                  aria-label={item.identifier}
+                  role="listitem"
+                  data-testid="models-definition-row"
+                  data-model-identifier={item.identifier}
+                  data-model-default={item.isDefault ? "true" : "false"}
                 >
-                  <strong>{item.identifier}</strong>
-                  <span>{item.contextSize.toLocaleString()}</span>
-                </button>
+                  <button
+                    className="models-definition"
+                    type="button"
+                    onClick={() => setModelDialog(item)}
+                    aria-label={item.identifier}
+                  >
+                    <strong>{item.identifier}</strong>
+                    <span className="models-definition-meta">
+                      {item.isDefault && (
+                        <span className="models-default-badge" data-testid="models-default-badge">
+                          {text[RSC.MODELS_MODEL_DEFAULT_BADGE]}
+                        </span>
+                      )}
+                      <span>{item.contextSize.toLocaleString()}</span>
+                    </span>
+                  </button>
+                  {/* One control that reads as what pressing it will do, so the
+                      accessible name states the outcome instead of the state. */}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={busy}
+                    data-testid={item.isDefault ? "models-default-clear" : "models-default-set"}
+                    onClick={() => void setDefault(selectedEndpoint.id, item.id, !item.isDefault)}
+                  >
+                    {item.isDefault ? <StarOff aria-hidden="true" /> : <Star aria-hidden="true" />}
+                    {text[item.isDefault ? RSC.MODELS_MODEL_DEFAULT_CLEAR_BUTTON : RSC.MODELS_MODEL_DEFAULT_SET_BUTTON]}
+                  </Button>
+                </div>
               ))}
             </div>
           )}
@@ -426,6 +492,10 @@ export function ModelsScreen({ token, request }: { token: string; request: Model
           )}
           {error && !creating && <p role="alert" className="error-text">{error}</p>}
           {status && <p role="status" className="models-status">{status}</p>}
+          {/* Held back until the first load has finished: announcing that the
+              deployment has no default before the catalog has arrived would be
+              a false alarm about sessions that can in fact be opened. */}
+          {loaded && <DefaultModelSummary model={defaultModel} text={text} />}
           {!loaded ? (
             <p role="status" className="models-empty">{text[RSC.MODELS_LOADING_STATUS]}</p>
           ) : catalog.endpoints.length === 0 ? (

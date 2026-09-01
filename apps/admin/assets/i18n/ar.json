@@ -197,5 +197,15 @@
   "admin.skill.save.button": "حفظ الملف",
   "admin.skill.delete.confirm": "حذف جميع ملفات هذه المهارة؟ يبقى إدخال المهارة نفسه.",
   "admin.skill.select.hint": "اختر ملفًا لقراءته أو تحريره.",
-  "admin.skill.requires.label": "يحتاج"
+  "admin.skill.requires.label": "يحتاج",
+  "organization.node.model.single.label": "النموذج",
+  "organization.node.model.single.placeholder": "الوراثة من المؤسسة الأم",
+  "organization.node.model.single.hint": "نموذج واحد لكل مؤسسة. تستخدم المؤسسات الفرعية هذا ما لم تحدد نموذجها؛ وإن لم يوجد أي نموذج في السلسلة يُستخدم النموذج الافتراضي.",
+  "organization.node.model.single.clear.button": "مسح",
+  "organization.node.model.single.inherited.text": "موروث من {name}",
+  "models.model.default.badge": "افتراضي",
+  "models.model.default.set.button": "اجعله افتراضيًا",
+  "models.model.default.clear.button": "إلغاء الافتراضي",
+  "models.model.default.hint": "يُستخدم عندما لا ينتمي الحساب إلى أي مؤسسة، أو عند عدم وجود إعداد في سلسلة مؤسساته. يمكن أن يكون نموذج واحد فقط افتراضيًا.",
+  "models.model.default.none.text": "لا يوجد نموذج افتراضي. لا يمكن للحسابات خارج المؤسسات بدء جلسة."
 }

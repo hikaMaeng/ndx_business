@@ -21,10 +21,10 @@ test("organization snapshot parser validates appearance tokens", () => {
     ],
     members: [],
     responsibilities: [],
-    // Required since organization inference services landed; the parser rejects
-    // a snapshot without them.
-    inferenceServiceOptions: [],
-    inferenceServices: [],
+    // Required since the organisation's model landed; the parser rejects a
+    // snapshot without them.
+    inferenceModelOptions: [],
+    inferenceModels: [],
     access: {
       isMasterAdmin: true,
       canCreateRoot: true,
@@ -48,6 +48,30 @@ test("organization snapshot parser validates appearance tokens", () => {
       ...valid,
       organizations: [{ ...valid.organizations[0], color: "javascript" }],
     }),
+    null,
+  );
+});
+
+test("one organisation cannot arrive with two models", () => {
+  const model = (organizationId: string, identifier: string) =>
+    ({ organizationId, modelId: identifier, endpointId: "e1", endpointName: "one", identifier });
+  const base = {
+    organizations: [],
+    members: [],
+    responsibilities: [],
+    inferenceModelOptions: [],
+    access: { isMasterAdmin: true, canCreateRoot: true, nodes: [] },
+  };
+  assert.ok(parseOrganizationSnapshot({
+    ...base,
+    inferenceModels: [model("a", "one"), model("b", "two")],
+  }), "different organisations each choosing is the normal case");
+
+  // A server that lost the constraint would have the screen render a `<select>`
+  // silently showing one of the two. A load failure says so; a quiet pick does
+  // not.
+  assert.equal(
+    parseOrganizationSnapshot({ ...base, inferenceModels: [model("a", "one"), model("a", "two")] }),
     null,
   );
 });

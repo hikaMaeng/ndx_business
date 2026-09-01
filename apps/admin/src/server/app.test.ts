@@ -311,15 +311,16 @@ test("model endpoints refresh provider models, filter embeddings, and persist mo
       (item: { name: string }) => item.name === "Model-enabled node",
     ).id as string;
     const assigned = await request(app)
-      .post(`/api/organizations/${organizationId}/inference-services`)
+      .put(`/api/organizations/${organizationId}/inference-model`)
       .set("Authorization", `Bearer ${token}`)
-      .send({ endpointId: endpoint.id })
+      .send({ modelId: item.id })
       .expect(200);
-    assert.deepEqual(assigned.body.inferenceServices, [{
+    assert.deepEqual(assigned.body.inferenceModels, [{
       organizationId,
+      modelId: item.id,
       endpointId: endpoint.id,
-      name: "Primary provider",
-      models: [{ modelId: item.id, identifier: "chat-primary", active: true }],
+      endpointName: "Primary provider",
+      identifier: "chat-primary",
     }]);
     const child = await request(app)
       .post("/api/organizations")
@@ -329,9 +330,11 @@ test("model endpoints refresh provider models, filter embeddings, and persist mo
     const childId = child.body.organizations.find(
       (organization: { name: string }) => organization.name === "Model child node",
     ).id as string;
+    // A child sets nothing of its own; what it runs on is the parent's, and the
+    // snapshot says that by carrying no row for it rather than by copying one.
     assert.equal(
-      child.body.inferenceServices.some(
-        (service: { organizationId: string }) => service.organizationId === childId,
+      child.body.inferenceModels.some(
+        (model: { organizationId: string }) => model.organizationId === childId,
       ),
       false,
     );
@@ -360,34 +363,41 @@ test("model endpoints refresh provider models, filter embeddings, and persist mo
       .get("/api/organizations")
       .set("Authorization", `Bearer ${token}`)
       .expect(200);
+    // Every registered model is offered, not only the ones under whichever
+    // endpoint somebody attached first. Registering one is what puts it here.
     assert.deepEqual(
-      allModels.body.inferenceServices[0].models.map(
-        (model: { identifier: string; active: boolean }) => [model.identifier, model.active],
+      allModels.body.inferenceModelOptions.map(
+        (option: { identifier: string; endpointName: string }) => [option.endpointName, option.identifier],
       ),
-      [["chat-later", true], ["chat-primary", true]],
+      [["Primary provider", "chat-later"], ["Primary provider", "chat-primary"]],
     );
-    const disabled = await request(app)
-      .put(`/api/organizations/${organizationId}/inference-services/${endpoint.id}/models/${item.id}`)
+    const replaced = await request(app)
+      .put(`/api/organizations/${organizationId}/inference-model`)
       .set("Authorization", `Bearer ${token}`)
-      .send({ active: false })
+      .send({ modelId: laterModel.id })
       .expect(200);
-    assert.equal(
-      disabled.body.inferenceServices[0].models.find(
-        (model: { modelId: string }) => model.modelId === item.id,
-      ).active,
-      false,
+    // Replaced, not added beside: one organisation holds one model, so the
+    // resolver never has two rows to break a tie between.
+    assert.deepEqual(
+      replaced.body.inferenceModels.map((model: { modelId: string }) => model.modelId),
+      [laterModel.id],
     );
-    assert.equal(
-      disabled.body.inferenceServices[0].models.find(
-        (model: { modelId: string }) => model.modelId === laterModel.id,
-      ).active,
-      true,
-    );
-    const removed = await request(app)
-      .delete(`/api/organizations/${organizationId}/inference-services/${endpoint.id}`)
+    const cleared = await request(app)
+      .delete(`/api/organizations/${organizationId}/inference-model`)
       .set("Authorization", `Bearer ${token}`)
       .expect(200);
-    assert.deepEqual(removed.body.inferenceServices, []);
+    assert.deepEqual(cleared.body.inferenceModels, []);
+    // Clearing what is already clear is the state being asked for, and a second
+    // press of the button must not be an error.
+    await request(app)
+      .delete(`/api/organizations/${organizationId}/inference-model`)
+      .set("Authorization", `Bearer ${token}`)
+      .expect(200);
+    await request(app)
+      .put(`/api/organizations/${organizationId}/inference-model`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ modelId: "no-such-model" })
+      .expect(403);
 
   } finally {
     globalThis.fetch = previousFetch;

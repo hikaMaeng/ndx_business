@@ -4,7 +4,31 @@ import { VIBE_ACTIONS, parseIterationScope } from "../../../common/index.js";
 import { chat } from "../../llm/index.js";
 import type { ChatMessage } from "../../llm/index.js";
 import { BASH_TOOL_SCHEMA } from "../../tools/bash/index.js";
-import type { ReactorGlobals, SessionContext } from "../context/index.js";
+import type { LoopConfig } from "../../config/index.js";
+import type { ReactorGlobals, SessionContext, SessionInference } from "../context/index.js";
+
+/**
+ * The resolved model over the container's, without the container's credential
+ * following it to somebody else's host.
+ *
+ * Merged rather than substituted because a resolution answers which model and
+ * how to sample it and nothing else: the timeouts, the token budget and the
+ * flush interval are still the deployment's, and replacing the whole object
+ * would leave a session with none of them.
+ *
+ * The key is the exception. An endpoint that registered no header wants no
+ * authorization, and spreading a resolution without one over a configuration
+ * that has one would send the deployment's bearer token to whatever host an
+ * organisation nominated. Kept only when the endpoint has not moved.
+ *
+ * Exported for its own test. The call around it cannot be tested — `chat` talks
+ * to a real endpoint — and this is the part of it that can be got wrong quietly.
+ */
+export function withInference(config: LoopConfig, chosen: SessionInference): LoopConfig {
+  const merged = { ...config, ...chosen };
+  if (!chosen.apiKey && chosen.baseUrl !== config.baseUrl) delete merged.apiKey;
+  return merged;
+}
 
 /**
  * One inference call. That is the whole job.
@@ -50,22 +74,43 @@ export async function callModel(
     ...(context.suffix ? [{ role: "system" as const, content: context.suffix }] : []),
   ];
 
+  /**
+   * Which model, asked now rather than remembered.
+   *
+   * The container's configuration is a fallback, not the answer: it is the same
+   * for every session on the machine, and which model an agent runs on is a
+   * decision an organisation makes. Asked immediately before the call so the
+   * decision that applies is the one in force at the call — a request carries
+   * no model, and the session does not hold one either.
+   *
+   * No resolver, or nothing resolved, means the deployment registered no models
+   * and the container's own endpoint is all there is. That is a fresh install,
+   * not a failure, and it should still be able to answer.
+   */
+  const chosen = await globals.inference?.(session.workspace) ?? null;
+  const config = chosen ? withInference(globals.config, chosen) : globals.config;
+
+  /**
+   * The fact says which model, and who chose it.
+   *
+   * Per iteration rather than per session, because the resolution is per call
+   * now: an organisation that changes its model mid-session changes it for the
+   * next iteration, and a transcript claiming one model for a whole turn would
+   * describe something that did not happen.
+   *
+   * "Which model wrote this" is the question that follows every surprise, and
+   * with the resolution stored nowhere there is nothing else left to ask.
+   * `modelOrganizationId` comes along because a model name does not say which
+   * level of an org chart supplied it, and that is the half nobody can work out
+   * for themselves.
+   */
   emit({
     action: VIBE_ACTIONS.iterationStarted, seq: session.sequence.next(),
     key: `iteration.started:${scope.turnKey}:${scope.iterationIndex}`,
     turnKey: scope.turnKey, iterationIndex: scope.iterationIndex,
+    model: config.model,
+    ...(chosen ? { modelOrganizationId: chosen.organizationId } : {}),
   });
-
-  /**
-   * The session's model, over the container's.
-   *
-   * The container's configuration is a fallback, not the answer: it is the same
-   * for every session on the machine, and which model an agent runs on is a
-   * decision an organisation makes. Merged rather than replaced so a deployment
-   * that registered a model but no timeout still gets a timeout.
-   */
-  const chosen = await session.store.readInference(session.sessionKey) as Partial<typeof globals.config>;
-  const config = Object.keys(chosen).length ? { ...globals.config, ...chosen } : globals.config;
 
   const reply = await chat(config, messages, [BASH_TOOL_SCHEMA], signal, (delta) => {
     if (delta.reasoning) {

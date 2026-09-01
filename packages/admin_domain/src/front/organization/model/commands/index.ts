@@ -1,7 +1,5 @@
 import {
   organizationInferenceModelPath,
-  organizationInferenceServicePath,
-  organizationInferenceServicesPath,
   parseOrganizationSnapshot,
   type OrganizationColor,
   type OrganizationIcon,
@@ -102,21 +100,21 @@ export class OrganizationCommands {
       : this.run(`/api/organizations/${organizationId}/responsibilities`, { method: "POST", body: JSON.stringify({ userId, scope }) });
   }
 
-  addInferenceService(organizationId: string, endpointId: string): Promise<CommandResult> {
-    if (!endpointId) return Promise.resolve(false);
-    return this.run(organizationInferenceServicesPath(organizationId), { method: "POST", body: JSON.stringify({ endpointId }) });
+  /**
+   * Chooses the organisation's one model, or clears it when nothing is named.
+   *
+   * A `<select>` whose placeholder means "inherit from the parent" reports that
+   * choice as the empty value, and the empty value is a real answer rather than
+   * a caller who forgot an argument — so it clears rather than doing nothing.
+   */
+  setInferenceModel(organizationId: string, modelId: string): Promise<CommandResult> {
+    return this.run(organizationInferenceModelPath(organizationId), modelId
+      ? { method: "PUT", body: JSON.stringify({ modelId }) }
+      : { method: "DELETE" });
   }
 
-  removeInferenceService(organizationId: string, endpointId: string): Promise<CommandResult> {
-    return this.run(organizationInferenceServicePath(organizationId, endpointId), { method: "DELETE" });
-  }
-
-  setInferenceModelActive(
-    organizationId: string, endpointId: string, modelId: string, active: boolean,
-  ): Promise<CommandResult> {
-    return this.run(organizationInferenceModelPath(organizationId, endpointId, modelId), {
-      method: "PUT", body: JSON.stringify({ active }),
-    });
+  clearInferenceModel(organizationId: string): Promise<CommandResult> {
+    return this.run(organizationInferenceModelPath(organizationId), { method: "DELETE" });
   }
 }
 

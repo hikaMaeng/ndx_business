@@ -197,5 +197,15 @@
   "admin.skill.save.button": "Guardar archivo",
   "admin.skill.delete.confirm": "¿Eliminar todos los archivos de esta habilidad? La entrada de la habilidad permanece.",
   "admin.skill.select.hint": "Selecciona un archivo para leerlo o editarlo.",
-  "admin.skill.requires.label": "Necesita"
+  "admin.skill.requires.label": "Necesita",
+  "organization.node.model.single.label": "Modelo",
+  "organization.node.model.single.placeholder": "Heredar de la organización superior",
+  "organization.node.model.single.hint": "Un modelo por organización. Las suborganizaciones usan este salvo que definan el suyo; si no hay ninguno en toda la cadena, se usa el modelo predeterminado.",
+  "organization.node.model.single.clear.button": "Quitar",
+  "organization.node.model.single.inherited.text": "Heredado de {name}",
+  "models.model.default.badge": "Predeterminado",
+  "models.model.default.set.button": "Hacer predeterminado",
+  "models.model.default.clear.button": "Quitar predeterminado",
+  "models.model.default.hint": "Se usa cuando una cuenta no pertenece a ninguna organización, o cuando no hay nada definido en su cadena. Solo un modelo puede ser el predeterminado.",
+  "models.model.default.none.text": "Sin modelo predeterminado. Las cuentas fuera de una organización no pueden abrir una sesión."
 }

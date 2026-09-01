@@ -4,8 +4,8 @@ Source is partitioned by runtime:
 
 | Path         | Contract                                                                    | Drill-down                                                       |
 | ------------ | --------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `src/common` | Runtime-neutral domain code shared by server and front.                     | `src/common/protocol/organization/index.ts#OrganizationInferenceService` |
-| `src/server` | Server-only domain rules and persistence. Must not import from `src/front`. | `src/server/organizations/index.ts#assignOrganizationInferenceService` |
+| `src/common` | Runtime-neutral domain code shared by server and front.                     | `src/common/protocol/organization/index.ts#OrganizationInferenceModel` |
+| `src/server` | Server-only domain rules and persistence. Must not import from `src/front`. | `src/server/organizations/index.ts#setOrganizationInferenceModel` |
 | `src/front`  | Front-only pure model state. Must not own app UI composition.               | `src/front/models/model/store.ts#ensureModelsFeatureModel` |
 | `src/front/theme` | The design scale both apps read: surfaces, type family, type steps. Tokens only — no element rules, no layout. | `src/front/theme/theme.css` |
 

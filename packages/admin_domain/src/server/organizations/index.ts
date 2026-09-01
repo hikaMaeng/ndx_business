@@ -3,16 +3,14 @@ import {
   ORGANIZATION_COLORS,
   ORGANIZATION_ICONS,
   type AssignMemberRequest,
-  type AssignOrganizationInferenceServiceRequest,
   type AssignResponsibleRequest,
   type CreateOrganizationRequest,
   type OrganizationColor,
   type OrganizationIcon,
-  type OrganizationInferenceService,
-  type OrganizationInferenceServiceOption,
   type OrganizationInferenceModel,
+  type OrganizationInferenceModelOption,
   type OrganizationSnapshot,
-  type UpdateOrganizationInferenceModelRequest,
+  type SetOrganizationInferenceModelRequest,
   type UpdateOrganizationRequest,
 } from "../../common/protocol/organization/index.js";
 import type { UsersResponse } from "../../common/protocol/auth/index.js";
@@ -57,40 +55,29 @@ export async function listOrganizations(
     scope: "node" | "subtree";
     email: string;
   }>;
-  // `lower()` for a case-insensitive sort.
-  const inferenceServiceOptions = await ask.all(
-    "SELECT id, name FROM model_endpoints ORDER BY lower(name)",
-  ) as Array<{ id: string; name: string }>;
-  const inferenceServiceRows = await ask.all(
-    "SELECT service.organization_id, service.endpoint_id, endpoint.name FROM organization_inference_services service JOIN model_endpoints endpoint ON endpoint.id = service.endpoint_id ORDER BY lower(endpoint.name)",
-  ) as Array<{ organization_id: string; endpoint_id: string; name: string }>;
+  /*
+   * Every registered model, not the ones some endpoint was attached to first.
+   *
+   * Attaching a service used to be a step of its own, and choosing a model
+   * meant remembering which endpoint it lived under. There is one choice to
+   * make now, so the list is every model the deployment knows about, sorted by
+   * endpoint then identifier — `lower()` because a case-sensitive sort files
+   * `Zeta` before `alpha` and reads as a bug in the picker.
+   */
+  const inferenceModelOptionRows = await ask.all(
+    "SELECT definition.id AS model_id, definition.identifier, endpoint.id AS endpoint_id, endpoint.name AS endpoint_name FROM model_definitions definition JOIN model_endpoints endpoint ON endpoint.id = definition.endpoint_id ORDER BY lower(endpoint.name), lower(definition.identifier)",
+  ) as Array<{ model_id: string; identifier: string; endpoint_id: string; endpoint_name: string }>;
+  // At most one row per organisation, which the partial unique index on
+  // `active = 1` is what actually guarantees.
   const inferenceModelRows = await ask.all(
-    "SELECT service.organization_id, service.endpoint_id, definition.id AS model_id, definition.identifier, COALESCE(item.active, 1) AS active FROM organization_inference_services service JOIN model_definitions definition ON definition.endpoint_id = service.endpoint_id LEFT JOIN organization_inference_models item ON item.organization_id = service.organization_id AND item.endpoint_id = service.endpoint_id AND item.model_id = definition.id ORDER BY lower(definition.identifier)",
+    "SELECT item.organization_id, definition.id AS model_id, definition.identifier, endpoint.id AS endpoint_id, endpoint.name AS endpoint_name FROM organization_inference_models item JOIN model_definitions definition ON definition.id = item.model_id JOIN model_endpoints endpoint ON endpoint.id = definition.endpoint_id WHERE item.active = 1",
   ) as Array<{
     organization_id: string;
-    endpoint_id: string;
     model_id: string;
     identifier: string;
-    active: number;
+    endpoint_id: string;
+    endpoint_name: string;
   }>;
-  const servicesByOrganization = new Map<string, Map<string, OrganizationInferenceService>>();
-  for (const row of inferenceServiceRows) {
-    const services = servicesByOrganization.get(row.organization_id) ?? new Map();
-    services.set(row.endpoint_id, {
-      organizationId: row.organization_id,
-      endpointId: row.endpoint_id,
-      name: row.name,
-      models: [],
-    });
-    servicesByOrganization.set(row.organization_id, services);
-  }
-  for (const row of inferenceModelRows) {
-    servicesByOrganization.get(row.organization_id)?.get(row.endpoint_id)?.models.push({
-      modelId: row.model_id,
-      identifier: row.identifier,
-      active: Boolean(row.active),
-    } satisfies OrganizationInferenceModel);
-  }
   return {
     organizations: organizationRows.map((row) => ({
       id: row.id,
@@ -111,13 +98,19 @@ export async function listOrganizations(
       scope: row.scope,
       email: row.email,
     })),
-    inferenceServiceOptions: inferenceServiceOptions.map((row) => ({
-      endpointId: row.id,
-      name: row.name,
-    } satisfies OrganizationInferenceServiceOption)),
-    inferenceServices: [...servicesByOrganization.values()].flatMap((services) =>
-      [...services.values()],
-    ),
+    inferenceModelOptions: inferenceModelOptionRows.map((row) => ({
+      modelId: row.model_id,
+      endpointId: row.endpoint_id,
+      endpointName: row.endpoint_name,
+      identifier: row.identifier,
+    } satisfies OrganizationInferenceModelOption)),
+    inferenceModels: inferenceModelRows.map((row) => ({
+      organizationId: row.organization_id,
+      modelId: row.model_id,
+      endpointId: row.endpoint_id,
+      endpointName: row.endpoint_name,
+      identifier: row.identifier,
+    } satisfies OrganizationInferenceModel)),
     access: await buildOrganizationAccess(
       database,
       actorId,
@@ -127,65 +120,81 @@ export async function listOrganizations(
   } satisfies OrganizationSnapshot;
 }
 
-export async function assignOrganizationInferenceService(
+/**
+ * Points an organisation at its one model, replacing whatever it had.
+ *
+ * Replacing rather than adding is the whole point: the resolver takes the
+ * first organisation up the chain with a model, so a second one attached here
+ * would be a preference nobody could express and the database would have to
+ * break the tie. Clearing first also lets somebody move an organisation from
+ * one endpoint's model to another's without the partial unique index refusing
+ * the insert half-way through.
+ *
+ * The endpoint is read from the model rather than asked for. A model belongs
+ * to exactly one endpoint, so accepting both would let a caller name a pairing
+ * that does not exist.
+ */
+export async function setOrganizationInferenceModel(
   database: AdminDatabase,
   actorId: string,
   master: boolean,
   organizationId: string,
-  input: AssignOrganizationInferenceServiceRequest,
+  input: SetOrganizationInferenceModelRequest,
 ): Promise<OrganizationSnapshot> {
   await requireOrganizationManage(database, actorId, organizationId, master);
-  if (!input || typeof input.endpointId !== "string" || !input.endpointId)
-    throw new Error("Unknown inference service");
-  const endpoint = await queries(database).get("SELECT id FROM model_endpoints WHERE id = ?", input.endpointId) as { id: string } | undefined;
-  if (!endpoint) throw new Error("Unknown inference service");
-  // Already a member is not an error; it is the state being asked for.
+  if (!input || typeof input.modelId !== "string" || !input.modelId)
+    throw new Error("Unknown inference model");
+  const definition = await queries(database).get(
+    "SELECT id, endpoint_id FROM model_definitions WHERE id = ?",
+    input.modelId,
+  ) as { id: string; endpoint_id: string } | undefined;
+  if (!definition) throw new Error("Unknown inference model");
+
+  // All three statements or none, and all three on one connection — a pool does
+  // not promise the next statement lands where `BEGIN` did. A delete that
+  // committed without its insert would read as an organisation that quietly
+  // dropped back to inheriting.
+  const client = await database.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(positional(
+      "DELETE FROM organization_inference_models WHERE organization_id = ?",
+    ), [organizationId]);
+    // The service row exists only to satisfy the model row's composite foreign
+    // key; nobody manages it directly any more.
+    await client.query(positional(
+      "INSERT INTO organization_inference_services (organization_id, endpoint_id) VALUES (?, ?) ON CONFLICT DO NOTHING",
+    ), [organizationId, definition.endpoint_id]);
+    await client.query(positional(
+      "INSERT INTO organization_inference_models (organization_id, endpoint_id, model_id, active) VALUES (?, ?, ?, 1)",
+    ), [organizationId, definition.endpoint_id, definition.id]);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+  return listOrganizations(database, actorId, master);
+}
+
+/**
+ * Takes the organisation's model away, so it inherits again.
+ *
+ * Clearing what is already clear is not an error; it is the state being asked
+ * for, and a double-click on the button should not raise one.
+ */
+export async function clearOrganizationInferenceModel(
+  database: AdminDatabase,
+  actorId: string,
+  master: boolean,
+  organizationId: string,
+): Promise<OrganizationSnapshot> {
+  await requireOrganizationManage(database, actorId, organizationId, master);
   await queries(database).run(
-    "INSERT INTO organization_inference_services (organization_id, endpoint_id) VALUES (?, ?) ON CONFLICT DO NOTHING",
-    organizationId, endpoint.id,
-  );
-  return listOrganizations(database, actorId, master);
-}
-
-export async function removeOrganizationInferenceService(
-  database: AdminDatabase,
-  actorId: string,
-  master: boolean,
-  organizationId: string,
-  endpointId: string,
-): Promise<OrganizationSnapshot> {
-  await requireOrganizationManage(database, actorId, organizationId, master);
-  const removed = await queries(database).run(
-    "DELETE FROM organization_inference_services WHERE organization_id = ? AND endpoint_id = ?",
-    organizationId, endpointId,
-  );
-  if (!removed.changes) throw new Error("Unknown organization inference service");
-  return listOrganizations(database, actorId, master);
-}
-
-export async function updateOrganizationInferenceModel(
-  database: AdminDatabase,
-  actorId: string,
-  master: boolean,
-  organizationId: string,
-  endpointId: string,
-  modelId: string,
-  input: UpdateOrganizationInferenceModelRequest,
-): Promise<OrganizationSnapshot> {
-  await requireOrganizationManage(database, actorId, organizationId, master);
-  if (!input || typeof input.active !== "boolean")
-    throw new Error("Inference model active state is required");
-  const changed = await queries(database).run(
-    "INSERT INTO organization_inference_models (organization_id, endpoint_id, model_id, active) SELECT ?, ?, definition.id, ? FROM model_definitions definition JOIN organization_inference_services service ON service.organization_id = ? AND service.endpoint_id = ? WHERE definition.id = ? AND definition.endpoint_id = ? ON CONFLICT (organization_id, endpoint_id, model_id) DO UPDATE SET active = excluded.active",
+    "DELETE FROM organization_inference_models WHERE organization_id = ?",
     organizationId,
-    endpointId,
-    Number(input.active),
-    organizationId,
-    endpointId,
-    modelId,
-    endpointId,
   );
-  if (!changed.changes) throw new Error("Unknown organization inference model");
   return listOrganizations(database, actorId, master);
 }
 

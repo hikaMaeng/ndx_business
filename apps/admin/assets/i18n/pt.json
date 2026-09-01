@@ -197,5 +197,15 @@
   "admin.skill.save.button": "Salvar arquivo",
   "admin.skill.delete.confirm": "Excluir todos os arquivos desta habilidade? A entrada da habilidade permanece.",
   "admin.skill.select.hint": "Selecione um arquivo para ler ou editar.",
-  "admin.skill.requires.label": "Requer"
+  "admin.skill.requires.label": "Requer",
+  "organization.node.model.single.label": "Modelo",
+  "organization.node.model.single.placeholder": "Herdar da organização superior",
+  "organization.node.model.single.hint": "Um modelo por organização. As suborganizações usam este, a menos que definam o seu; sem nenhum em toda a cadeia, usa-se o modelo padrão.",
+  "organization.node.model.single.clear.button": "Limpar",
+  "organization.node.model.single.inherited.text": "Herdado de {name}",
+  "models.model.default.badge": "Padrão",
+  "models.model.default.set.button": "Tornar padrão",
+  "models.model.default.clear.button": "Remover padrão",
+  "models.model.default.hint": "Usado quando uma conta não pertence a nenhuma organização, ou quando nada está definido em sua cadeia. Apenas um modelo pode ser o padrão.",
+  "models.model.default.none.text": "Sem modelo padrão. Contas fora de uma organização não conseguem abrir uma sessão."
 }

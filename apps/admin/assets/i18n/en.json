@@ -197,5 +197,15 @@
   "admin.skill.save.button": "Save file",
   "admin.skill.delete.confirm": "Delete every file in this skill? The skill entry itself stays.",
   "admin.skill.select.hint": "Select a file to read or edit it.",
-  "admin.skill.requires.label": "Needs"
+  "admin.skill.requires.label": "Needs",
+  "organization.node.model.single.label": "Model",
+  "organization.node.model.single.placeholder": "Inherit from the parent organisation",
+  "organization.node.model.single.hint": "One model per organisation. Sub-organisations use this unless they set their own; with none set anywhere up the chain, the default model is used.",
+  "organization.node.model.single.clear.button": "Clear",
+  "organization.node.model.single.inherited.text": "Inherited from {name}",
+  "models.model.default.badge": "Default",
+  "models.model.default.set.button": "Make default",
+  "models.model.default.clear.button": "Clear default",
+  "models.model.default.hint": "Used when an account belongs to no organisation, or when nothing is set anywhere up its organisation chain. Only one model can be the default.",
+  "models.model.default.none.text": "No default model. Accounts outside an organisation cannot open a session."
 }

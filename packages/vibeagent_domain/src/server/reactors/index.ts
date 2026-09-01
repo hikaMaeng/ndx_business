@@ -131,10 +131,19 @@ export function createVibeWorker(
    * the built-in prompt and no skills.
    */
   policy?: ReactorGlobals["policy"],
+  /**
+   * Which model a call should run on, asked once per call.
+   *
+   * Separate from `policy` because it is asked at a different moment and for a
+   * different reason: policy settles what a session is, once, and this answers
+   * what to dial right now. Left out, every call uses the container's endpoint.
+   */
+  inference?: ReactorGlobals["inference"],
 ): WorkerExecute {
   const globals: ReactorGlobals = {
     pool, config: readLoopConfig(), sessions: new SessionStore(pool), view: new ViewStore(pool),
     ...(policy ? { policy } : {}),
+    ...(inference ? { inference } : {}),
   };
   const schema = Promise.all([ensureSessionSchema(pool), ensureViewSchema(pool)]);
 

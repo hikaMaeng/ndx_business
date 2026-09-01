@@ -10,7 +10,7 @@
 | organization capability projection | organization tree and node modal | Buttons and editable controls render only from server-projected capabilities; the server independently rechecks every mutation. |
 | `/api/admin/*` | master admin shell | Every route requires `isMasterAdmin`; hiding Account/System navigation is not an authorization boundary. |
 | `/api/models*` | model endpoint React feature | Every route requires `isMasterAdmin`; a configured header is sent only to the selected provider during its explicit refresh. |
-| `/api/organizations/:id/inference-services*` | organization node model tab | The selected node's manager may attach or remove a service and change only its local model active flags; provider credentials never enter this surface. |
+| `/api/organizations/:id/inference-model` | organization node model tab | The selected node's manager may set or clear that node's one model; provider credentials never enter this surface. |
 | `apiPermissionMiddleware` (`src/server/permission/index.ts`) | every API handler | `GET /api/health`, signup, and login are the only public API routes. Every other `/api` route authenticates once before its handler; `/api/admin/*` and `/api/models*` additionally require `isMasterAdmin`. |
 
 ## Runtime
@@ -44,7 +44,7 @@ Approved locators, which tests may rely on:
 | `role=link` name `Health`                                             | health endpoint link                                                       |
 | `data-testid="organization-node-modal"`, `role=dialog`                | Existing-node information and membership editor.                           |
 | `role=tab` names from `organization.node.*.tab.button`                | Information and member modal surfaces; member tab includes its live count. |
-| `role=tab` name from `organization.node.models.tab.button`             | Attached inference service selector and per-model active toggles. |
+| `role=tab` name from `organization.node.models.tab.button`             | The node's one model. `data-testid="organization-inference-model-select"` is the picker, `organization-inference-model-clear` the clear action, and `organization-inference-model-inherited` the ancestor named when the node sets nothing. |
 | `role=listbox` name from `organization.node.member.suggestions.label` | Account autocomplete shown while typing.                                   |
 | `role=dialog` name from `models.add.endpoint.button` | New endpoint form surface. |
 | `role=dialog` name from `models.model.add.text` or `models.model.edit.text` | Manual model creation and list-item editing form surfaces. |

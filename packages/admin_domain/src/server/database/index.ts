@@ -50,9 +50,45 @@ const statements: readonly string[] = [
    */
   "ALTER TABLE model_definitions ADD COLUMN IF NOT EXISTS is_default integer NOT NULL DEFAULT 0 CHECK (is_default IN (0, 1))",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_model_definitions_default ON model_definitions(is_default) WHERE is_default = 1",
+  // Which endpoints an organisation's model may come from. Nobody picks these
+  // any more — a row appears as a side effect of choosing a model, because the
+  // model row's composite foreign key needs one to point at. Kept rather than
+  // dropped so the deployments that already have rows here keep their models.
   "CREATE TABLE IF NOT EXISTS organization_inference_services (organization_id text NOT NULL REFERENCES organizations(id) ON DELETE CASCADE, endpoint_id text NOT NULL REFERENCES model_endpoints(id) ON DELETE CASCADE, PRIMARY KEY (organization_id, endpoint_id))",
   "CREATE TABLE IF NOT EXISTS organization_inference_models (organization_id text NOT NULL, endpoint_id text NOT NULL, model_id text NOT NULL REFERENCES model_definitions(id) ON DELETE CASCADE, active integer NOT NULL DEFAULT 1 CHECK (active IN (0, 1)), PRIMARY KEY (organization_id, endpoint_id, model_id), FOREIGN KEY (organization_id, endpoint_id) REFERENCES organization_inference_services(organization_id, endpoint_id) ON DELETE CASCADE)",
   "CREATE INDEX IF NOT EXISTS idx_organization_inference_models_service ON organization_inference_models(organization_id, endpoint_id)",
+  /*
+   * One organisation, one model.
+   *
+   * The resolver walks up the organisation chain and takes the first node with
+   * a model. When a node had several it broke the tie on `identifier` — an
+   * order nobody chose and nothing recorded. An organisation that attached two
+   * had a preference the schema could not hold, so the answer is to make two
+   * impossible rather than to invent a rule for picking between them.
+   *
+   * The surplus has to go before the index can exist: a deployment that is
+   * already running has organisations with several active rows, and
+   * `CREATE UNIQUE INDEX` on that table fails outright, which would leave
+   * startup unable to finish its migrations. The row kept is the one the old
+   * `ORDER BY d.identifier` would have picked, so every running deployment
+   * stays on the model it was already resolving to; `model_id` breaks the
+   * remaining tie because two endpoints may register the same identifier and
+   * an arbitrary keep is exactly what this migration is here to end. The
+   * others are deactivated rather than deleted so a surprised administrator
+   * can still see what the organisation used to have attached.
+   */
+  `UPDATE organization_inference_models m
+      SET active = 0
+    WHERE m.active = 1
+      AND m.model_id <> (
+        SELECT keep.model_id
+          FROM organization_inference_models keep
+          JOIN model_definitions definition ON definition.id = keep.model_id
+         WHERE keep.organization_id = m.organization_id AND keep.active = 1
+         ORDER BY definition.identifier, keep.model_id
+         LIMIT 1
+      )`,
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_organization_inference_models_single ON organization_inference_models(organization_id) WHERE active = 1",
 
   // A project is a folder, and a record. The folder is where the work happens;
   // the record says who it belongs to and under whose policy it runs, which a

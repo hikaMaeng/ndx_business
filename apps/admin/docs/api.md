@@ -13,8 +13,7 @@
 | `PUT /api/organizations/:id`                                   | Updates a node name, color, and icon.                 | `src/server/app.ts#createApp` |
 | `POST/DELETE /api/organizations/:id/members[/userId]`          | Adds or removes one node member.                      | `src/server/app.ts#createApp` |
 | `POST/DELETE /api/organizations/:id/responsibilities[/userId]` | Sets or clears the member's node/subtree admin scope. | `src/server/app.ts#createApp` |
-| `POST/DELETE /api/organizations/:id/inference-services[/endpointId]` | Attaches an endpoint to a node or removes that node's service relation; all of its current models project as active unless locally overridden. | `src/server/app.ts#createApp` |
-| `PUT /api/organizations/:id/inference-services/:endpointId/models/:modelId` | Enables or disables one model only for that node. | `src/server/app.ts#createApp` |
+| `PUT/DELETE /api/organizations/:id/inference-model` | Sets the node's one model, replacing whatever it had, or clears it so the node inherits again. Clearing an already-clear node succeeds. | `src/server/app.ts#createApp` |
 | `GET/POST /api/models` | Lists persisted provider endpoints or creates one. | `src/server/app.ts#createApp` |
 | `PUT /api/models/:endpointId` | Updates an endpoint's name, URL, optional header, and provider type. | `src/server/app.ts#createApp` |
 | `POST /api/models/:endpointId/refresh` | Retrieves provider models and excludes identifiers containing `embedding`. | `src/server/app.ts#createApp` |

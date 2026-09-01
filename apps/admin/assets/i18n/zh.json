@@ -197,5 +197,15 @@
   "admin.skill.save.button": "保存文件",
   "admin.skill.delete.confirm": "删除该技能的所有文件？技能条目本身会保留。",
   "admin.skill.select.hint": "选择一个文件以查看或编辑。",
-  "admin.skill.requires.label": "需要"
+  "admin.skill.requires.label": "需要",
+  "organization.node.model.single.label": "模型",
+  "organization.node.model.single.placeholder": "继承上级组织",
+  "organization.node.model.single.hint": "每个组织一个模型。下级组织未自行设置时沿用此模型；整条链上都没有设置时使用默认模型。",
+  "organization.node.model.single.clear.button": "清除",
+  "organization.node.model.single.inherited.text": "继承自 {name}",
+  "models.model.default.badge": "默认",
+  "models.model.default.set.button": "设为默认",
+  "models.model.default.clear.button": "取消默认",
+  "models.model.default.hint": "当账户不属于任何组织，或其组织链上均未设置时使用。只能有一个默认模型。",
+  "models.model.default.none.text": "没有默认模型。不属于任何组织的账户无法开启会话。"
 }

@@ -197,5 +197,15 @@
   "admin.skill.save.button": "Enregistrer le fichier",
   "admin.skill.delete.confirm": "Supprimer tous les fichiers de cette compétence ? L'entrée elle-même est conservée.",
   "admin.skill.select.hint": "Sélectionnez un fichier pour le lire ou le modifier.",
-  "admin.skill.requires.label": "Nécessite"
+  "admin.skill.requires.label": "Nécessite",
+  "organization.node.model.single.label": "Modèle",
+  "organization.node.model.single.placeholder": "Hériter de l'organisation parente",
+  "organization.node.model.single.hint": "Un modèle par organisation. Les sous-organisations utilisent celui-ci sauf si elles définissent le leur ; si rien n'est défini dans la chaîne, le modèle par défaut est utilisé.",
+  "organization.node.model.single.clear.button": "Effacer",
+  "organization.node.model.single.inherited.text": "Hérité de {name}",
+  "models.model.default.badge": "Par défaut",
+  "models.model.default.set.button": "Définir par défaut",
+  "models.model.default.clear.button": "Retirer par défaut",
+  "models.model.default.hint": "Utilisé lorsqu'un compte n'appartient à aucune organisation, ou que rien n'est défini dans sa chaîne. Un seul modèle peut être celui par défaut.",
+  "models.model.default.none.text": "Aucun modèle par défaut. Les comptes hors organisation ne peuvent pas ouvrir de session."
 }

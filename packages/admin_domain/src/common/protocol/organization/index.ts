@@ -48,22 +48,30 @@ export type OrganizationNodePermission = {
   canAssignAdminAll: boolean;
 };
 
-export type OrganizationInferenceServiceOption = {
-  endpointId: string;
-  name: string;
-};
-
-export type OrganizationInferenceModel = {
+/**
+ * One model an organisation could be pointed at, from any registered endpoint.
+ *
+ * The endpoint's name travels with it because two providers may register the
+ * same identifier. A picker offering `gpt-4o` twice asks somebody to choose
+ * between two entries it refuses to tell apart.
+ */
+export type OrganizationInferenceModelOption = {
   modelId: string;
+  endpointId: string;
+  endpointName: string;
   identifier: string;
-  active: boolean;
 };
 
-export type OrganizationInferenceService = {
+/**
+ * The one model an organisation has chosen, or no row at all.
+ *
+ * Singular, because an organisation that attached two expressed a preference
+ * nothing recorded and left the resolver picking between them by identifier
+ * order. A snapshot that can still carry a list is a snapshot that invites the
+ * screen to re-create the ambiguity the schema now forbids.
+ */
+export type OrganizationInferenceModel = OrganizationInferenceModelOption & {
   organizationId: string;
-  endpointId: string;
-  name: string;
-  models: OrganizationInferenceModel[];
 };
 
 export type OrganizationAccess = {
@@ -76,8 +84,14 @@ export type OrganizationSnapshot = {
   organizations: Organization[];
   members: OrganizationMember[];
   responsibilities: OrganizationResponsibility[];
-  inferenceServiceOptions: OrganizationInferenceServiceOption[];
-  inferenceServices: OrganizationInferenceService[];
+  inferenceModelOptions: OrganizationInferenceModelOption[];
+  /**
+   * Every organisation's choice, and never more than one entry per
+   * organisation. Carried for the whole tree rather than for the open node so
+   * a node that chose nothing can name the ancestor it inherits from without a
+   * second request.
+   */
+  inferenceModels: OrganizationInferenceModel[];
   access: OrganizationAccess;
 };
 
@@ -98,8 +112,7 @@ export type AssignResponsibleRequest = {
   userId: string;
   scope: "node" | "subtree";
 };
-export type AssignOrganizationInferenceServiceRequest = { endpointId: string };
-export type UpdateOrganizationInferenceModelRequest = { active: boolean };
+export type SetOrganizationInferenceModelRequest = { modelId: string };
 
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === "object"; }
 
@@ -113,39 +126,26 @@ export function parseUpdateOrganizationRequest(value: unknown): UpdateOrganizati
 }
 export function parseAssignMemberRequest(value: unknown): AssignMemberRequest | null { return isRecord(value) && typeof value.userId === "string" ? { userId: value.userId } : null; }
 export function parseAssignResponsibleRequest(value: unknown): AssignResponsibleRequest | null { return isRecord(value) && typeof value.userId === "string" && (value.scope === "node" || value.scope === "subtree") ? { userId: value.userId, scope: value.scope } : null; }
-export function parseAssignOrganizationInferenceServiceRequest(value: unknown): AssignOrganizationInferenceServiceRequest | null { return isRecord(value) && typeof value.endpointId === "string" ? { endpointId: value.endpointId } : null; }
-export function parseUpdateOrganizationInferenceModelRequest(value: unknown): UpdateOrganizationInferenceModelRequest | null { return isRecord(value) && typeof value.active === "boolean" ? { active: value.active } : null; }
+export function parseSetOrganizationInferenceModelRequest(value: unknown): SetOrganizationInferenceModelRequest | null { return isRecord(value) && typeof value.modelId === "string" && value.modelId ? { modelId: value.modelId } : null; }
 
-export const addOrganizationInferenceServiceRoute = {
-  path: "/api/organizations/:id/inference-services",
-  method: "POST",
-} as const;
-export const removeOrganizationInferenceServiceRoute = {
-  path: "/api/organizations/:id/inference-services/:endpointId",
-  method: "DELETE",
-} as const;
-export const updateOrganizationInferenceModelRoute = {
-  path: "/api/organizations/:id/inference-services/:endpointId/models/:modelId",
+/**
+ * One path, singular, for the one model.
+ *
+ * PUT replaces and DELETE clears, so neither verb can express "one more
+ * alongside the others" — the URL says what the schema enforces rather than
+ * leaving the constraint to be discovered from a failing insert.
+ */
+export const setOrganizationInferenceModelRoute = {
+  path: "/api/organizations/:id/inference-model",
   method: "PUT",
 } as const;
+export const clearOrganizationInferenceModelRoute = {
+  path: "/api/organizations/:id/inference-model",
+  method: "DELETE",
+} as const;
 
-export function organizationInferenceServicesPath(organizationId: string): string {
-  return `/api/organizations/${organizationId}/inference-services`;
-}
-
-export function organizationInferenceServicePath(
-  organizationId: string,
-  endpointId: string,
-): string {
-  return `${organizationInferenceServicesPath(organizationId)}/${endpointId}`;
-}
-
-export function organizationInferenceModelPath(
-  organizationId: string,
-  endpointId: string,
-  modelId: string,
-): string {
-  return `${organizationInferenceServicePath(organizationId, endpointId)}/models/${modelId}`;
+export function organizationInferenceModelPath(organizationId: string): string {
+  return `/api/organizations/${organizationId}/inference-model`;
 }
 
 export function parseOrganizationSnapshot(
@@ -157,8 +157,8 @@ export function parseOrganizationSnapshot(
     !Array.isArray(record.organizations) ||
     !Array.isArray(record.members) ||
     !Array.isArray(record.responsibilities) ||
-    !Array.isArray(record.inferenceServiceOptions) ||
-    !Array.isArray(record.inferenceServices) ||
+    !Array.isArray(record.inferenceModelOptions) ||
+    !Array.isArray(record.inferenceModels) ||
     !record.access ||
     typeof record.access !== "object"
   )
@@ -194,29 +194,30 @@ export function parseOrganizationSnapshot(
       typeof row.email === "string"
     );
   });
-  const inferenceServiceOptions = record.inferenceServiceOptions.every((item) => {
-    if (!item || typeof item !== "object") return false;
-    const row = item as Record<string, unknown>;
-    return typeof row.endpointId === "string" && typeof row.name === "string";
-  });
-  const inferenceServices = record.inferenceServices.every((item) => {
+  const isModelOption = (item: unknown): boolean => {
     if (!item || typeof item !== "object") return false;
     const row = item as Record<string, unknown>;
     return (
+      typeof row.modelId === "string" &&
       typeof row.endpointId === "string" &&
-      typeof row.organizationId === "string" &&
-      typeof row.name === "string" &&
-      Array.isArray(row.models) &&
-      row.models.every((model) => {
-        if (!model || typeof model !== "object") return false;
-        const modelRow = model as Record<string, unknown>;
-        return (
-          typeof modelRow.modelId === "string" &&
-          typeof modelRow.identifier === "string" &&
-          typeof modelRow.active === "boolean"
-        );
-      })
+      typeof row.endpointName === "string" &&
+      typeof row.identifier === "string"
     );
+  };
+  const inferenceModelOptions = record.inferenceModelOptions.every(isModelOption);
+  /**
+   * A second entry for one organisation is a snapshot from a server that lost
+   * the constraint, and the screen would render it as a `<select>` silently
+   * showing one of the two. Rejecting the whole snapshot surfaces that as a
+   * load failure instead of as a value nobody chose.
+   */
+  const chosenBy = new Set<string>();
+  const inferenceModels = record.inferenceModels.every((item) => {
+    if (!isModelOption(item)) return false;
+    const row = item as Record<string, unknown>;
+    if (typeof row.organizationId !== "string" || chosenBy.has(row.organizationId)) return false;
+    chosenBy.add(row.organizationId);
+    return true;
   });
   const access = record.access as Record<string, unknown>;
   const accessNodes = Array.isArray(access.nodes)
@@ -237,8 +238,8 @@ export function parseOrganizationSnapshot(
   return organizations &&
     members &&
     responsibilities &&
-    inferenceServiceOptions &&
-    inferenceServices &&
+    inferenceModelOptions &&
+    inferenceModels &&
     typeof access.isMasterAdmin === "boolean" &&
     typeof access.canCreateRoot === "boolean" &&
     accessNodes

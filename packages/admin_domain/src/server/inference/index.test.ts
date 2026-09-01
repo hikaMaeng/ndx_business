@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { openAdminDatabase, ensureAdminSchema, queries, type AdminDatabase } from "../database/index.js";
+import {
+  clearOrganizationInferenceModel,
+  setOrganizationInferenceModel,
+} from "../organizations/index.js";
 import { defaultInference, resolveInference } from "./index.js";
 
 /**
@@ -12,7 +16,7 @@ import { defaultInference, resolveInference } from "./index.js";
 const url = process.env.ADMIN_TEST_DATABASE_URL ?? process.env.ADMIN_DATABASE_URL ?? "";
 const describe = url ? test : test.skip;
 
-async function fixture(t: { after: (fn: () => Promise<void> | void) => void }): Promise<{ database: AdminDatabase; endpoint: string }> {
+async function fixture(t: { after: (fn: () => Promise<void> | void) => void }): Promise<{ database: AdminDatabase; endpoint: string; schema: string }> {
   const schema = `inference_test_${randomUUID().replace(/-/g, "")}`;
   const database = openAdminDatabase(url, 4, schema);
   // Registered before anything that can throw. A fixture that fails halfway
@@ -29,7 +33,7 @@ async function fixture(t: { after: (fn: () => Promise<void> | void) => void }): 
     "INSERT INTO model_endpoints (id, name, url, header_name, header_value, api_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     endpoint, "test", "http://127.0.0.1:1/v1", "", "", "openai-chat-completion", "now", "now",
   );
-  return { database, endpoint };
+  return { database, endpoint, schema };
 }
 
 const addModel = async (database: AdminDatabase, endpoint: string, identifier: string, isDefault = false) => {
@@ -51,6 +55,11 @@ const addOrg = async (database: AdminDatabase, name: string, parent: string | nu
   return id;
 };
 
+/**
+ * Writes the row by hand rather than through `setOrganizationInferenceModel`,
+ * so what the index refuses is tested and not what the domain function chooses
+ * to delete first.
+ */
 const attach = async (database: AdminDatabase, organization: string, endpoint: string, model: string, active = true) => {
   const ask = queries(database);
   await ask.run("INSERT INTO organization_inference_services (organization_id, endpoint_id) VALUES (?, ?) ON CONFLICT DO NOTHING", organization, endpoint);
@@ -133,6 +142,73 @@ describe("a model switched off is not a model, and does not stop the search", as
   const resolved = await resolveInference(database, c);
   assert.equal(resolved?.model, "model-of-a");
   assert.equal(resolved?.organizationId, a);
+});
+
+describe("an organisation cannot hold a second active model", async (t) => {
+  const { database, endpoint } = await fixture(t);
+
+  const first = await addModel(database, endpoint, "first");
+  const second = await addModel(database, endpoint, "second");
+  const a = await addOrg(database, "a", null);
+  await attach(database, a, endpoint, first);
+
+  // Refused by the index, not by whoever writes next. Two active rows are an
+  // organisation with a preference nothing recorded, and the resolver would go
+  // back to breaking the tie on identifier order — a choice nobody made.
+  await assert.rejects(() => attach(database, a, endpoint, second));
+  // Inactive is not a claim on the one slot, so the record of what an
+  // organisation used to have attached survives the constraint.
+  await attach(database, a, endpoint, second, false);
+  assert.equal((await resolveInference(database, a))?.model, "first");
+});
+
+describe("a deployment that already had two keeps the one it was running", async (t) => {
+  const { database, endpoint, schema } = await fixture(t);
+  const ask = queries(database);
+
+  // Where a running deployment stood before this shipped: no index, so two
+  // active rows were possible. Dropping it reproduces that database rather than
+  // keeping a second copy of the old DDL around to drift from the real one.
+  await ask.run("DROP INDEX idx_organization_inference_models_single");
+  const alpha = await addModel(database, endpoint, "alpha");
+  const zeta = await addModel(database, endpoint, "zeta");
+  const a = await addOrg(database, "a", null);
+  await attach(database, a, endpoint, zeta);
+  await attach(database, a, endpoint, alpha);
+
+  // Startup migrates. Creating the index over two active rows fails outright,
+  // so the surplus has to be deactivated first or a live deployment never
+  // finishes starting.
+  await ensureAdminSchema(database, schema);
+
+  // `alpha` is what the old `ORDER BY d.identifier` would have resolved to, so
+  // nothing changes model underneath a session that was already running.
+  assert.equal((await resolveInference(database, a))?.model, "alpha");
+  // Deactivated rather than deleted, so somebody can still see what the
+  // organisation used to have attached.
+  assert.equal(
+    (await ask.get("SELECT active FROM organization_inference_models WHERE organization_id = ? AND model_id = ?", a, zeta))?.active,
+    0,
+  );
+});
+
+describe("setting a model replaces the one before it", async (t) => {
+  const { database, endpoint } = await fixture(t);
+
+  const first = await addModel(database, endpoint, "first");
+  const second = await addModel(database, endpoint, "second");
+  const a = await addOrg(database, "a", null);
+  await setOrganizationInferenceModel(database, "actor", true, a, { modelId: first });
+  await setOrganizationInferenceModel(database, "actor", true, a, { modelId: second });
+
+  // Beside rather than instead would trip the index on the second write, so
+  // this also proves the replacement is what makes the screen usable at all.
+  assert.equal((await resolveInference(database, a))?.model, "second");
+
+  await clearOrganizationInferenceModel(database, "actor", true, a);
+  assert.equal(await resolveInference(database, a), null, "cleared means inheriting again");
+  // Clearing what is already clear is the state being asked for, not an error.
+  await clearOrganizationInferenceModel(database, "actor", true, a);
 });
 
 describe("only one model can be the default", async (t) => {

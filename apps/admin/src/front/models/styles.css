@@ -196,6 +196,68 @@
   gap: 8px;
 }
 
+.models-definition-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.models-definition-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.models-default-badge {
+  flex: none;
+  padding: 2px 8px;
+  color: var(--primary);
+  border: 1px solid var(--primary);
+  border-radius: 999px;
+  background: var(--input-bg);
+  font-size: var(--text-2xs);
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.models-default-summary {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-bg);
+}
+
+.models-default-current {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.models-default-current strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.models-default-none {
+  margin: 0;
+  color: var(--text-description);
+}
+
+.models-default-hint {
+  margin: 0;
+  color: var(--text-description);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+}
+
 .models-definition {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -237,7 +299,10 @@
   white-space: nowrap;
 }
 
-.models-definition span {
+/* Direct child only. The row's meta span passes these down by inheritance, and
+   inheritance is what the default badge's own colour and size can override —
+   a descendant selector here would outrank the badge and grey it out. */
+.models-definition > span {
   color: var(--text-description);
   font-size: var(--text-sm);
 }
@@ -311,5 +376,9 @@
   .models-list-heading,
   .models-detail-heading {
     align-items: flex-start;
+  }
+
+  .models-definition-row {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

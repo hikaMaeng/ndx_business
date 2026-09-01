@@ -9,7 +9,19 @@
     "test": {
       "dependsOn": ["^build", "build"],
       "inputs": ["$TURBO_DEFAULT$", "src/**", "package.json", "tsconfig.json"],
-      "outputs": []
+      "outputs": [],
+      // Some tests need a real PostgreSQL: a recursive walk up a table and a
+      // partial unique index cannot be stubbed without writing a second
+      // implementation of the thing under test.
+      //
+      // Turbo hides the environment from a task unless the task names it, so
+      // without this line those tests saw no URL, skipped themselves, and
+      // reported success. Fifteen tests that never run are fifteen tests that
+      // do not exist, and the suite was green the whole time they were absent.
+      //
+      // `passThroughEnv` rather than `env`, because the value does not change
+      // what the code produces and so must not change the cache key.
+      "passThroughEnv": ["ADMIN_TEST_DATABASE_URL", "ADMIN_DATABASE_URL", "HEADLESS_BROWSER_PLAYWRIGHT_ROOT"]
     },
     "lint": {
       "dependsOn": ["^build"],

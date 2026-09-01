@@ -19,9 +19,10 @@ Public exports:
 | `listOrganizationAccounts`                           | Lists account candidates only for actors with organization authority.  | `src/server/organizations/index.ts#listOrganizationAccounts`     |
 | `buildOrganizationAccess`                            | Projects the server policy into per-node UI capabilities.               | `src/server/organizations/authorization/index.ts#buildOrganizationAccess` |
 | `ensureOrganizationModel`                            | Token-keyed live front model registry.                                  | `src/front/organization/model/store.ts#ensureOrganizationModel`  |
-| `OrganizationInferenceService` and route bindings     | Carries safe service options plus the node-specific active model state. | `src/common/protocol/organization/index.ts#OrganizationInferenceService` |
-| `assignOrganizationInferenceService`                  | Connects one persisted inference service; its current models project as active unless locally overridden. | `src/server/organizations/index.ts#assignOrganizationInferenceService` |
-| `updateOrganizationInferenceModel`                    | Switches an attached model without changing global provider model configuration. | `src/server/organizations/index.ts#updateOrganizationInferenceModel` |
+| `OrganizationInferenceModel` and route bindings       | Every registered model as a choice, plus the one model each node picked. Never provider URLs or headers. | `src/common/protocol/organization/index.ts#OrganizationInferenceModel` |
+| `setOrganizationInferenceModel`                       | Points one organization at one model, replacing whatever it had.        | `src/server/organizations/index.ts#setOrganizationInferenceModel` |
+| `clearOrganizationInferenceModel`                     | Removes it, so the node inherits from its nearest configured ancestor again. | `src/server/organizations/index.ts#clearOrganizationInferenceModel` |
+| `chosenInferenceModel`, `inheritedInferenceModel`     | What this node chose, and which ancestor answers when it chose nothing. | `src/front/organization/model/membership/index.ts#inheritedInferenceModel` |
 
 ## Model endpoint surface
 

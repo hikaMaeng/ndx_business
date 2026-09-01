@@ -48,4 +48,9 @@ export enum RSC {
   MODELS_MODEL_SAVE_BUTTON = "models.model.save.button",
   MODELS_MODEL_CREATED_STATUS = "models.model.created.status",
   MODELS_MODEL_UPDATED_STATUS = "models.model.updated.status",
+  MODELS_MODEL_DEFAULT_BADGE = "models.model.default.badge",
+  MODELS_MODEL_DEFAULT_SET_BUTTON = "models.model.default.set.button",
+  MODELS_MODEL_DEFAULT_CLEAR_BUTTON = "models.model.default.clear.button",
+  MODELS_MODEL_DEFAULT_HINT = "models.model.default.hint",
+  MODELS_MODEL_DEFAULT_NONE_TEXT = "models.model.default.none.text",
 }

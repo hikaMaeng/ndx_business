@@ -36,26 +36,27 @@ export interface SessionPolicy {
   mcp?: readonly { name: string; enabled: boolean; value: Record<string, unknown> }[];
   /** The cascading project instructions, already merged. Empty when there are none. */
   agents?: string;
-  /**
-   * The model this session should run on.
-   *
-   * Absent when a deployment has registered none, in which case the worker's own
-   * configuration stands in. Present, it overrides it — a business decides what
-   * its people's agents run on, and an environment variable on a container is
-   * not where that decision belongs.
-   */
-  inference?: {
-    baseUrl: string;
-    apiKey?: string;
-    model: string;
-    temperature: number;
-    topP: number;
-    topK: number;
-    minP: number;
-    repeatPenalty: number;
-    /** Which organisation supplied it, or null for the deployment default. */
-    organizationId: string | null;
-  };
+}
+
+/**
+ * A model, its endpoint, and the sampling registered for it.
+ *
+ * Spelled out here rather than imported from the service that resolves it. The
+ * shape is small and the dependency would not be: this package would have to
+ * know that organisations exist and how to reach the account service, which is
+ * exactly what handing it an answer avoids.
+ */
+export interface SessionInference {
+  baseUrl: string;
+  apiKey?: string;
+  model: string;
+  temperature: number;
+  topP: number;
+  topK: number;
+  minP: number;
+  repeatPenalty: number;
+  /** Which organisation supplied it, or null for the deployment default. */
+  organizationId: string | null;
 }
 
 export interface ReactorGlobals {
@@ -73,6 +74,18 @@ export interface ReactorGlobals {
    * with no policy configured should get rather than a failure.
    */
   policy?(userId: string, workspace: string): Promise<SessionPolicy>;
+  /**
+   * Which model this call should use, asked at the moment of asking.
+   *
+   * Injected and optional for the same reason as `policy`: the answer comes
+   * from an org chart this package knows nothing about. Asked per call rather
+   * than settled when the session opened, because the decision belongs to
+   * whoever owns the project and they can change it — a session that recorded a
+   * model at open would keep spending on one its organisation had already
+   * replaced, for as long as somebody kept the conversation going. Absent, or
+   * answering null, the worker's own configuration stands.
+   */
+  inference?(workspace: string): Promise<SessionInference | null>;
 }
 
 /** How many positions a reactor reserves before it starts emitting. */

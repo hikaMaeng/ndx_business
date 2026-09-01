@@ -1,4 +1,4 @@
-import { parseModelCatalogSnapshot } from "../../../../common/protocol/models/index.js";
+import { parseModelCatalogSnapshot, type SetModelDefaultRequest } from "../../../../common/protocol/models/index.js";
 import type { EndpointDraft, ModelDefinitionDraft } from "../drafts/index.js";
 import type { ModelsFeatureModel } from "../types.js";
 
@@ -20,6 +20,7 @@ export interface CommandText {
   endpointRefreshed: string;
   definitionCreated: string;
   definitionUpdated: string;
+  defaultChanged: string;
 }
 
 /**
@@ -98,5 +99,14 @@ export class ModelsCommands {
 
   saveDefinition(endpointId: string, modelId: string, draft: ModelDefinitionDraft): Promise<boolean> {
     return this.run(`/api/models/${endpointId}/models/${modelId}`, { method: "PUT", body: JSON.stringify(draft) }, this.words().definitionUpdated);
+  }
+
+  /**
+   * Separate from `saveDefinition` for the same reason the request is separate
+   * from the update: a save of a model's sampling must not be able to carry an
+   * opinion about the deployment default with it.
+   */
+  setDefault(endpointId: string, modelId: string, isDefault: boolean): Promise<boolean> {
+    return this.run(`/api/models/${endpointId}/models/${modelId}/default`, { method: "PUT", body: JSON.stringify({ isDefault } satisfies SetModelDefaultRequest) }, this.words().defaultChanged);
   }
 }

@@ -51,9 +51,9 @@ The multi-account organization and master-admin acceptance matrix is recorded in
 Organization browser verification opens an existing node and checks the three
 tabs, live member count, information persistence, autocomplete assignment,
 exclusive `admin` / `admin all` toggles, and member removal. It also confirms
-node creation is absent from the node modal. The model tab selects a prepared
-inference service, checks its models are active, disables one model, and removes
-the service from that node.
+node creation is absent from the node modal. The model tab picks one model from
+every registered model, checks the choice replaces rather than adds, clears it,
+and checks a child with nothing set names the ancestor it inherits from.
 
 Model verification creates an endpoint through the accessible dialog, opens its
 card, adds a manual model, opens a listed model for editing, and checks the
